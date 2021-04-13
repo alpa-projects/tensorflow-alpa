@@ -60,6 +60,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/flatten_call_graph.h"
 #include "tensorflow/compiler/xla/service/gather_expander.h"
 #include "tensorflow/compiler/xla/service/gpu/alias_passthrough_params.h"
+#include "tensorflow/compiler/xla/service/gpu/auto_sharding.h"
 #include "tensorflow/compiler/xla/service/gpu/cudnn_batchnorm_rewriter.h"
 #include "tensorflow/compiler/xla/service/gpu/fusion_merger.h"
 #include "tensorflow/compiler/xla/service/gpu/gemm_rewriter.h"
@@ -163,6 +164,7 @@ Status GpuCompiler::OptimizeHloModule(
   const int64 num_partitions = hlo_module->config().num_partitions();
   const bool use_spmd =
       hlo_module->config().use_spmd_partitioning() && num_partitions > 1;
+  const bool use_auto_sharding = hlo_module->config().use_auto_sharding();
 
   {
     HloPassPipeline pipeline("optimization");
@@ -296,6 +298,9 @@ Status GpuCompiler::OptimizeHloModule(
 
   if (use_spmd) {
     HloPassPipeline spmd_pipeline("spmd-partitioner");
+    if (use_auto_sharding) {
+      spmd_pipeline.AddPass<AutoSharding>();
+    }
     spmd_pipeline.AddPass<ShardingPropagation>(true);
     spmd::SpmdPartitionerOptions default_options;
     default_options.allow_module_signature_change = true;

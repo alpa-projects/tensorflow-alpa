@@ -391,6 +391,12 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           &HloPrintOptions::leading_and_trailing_instructions_number,
           &HloPrintOptions::set_leading_and_trailing_instructions_number);
 
+  py::class_<HloSharding> hlo_sharding_class(m, "HloSharding");
+  hlo_sharding_class
+      .def("proto_tuple", [](const HloSharding& hlo_sharding) {
+        return hlo_sharding.ToProto();
+      });
+
   py::class_<HloModule, std::shared_ptr<HloModule>> hlo_module_class(
       m, "HloModule");
   hlo_module_class
@@ -399,7 +405,9 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           static_cast<std::string (HloModule::*)(const HloPrintOptions&) const>(
               &HloModule::ToString),
           py::arg("options") = HloPrintOptions())
-      .def("as_serialized_hlo_module_proto", &GetHloModuleSerializedProto);
+      .def("as_serialized_hlo_module_proto", &GetHloModuleSerializedProto)
+      .def("spmd_output_sharding", &HloModule::spmd_output_sharding)
+      .def("spmd_parameters_shardings", &HloModule::spmd_parameters_shardings);
 
   m.def("hlo_module_to_dot_graph",
         [](const HloModule& hlo_module) -> StatusOr<std::string> {
@@ -605,7 +613,13 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           &ExecutableBuildOptions::set_device_assignment)
       .def_property("use_spmd_partitioning",
                     &ExecutableBuildOptions::use_spmd_partitioning,
-                    &ExecutableBuildOptions::set_use_spmd_partitioning);
+                    &ExecutableBuildOptions::set_use_spmd_partitioning)
+      .def_property("use_auto_sharding",
+                    &ExecutableBuildOptions::use_auto_sharding,
+                    &ExecutableBuildOptions::set_use_auto_sharding)
+      .def_property("memory_budget_per_device",
+                    &ExecutableBuildOptions::memory_budget_per_device,
+                    &ExecutableBuildOptions::set_memory_budget_per_device);
 
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)

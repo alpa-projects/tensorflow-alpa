@@ -83,6 +83,18 @@ ExecutableBuildOptions& ExecutableBuildOptions::set_deduplicate_hlo(
   return *this;
 }
 
+ExecutableBuildOptions& ExecutableBuildOptions::set_use_auto_sharding(
+    bool use_auto_sharding) {
+  use_auto_sharding_ = use_auto_sharding;
+  return *this;
+}
+
+ExecutableBuildOptions& ExecutableBuildOptions::set_memory_budget_per_device(
+    int64 memory_budget_per_device) {
+  memory_budget_per_device_ = memory_budget_per_device;
+  return *this;
+}
+
 ExecutableBuildOptions& ExecutableBuildOptions::set_device_assignment(
     const DeviceAssignment& device_assignment) {
   device_assignment_ = device_assignment;
@@ -121,6 +133,8 @@ ExecutionOptions CreateExecutionOptions(
   execution_options.set_use_spmd_partitioning(
       build_options.use_spmd_partitioning());
   execution_options.set_deduplicate_hlo(build_options.deduplicate_hlo());
+  execution_options.set_memory_budget_per_device(build_options.memory_budget_per_device());
+  execution_options.set_use_auto_sharding(build_options.use_auto_sharding());
   if (build_options.has_device_assignment()) {
     TF_CHECK_OK(build_options.device_assignment().Serialize(
         execution_options.mutable_device_assignment()));

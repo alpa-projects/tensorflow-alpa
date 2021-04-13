@@ -153,6 +153,16 @@ class HloModuleConfig {
   }
   bool deduplicate_hlo() const { return deduplicate_hlo_; }
 
+  void set_use_auto_sharding(bool use_auto_sharding) {
+    use_auto_sharding_ = use_auto_sharding;
+  }
+  bool use_auto_sharding() const { return use_auto_sharding_; }
+
+  void set_memory_budget_per_device(int64 memory_budget_per_device) {
+    memory_budget_per_device_ = memory_budget_per_device;
+  }
+  int64 memory_budget_per_device() const { return memory_budget_per_device_; }
+
   // Return a string which unambiguously represents all the fields of this data
   // structure. Used for generating a cache key for storing the compiled
   // executable.
@@ -267,6 +277,12 @@ class HloModuleConfig {
   // If enabled, deduplicate equivalent hlos into function calls to reduce code
   // size.
   bool deduplicate_hlo_ = false;
+
+  // The memory budget per device. Defaults to -1, which means unlimited.
+  int64 memory_budget_per_device_ = -1;
+
+  // Whether to use auto sharding
+  bool use_auto_sharding_ = false;
 
   // The target maximum parallelism at which to partition HLOs for parallel
   // execution on the CPU backend.

@@ -92,6 +92,14 @@ class ExecutableBuildOptions {
   bool deduplicate_hlo() const { return deduplicate_hlo_; }
   ExecutableBuildOptions& set_deduplicate_hlo(bool deduplicate_hlo);
 
+  // Whether to use auto sharding
+  bool use_auto_sharding() const { return use_auto_sharding_; }
+  ExecutableBuildOptions& set_use_auto_sharding(bool use_auto_sharding);
+
+  // The memory budget per device. Defaults to -1, which means unlimited.
+  int64 memory_budget_per_device() const { return memory_budget_per_device_; }
+  ExecutableBuildOptions& set_memory_budget_per_device(int64 memory_budget_per_device);
+
   // If set, this specifies a static device assignment for the computation.
   // Otherwise, the computation will be compiled generically and can be run with
   // any device assignment compatible with the computation's replica and
@@ -143,6 +151,8 @@ class ExecutableBuildOptions {
   bool use_spmd_partitioning_ = false;
   bool deduplicate_hlo_ = false;
   bool broadcast_replicated_params_ = false;
+  bool use_auto_sharding_ = false;
+  int64 memory_budget_per_device_ = -1;
   absl::optional<DeviceAssignment> device_assignment_;
   bool alias_passthrough_params_ = false;
   bool run_backend_only_ = false;

@@ -384,6 +384,12 @@ message ExecutionOptions {
   bool deduplicate_hlo = 12;
 
   reserved 13;  // Was broadcast_replicated_parameters_via_collectives
+
+  // Whether to use auto sharding
+  int64 use_auto_sharding = 14;
+
+  // The memory budget per device.
+  int64 memory_budget_per_device = 15;
 }
 
 message GetDeviceHandlesRequest {

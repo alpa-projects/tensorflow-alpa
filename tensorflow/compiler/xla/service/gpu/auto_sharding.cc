@@ -45,15 +45,15 @@ class ClusterEnvironment {
   ClusterEnvironment(int num_devices) : num_devices(num_devices) {}
 
   double AllReduceCost(double num_bytes) const {
-    return alpha + \
-           beta * 2 * (num_devices - 1) / num_devices * num_bytes + \
-           0.01;
+    return (alpha +
+           beta * 2 * (num_devices - 1) / num_devices * num_bytes +
+           0.01);
   }
 
   double AllGatherCost(double num_bytes) const {
-    return alpha + \
-           beta * (num_devices - 1) / num_devices * num_bytes + \
-           0.001;
+    return (alpha +
+           beta * (num_devices - 1) / num_devices * num_bytes +
+           0.001);
   }
 
   double ReshardingCost(const Shape& shape, const HloSharding& src_sharding,
@@ -497,7 +497,7 @@ StrategyMap BuildStrategyAndCost(
         for (size_t i = 0; i < dot_dnums.lhs_batch_dimensions_size(); ++i) {
           strategies.push_back(
             ShardingStrategy({
-            "R = Sb x Sb " + std::to_string(i), Split(ins->shape(), i, cluster_env),
+            "Sb = Sb x Sb " + std::to_string(i), Split(ins->shape(), i, cluster_env),
             0, 0, GetBytes(ins->shape()) / cluster_env.num_devices,
             {
               ReshardingCostVector(ret[lhs], lhs->shape(),
@@ -597,7 +597,9 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
   int64 M = module->config().memory_budget_per_device();
   std::vector<int> s_len_np;
   std::vector<int> E_np;
+  std::vector<int> A_np;
   std::vector<double> r_np;
+  std::vector<double> v_np;
   s_len_np.reserve(instructions.size());
   for (const auto& ins : instructions) {
     s_len_np.push_back(strategy_map.at(ins).size());
@@ -637,8 +639,8 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
 
   // Serialize special edges that forces a alias pair have the same sharding spec
   for (const auto& pair : alias_set) {
-    E_np.push_back(pair.first);
-    E_np.push_back(pair.second);
+    A_np.push_back(pair.first);
+    A_np.push_back(pair.second);
     const std::vector<ShardingStrategy>& src_strategies =
       strategy_map.at(instructions[pair.first]);
     const std::vector<ShardingStrategy>& dst_strategies =
@@ -647,17 +649,15 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
     for (const auto& src_strategy : src_strategies) {
       for (const auto& dst_strategy : dst_strategies) {
         if (src_strategy.output_sharding == dst_strategy.output_sharding) {
-          r_np.push_back(0.0);
+          v_np.push_back(0.0);
         } else {
-          r_np.push_back(1e20);
+          v_np.push_back(1.0);
         }
       }
     }
   }
 
   // Serialize liveness_set
-  size_t num_edges = E_np.size() / 2;
-
   std::vector<int> L_np;
   for (size_t i = 0; i < N; ++i) {
     L_np.push_back(liveness_set[i].size());
@@ -679,22 +679,26 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
   }
 
   // Call the solver function in python
+  size_t num_edges = E_np.size() / 2;
   std::vector<int> s_val, e_val;
 
   PyGILState_STATE gstate = PyGILState_Ensure();
   {
-    py::object submodule = py::module_::import("paranum.auto_sharding");
+    py::object submodule = py::module_::import("parax.auto_sharding");
     py::object call_solver_serialized_args =
       submodule.attr("call_solver_serialized_args");
     py::tuple ret = call_solver_serialized_args(
       N, M,
       py::array(s_len_np.size(), s_len_np.data()), // TODO: avoid this copy
       py::array(E_np.size(), E_np.data()),
+      py::array(A_np.size(), A_np.data()),
       py::array(L_np.size(), L_np.data()),
       py::array(c_np.size(), c_np.data()),
       py::array(d_np.size(), d_np.data()),
       py::array(m_np.size(), m_np.data()),
-      py::array(r_np.size(), r_np.data()));
+      py::array(r_np.size(), r_np.data()),
+      py::array(v_np.size(), v_np.data())
+    );
 
     py::object s_val_obj = ret[0], e_val_obj = ret[1];
     py::array_t<int> s_val_array = s_val_obj, e_val_array = e_val_obj;

@@ -64,6 +64,10 @@ class ClusterEnvironment {
     if (src_sharding.IsReplicated()) {
       return 0;
     }
+    if (src_sharding.IsPartialReduction()) {
+      return AllReduceCost(GetBytes(shape));
+    }
+
     return AllGatherCost(GetBytes(shape));
   }
 
@@ -134,6 +138,7 @@ StrategyMap BuildStrategyAndCost(
     std::vector<ShardingStrategy> strategies;
     switch (ins->opcode()) {
       case HloOpcode::kParameter: {
+        // Split one dim
         for (size_t i = 0; i < ins->shape().rank(); ++i) {
           if (ins->shape().dimensions(i) < cluster_env.num_devices) {
             continue;
@@ -149,6 +154,8 @@ StrategyMap BuildStrategyAndCost(
                               compute_cost, communication_cost,
                               memory_cost, {}}));
         }
+
+        // Replicate all
         strategies.push_back(
           ShardingStrategy({"R", HloSharding::Replicate(),
                             0, 0, GetBytes(ins->shape()),
@@ -168,6 +175,7 @@ StrategyMap BuildStrategyAndCost(
         const auto& dimensions = ins->dimensions();
         const HloInstruction* operand = ins->operand(0);
 
+        // Split one dim
         for (size_t i = 0; i < ins->shape().rank(); ++i) {
           if (ins->shape().dimensions(i) < cluster_env.num_devices) {
             continue;
@@ -195,6 +203,7 @@ StrategyMap BuildStrategyAndCost(
             {std::move(resharding_costs)}}));
         }
 
+        // Replicate all
         strategies.push_back(
           ShardingStrategy({
           "R", HloSharding::Replicate(),
@@ -208,6 +217,7 @@ StrategyMap BuildStrategyAndCost(
         const auto& dimensions = ins->dimensions();
         const HloInstruction* operand = ins->operand(0);
 
+        // Split one dim
         for (size_t i = 0; i < ins->shape().rank(); ++i) {
           if (ins->shape().dimensions(i) < cluster_env.num_devices) {
             continue;
@@ -223,6 +233,7 @@ StrategyMap BuildStrategyAndCost(
                   Split(operand->shape(), original_dim, cluster_env), cluster_env)}}));
         }
 
+        // Replicate all
         strategies.push_back(
           ShardingStrategy({
           "R", HloSharding::Replicate(),
@@ -276,7 +287,7 @@ StrategyMap BuildStrategyAndCost(
           }
         }
 
-        // Register strategies
+        // Split one dim
         for (size_t i = 0; i < ins->shape().rank(); ++i) {
           if (ins->shape().dimensions(i) < cluster_env.num_devices) {
             continue;
@@ -304,6 +315,7 @@ StrategyMap BuildStrategyAndCost(
             {std::move(resharding_costs)}}));
         }
 
+        // Replicate all
         strategies.push_back(
           ShardingStrategy({
           "R", HloSharding::Replicate(),
@@ -362,6 +374,7 @@ StrategyMap BuildStrategyAndCost(
       // Ternary elementwise operations.
       case HloOpcode::kSelect:
       case HloOpcode::kClamp: {
+        // Split one dim
         for (int64 i = 0; i < ins->shape().rank(); ++i) {
           if (ins->shape().dimensions(i) < cluster_env.num_devices) {
             continue;
@@ -384,6 +397,7 @@ StrategyMap BuildStrategyAndCost(
             resharding_costs}));
         }
 
+        // Replicate all
         std::vector<std::vector<double>> resharding_costs;
         for (size_t i = 0; i < ins->operand_count(); ++i) {
           const HloInstruction* operand = ins->operand(i);
@@ -396,6 +410,23 @@ StrategyMap BuildStrategyAndCost(
           "R", HloSharding::Replicate(),
           0, 0, GetBytes(ins->shape()),
           resharding_costs}));
+
+        // Operate on partial reduction
+        if (ins->opcode() == HloOpcode::kAdd) {
+          std::vector<std::vector<double>> resharding_costs;
+          for (size_t i = 0; i < ins->operand_count(); ++i) {
+            const HloInstruction* operand = ins->operand(i);
+            resharding_costs.push_back(
+              ReshardingCostVector(ret[operand], operand->shape(),
+                                   HloSharding::PartialReduction(), cluster_env));
+          }
+          strategies.push_back(
+            ShardingStrategy({
+            "P", HloSharding::PartialReduction(),
+            0, 0, GetBytes(ins->shape()),
+            resharding_costs}));
+        }
+
         break;
       }
 
@@ -416,6 +447,7 @@ StrategyMap BuildStrategyAndCost(
 
         CHECK_EQ(pt, ins->shape().rank());
 
+        // Split one dim
         for (size_t i = 0; i < ins->shape().rank(); ++i) {
           if (ins->shape().dimensions(i) < cluster_env.num_devices) {
             continue;
@@ -433,6 +465,7 @@ StrategyMap BuildStrategyAndCost(
                   HloSharding::Replicate(), cluster_env)}}));
         }
 
+        // Replicate all
         strategies.push_back(
           ShardingStrategy({
           "R", HloSharding::Replicate(),
@@ -459,7 +492,7 @@ StrategyMap BuildStrategyAndCost(
 
         int64 space_base_dim = dot_dnums.lhs_batch_dimensions_size();
 
-        // split the space dim of lhs
+        // Split the space dim of lhs
         strategies.push_back(
           ShardingStrategy({
           "Sl = Sl x R", Split(ins->shape(), space_base_dim, cluster_env),
@@ -470,7 +503,7 @@ StrategyMap BuildStrategyAndCost(
             ReshardingCostVector(ret[rhs], rhs->shape(), HloSharding::Replicate(), cluster_env),
           }}));
 
-        // split the space dim of rhs
+        // Split the space dim of rhs
         strategies.push_back(
           ShardingStrategy({
           "Sr = R x Sr", Split(ins->shape(), space_base_dim + 1, cluster_env),
@@ -481,7 +514,7 @@ StrategyMap BuildStrategyAndCost(
                                  Split(rhs->shape(), rhs_space_dims[0], cluster_env), cluster_env),
           }}));
 
-        // split the contracting dim
+        // Split the contracting dim, do all-reduce immediately
         strategies.push_back(
           ShardingStrategy({
           "R = Sk x Sk", HloSharding::Replicate(),
@@ -493,7 +526,19 @@ StrategyMap BuildStrategyAndCost(
               Split(rhs->shape(), dot_dnums.rhs_contracting_dimensions(0), cluster_env), cluster_env),
           }}));
 
-        // split the batch dim
+        // Split the contracting dim, defer the all-reduce
+        strategies.push_back(
+          ShardingStrategy({
+          "P = Sk x Sk", HloSharding::PartialReduction(),
+          0, 0, GetBytes(ins->shape()),
+          {
+            ReshardingCostVector(ret[lhs], lhs->shape(),
+              Split(lhs->shape(), dot_dnums.lhs_contracting_dimensions(0), cluster_env), cluster_env),
+            ReshardingCostVector(ret[rhs], rhs->shape(),
+              Split(rhs->shape(), dot_dnums.rhs_contracting_dimensions(0), cluster_env), cluster_env),
+          }}));
+
+        // Split the batch dim
         for (size_t i = 0; i < dot_dnums.lhs_batch_dimensions_size(); ++i) {
           strategies.push_back(
             ShardingStrategy({
@@ -507,7 +552,7 @@ StrategyMap BuildStrategyAndCost(
             }}));
         }
  
-        // replicate all
+        // Replicate all
         strategies.push_back(
           ShardingStrategy({
           "R = R x R", HloSharding::Replicate(),
@@ -843,8 +888,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   std::vector<int> s_val, e_val;
   std::tie(s_val, e_val) = CallSolver(module, sequence, liveness_set,
                                       strategy_map, ins_id_map, alias_set);
-  //std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
-  //                                       ins_id_map, s_val, e_val);
+  std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
+                                         ins_id_map, s_val, e_val);
 
   // ----- Set Sharding -----
   HloComputation* entry = module->entry_computation();

@@ -40,6 +40,8 @@ namespace xla {
 // computations.
 class HloSharding {
  public:
+  enum class ReductionType {kAdd, kMax};
+
   // Creates a trivial sharding that replicates a maximal tile across all
   // devices.
   static HloSharding Replicate(absl::Span<const OpMetadata> metadata = {}) {
@@ -49,6 +51,12 @@ class HloSharding {
   // Creates a sharding that represents the op is manually partitioned.
   static HloSharding Manual(absl::Span<const OpMetadata> metadata = {}) {
     return HloSharding(/*manual=*/true, /*replicated=*/false, metadata);
+  }
+
+  // Creates a sharding that represents the op is replicated as partial reduction.
+  static HloSharding PartialReduction(ReductionType reduction_type = ReductionType::kAdd,
+                                      absl::Span<const OpMetadata> metadata = {}) {
+    return HloSharding(reduction_type, metadata);
   }
 
   // Creates a sharding that emulates device placement; a tile shape equal to
@@ -129,6 +137,15 @@ class HloSharding {
     }
     return absl::c_all_of(
         tuple_elements_, [](const HloSharding& s) { return s.IsReplicated(); });
+  }
+
+  // Returns true if the sharding is a partial reduction.
+  bool IsPartialReduction() const {
+    if (!IsTuple()) {
+      return partial_reduction_;
+    }
+    return absl::c_all_of(
+        tuple_elements_, [](const HloSharding& s) { return s.IsPartialReduction(); });
   }
 
   // Returns true if the tile size is the same as the input size.
@@ -295,9 +312,24 @@ class HloSharding {
         maximal_(replicated),
         tuple_(false),
         manual_(manual),
+        partial_reduction_(false),
         tile_assignment_({0}),
         replicate_on_last_tile_dim_(false),
         metadata_(metadata.begin(), metadata.end()) {}
+  explicit HloSharding(ReductionType reduction_type,
+                       absl::Span<const OpMetadata> metadata)
+      : replicated_(false),
+        maximal_(true),
+        tuple_(false),
+        manual_(false),
+        partial_reduction_(true),
+        tile_assignment_({0}),
+        replicate_on_last_tile_dim_(false),
+        reduction_type_(reduction_type),
+        metadata_(metadata.begin(), metadata.end()) {
+    // Only support add reduction for now.
+    CHECK(reduction_type == ReductionType::kAdd) << "Only support add reduction";
+  }
   // device_id values:
   // -2: magic number to mean unassigned device, used by spatial partitioning
   // -1: the id of the host
@@ -309,6 +341,7 @@ class HloSharding {
         maximal_(true),
         tuple_(false),
         manual_(false),
+        partial_reduction_(false),
         tile_assignment_({1}, device_id),
         replicate_on_last_tile_dim_(false),
         metadata_(metadata.begin(), metadata.end()) {}
@@ -319,6 +352,7 @@ class HloSharding {
         maximal_(false),
         tuple_(false),
         manual_(false),
+        partial_reduction_(false),
         tile_assignment_(tile_assignment),
         replicate_on_last_tile_dim_(replicate_on_last_tile_dim),
         metadata_(metadata.begin(), metadata.end()) {}
@@ -327,6 +361,7 @@ class HloSharding {
         maximal_(false),
         tuple_(true),
         manual_(false),
+        partial_reduction_(false),
         tile_assignment_({0}),
         tuple_elements_(tuple_shardings),
         replicate_on_last_tile_dim_(false) {}
@@ -348,6 +383,7 @@ class HloSharding {
   bool maximal_;
   bool tuple_;
   bool manual_;
+  bool partial_reduction_;
   // This field is only used if replicated_ is false. If maximal_ is true, then
   // the field contains a rank 1 array with a single element, which is the
   // device the HLO is assigned to. If maximal_ is false, the field contains an
@@ -376,6 +412,7 @@ class HloSharding {
   // combined with other shardings. Metadata are to not be populated when
   // tuple_ == true and instead metadata should be set on individual tuple
   // elements.
+  ReductionType reduction_type_;
   std::vector<OpMetadata> metadata_;
 };
 

@@ -358,6 +358,9 @@ class PartitionedHlo {
   // Helper function to broadcast data from a single device to all devices.
   PartitionedHlo Broadcast() const;
 
+  // Helper function to reshard a partial reduction tensor to a replicated tensor.
+  PartitionedHlo AllReduce() const;
+
   // Helper function to reshard the tensor using AllToAll (instead of the
   // default of Replicate followed by Slice).
   PartitionedHlo ReshardWithAllToAll(

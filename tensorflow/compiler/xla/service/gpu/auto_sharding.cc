@@ -1134,7 +1134,7 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
     py::object submodule = py::module_::import("parax.auto_sharding");
     py::object call_solver_serialized_args =
       submodule.attr("call_solver_serialized_args");
-    py::tuple ret = call_solver_serialized_args(
+    py::object ret = call_solver_serialized_args(
       N, M,
       py::array(s_len_np.size(), s_len_np.data()), // TODO: avoid this copy
       py::array(s_follow_np.size(), s_follow_np.data()),
@@ -1147,8 +1147,13 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
       py::array(r_np.size(), r_np.data()),
       py::array(v_np.size(), v_np.data())
     );
+    if (ret.is_none()) {
+      PyGILState_Release(gstate);
+      exit(-1);
+    }
+    py::tuple tuple_ret = ret;
 
-    py::object s_val_obj = ret[0], e_val_obj = ret[1];
+    py::object s_val_obj = tuple_ret[0], e_val_obj = tuple_ret[1];
     py::array_t<int> s_val_array = s_val_obj, e_val_array = e_val_obj;
     auto s_val_unckecked = s_val_array.unchecked<1>();
     auto e_val_unckecked = e_val_array.unchecked<1>();

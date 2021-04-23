@@ -65,6 +65,8 @@ class ClusterEnvironment {
 
     if (src_sharding.IsReplicated()) {
       if (dst_sharding.IsPartialReduction()) {
+        // An elementwise divide will occur here,
+        // so we should add a penanlty.
         return partial_reduction_penalty;
       } else {
         return 0;
@@ -440,11 +442,12 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           // This is a special treatment to simplify 
           // `all_reduce(x) + all_reduce(y) == all_reduce(x + y)`
 
-          // force to follow Reshape
+          // Cannot do follow in this case:
+          // The solver has to choose between "R = P + P" and "P = P + P",
+          // which cannot be determinded greedily.
           for (size_t i = 0; i < ins->operand_count(); ++i) {
             const HloInstruction* operand = ins->operand(i);
             if (operand->opcode() == HloOpcode::kReshape) {
-              //follow_map[ins] = operand;
               follow_map.erase(ins);
             }
           }
@@ -774,7 +777,8 @@ class Matrix {
   std::shared_ptr<std::vector<double>> data;
 };
 
-// A graph data structure with union set to merge nodes
+// A graph data structure to simplify the edge cost graph.
+// It merges nodes and does path compression.
 class CostGraph {
  public:
   CostGraph(const HloInstructionSequence& sequence,
@@ -826,7 +830,7 @@ class CostGraph {
     }
   }
 
-  void AddEdgeCost(int i, int j, Matrix cost) {
+  void AddEdgeCost(int i, int j, Matrix& cost) {
     if (i > j) {
       std::swap(i, j);
       cost = cost.Transpose();
@@ -878,6 +882,8 @@ class CostGraph {
       // Pick the strategy with the lowest cost to follow.
       // If there are multiple strategies with the same lowest costs,
       // prefer to follow "replicated", which has the largest index.
+      // Node: We assume the strategy "Repilcated" is always appended
+      // as the last strategy in BuildStrategyAndCost.
 
       for (int j = 0; j < node_lens[src]; ++j) {
         keys.push_back({edge_cost(i,j), -j});
@@ -940,6 +946,7 @@ class CostGraph {
   }
 
   void Simplify() {
+    // Merge nodes
     for (const auto& pair : to_merge_pairs) {
       int src = pair.first;
       int dst = pair.second;
@@ -948,6 +955,7 @@ class CostGraph {
       MergeNode(src, dst);
     }
 
+    // Build follow map
     follow_idx.reserve(node_lens.size());
     for (int i = 0; i < node_lens.size(); ++i) {
       if (merged_to.count(i)) {
@@ -1305,7 +1313,6 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   // ----- Set Sharding -----
   HloComputation* entry = module->entry_computation();
   HloInstruction* root_inst = entry->root_instruction();
-
 
   // Set sharding for inputs and intermdiates
   for (HloInstruction* inst: entry->instructions()) {

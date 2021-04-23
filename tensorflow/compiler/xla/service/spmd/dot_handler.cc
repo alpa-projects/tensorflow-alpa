@@ -1509,9 +1509,12 @@ StatusOr<HloInstruction*> PartitionBaseCase(
 
     HloInstruction* ar_or_not;
     if (output_sharding.IsPartialReduction()) {
+      // Defer all-reduce to explore the opportunity of the following simplification:
+      // `allreduce(x) + allreduce(y)` == `allreduce(x + y)`
       ar_or_not = dot;
       ar_or_not->set_sharding(HloSharding::PartialReduction());
     } else {
+      // Run allreduce immediately
       ar_or_not = lhs.state().partitioner->AllReduceAlongShardingDims(
           b, dot, lhs.sharding(), lhs.state().next_channel_id,
           lhs_contracting_dims, lhs.state().collective_ops_creator,

@@ -444,6 +444,20 @@ PartitionedHlo PartitionedHlo::ReshardNoCache(const HloSharding& target) {
     return Replicate().Reshard(target);
   }
 
+  // 'Replicated' to 'PartialReduction'.
+  if (target.IsPartialReduction()) {
+    auto norm = state_.b->AddInstruction(
+        HloInstruction::CreateConstant(LiteralUtil::CreateR0<float>(
+                state_.num_partitions)));
+    norm = state_.b->AddInstruction(
+        HloInstruction::CreateBroadcast(hlo_->shape(), norm, {}));
+    auto div = state_.b->AddInstruction(
+        HloInstruction::CreateBinary(hlo_->shape(), HloOpcode::kDivide,
+                                     hlo_, norm));
+    div->set_sharding(target);
+    return PartitionedHlo(div, base_shape_, state_);
+  }
+
   // 'Replicated' to 'SingleDevice'.
   if (target.IsTileMaximal()) {
     auto copy = state_.b->AddInstruction(
@@ -3528,9 +3542,9 @@ StatusOr<bool> SpmdPartitioner::Run(HloModule* module) {
   TF_RETURN_IF_ERROR(PreprocessSharding(module));
   TF_RETURN_IF_ERROR(PreprocessHlos(module));
 
-  std::cerr << "===== Enter SPMD Partitioner =====" << std::endl;
-  std::cerr << module->ToString();
-  std::cerr << "=====================================" << std::endl;
+  //std::cerr << "===== Enter SPMD Partitioner =====" << std::endl;
+  //std::cerr << module->ToString();
+  //std::cerr << "=====================================" << std::endl;
 
 
   XLA_VLOG_LINES(1, SpmdLogger::ReportBeforePartition(
@@ -3608,10 +3622,9 @@ StatusOr<bool> SpmdPartitioner::Run(HloModule* module) {
     TF_RETURN_IF_ERROR(pass.Run(module).status());
   }
 
-  std::cerr << "===== Exit SPMD Partitioner =====" << std::endl;
-  std::cerr << module->ToString();
-  std::cerr << "=====================================" << std::endl;
-
+  //std::cerr << "===== Exit SPMD Partitioner =====" << std::endl;
+  //std::cerr << module->ToString();
+  //std::cerr << "=====================================" << std::endl;
 
   TF_RETURN_IF_ERROR(ClearShardingAttributes(module));
   return changed;

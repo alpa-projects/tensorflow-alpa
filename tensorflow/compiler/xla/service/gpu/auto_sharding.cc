@@ -626,15 +626,15 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           }
         }
  
-        // Replicate
-        strategies.push_back(
-          ShardingStrategy({
-          "R = R x R", HloSharding::Replicate(),
-          0, 0, GetBytes(ins->shape()),
-          {
-            ReshardingCostVector(strategy_map[lhs], lhs->shape(), HloSharding::Replicate(), cluster_env),
-            ReshardingCostVector(strategy_map[rhs], rhs->shape(), HloSharding::Replicate(), cluster_env),
-          }}));
+        //// Replicate
+        //strategies.push_back(
+        //  ShardingStrategy({
+        //  "R = R x R", HloSharding::Replicate(),
+        //  0, 0, GetBytes(ins->shape()),
+        //  {
+        //    ReshardingCostVector(strategy_map[lhs], lhs->shape(), HloSharding::Replicate(), cluster_env),
+        //    ReshardingCostVector(strategy_map[rhs], rhs->shape(), HloSharding::Replicate(), cluster_env),
+        //  }}));
 
         break;
       }
@@ -1115,13 +1115,28 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
   }
 
   // Serialize liveness_set
+  auto filter_func = [&instructions](size_t i) {
+    HloOpcode opcode = instructions[i]->opcode();
+    if (opcode == HloOpcode::kDot || opcode == HloOpcode::kConvolution) {
+      return true;
+    } else {
+      return false;
+    }
+  };
+
   std::vector<int> L_np;
   for (size_t i = 0; i < N; ++i) {
-    L_np.push_back(liveness_set[i].size());
+    if (filter_func(i)) {
+      L_np.push_back(liveness_set[i].size());
+    } else {
+      L_np.push_back(0);
+    }
   }
   for (size_t i = 0; i < N; ++i) {
-    for (const HloValue* value : liveness_set[i]) {
-      L_np.push_back(ins_id_map.at(value->instruction()));
+    if (filter_func(i)) {
+      for (const HloValue* value : liveness_set[i]) {
+        L_np.push_back(ins_id_map.at(value->instruction()));
+      }
     }
   }
 

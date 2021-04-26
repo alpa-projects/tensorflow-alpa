@@ -629,6 +629,11 @@ static void AllocateFlags() {
       bool_setter_for(&DebugOptions::set_xla_gpu_deterministic_ops),
       flag_values->xla_gpu_deterministic_ops(),
       "Guarantees run-to-run determinism on GPU."));
+  flag_objects->push_back(tensorflow::Flag(
+      "xla_auto_sharding_print",
+      bool_setter_for(&DebugOptions::set_xla_auto_sharding_print),
+      flag_values->xla_auto_sharding_print(),
+      "Print the auto-sharding strategy"));
 
   ParseFlagsFromEnvAndDieIfUnknown("XLA_FLAGS", *flag_objects);
 }

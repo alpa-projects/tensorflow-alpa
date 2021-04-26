@@ -1327,8 +1327,10 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   std::vector<int> s_val, e_val;
   std::tie(s_val, e_val) = CallSolver(module, sequence, liveness_set,
                                       strategy_map, cost_graph, ins_id_map, alias_set);
-  //std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
-  //                                       cost_graph, ins_id_map, s_val, e_val);
+  if (module->config().debug_options().xla_auto_sharding_print()) {
+    std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
+                                           cost_graph, ins_id_map, s_val, e_val);
+  }
 
   // ----- Set Sharding -----
   HloComputation* entry = module->entry_computation();

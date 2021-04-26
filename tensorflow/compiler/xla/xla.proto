@@ -318,6 +318,9 @@ message DebugOptions {
 
   // Paths to files with LLVM code.
   repeated string xla_gpu_llvm_ir_file = 150;
+ 
+  // Whether print auto sharding strategy
+  bool xla_auto_sharding_print = 151;
 
   // Next id: 151
 

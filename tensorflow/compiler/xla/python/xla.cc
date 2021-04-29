@@ -293,6 +293,14 @@ PYBIND11_MODULE(xla_extension, m) {
       .def("execute_sharded_on_local_devices",
            &PyExecutable::ExecuteShardedOnLocalDevices, py::arg("arguments"))
       .def("hlo_modules", &PyExecutable::HloModules)
+      .def("total_allocation_size", [](PyExecutable* exec){
+             const PjRtExecutable* pjrt_executable = &exec->pjrt_executable();
+             const PjRtStreamExecutorExecutable* stream_executable = dynamic_cast<const PjRtStreamExecutorExecutable*>(pjrt_executable);
+             absl::Span<const std::shared_ptr<LocalExecutable>> local_executables =\
+                 stream_executable->executables();
+             Executable* executable = local_executables[0]->executable();
+             return executable->TotalAllocationSize();
+           })
       .def_property_readonly("traceback", &PyExecutable::traceback);
 
   m.def("buffer_to_dlpack_managed_tensor", BufferToDLPackManagedTensor,

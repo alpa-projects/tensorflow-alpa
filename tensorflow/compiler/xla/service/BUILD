@@ -5767,6 +5767,22 @@ tf_cc_test(
     ],
 )
 
+cc_library(
+    name = "pass_context",
+    srcs = [
+        "pass_context.cc",
+    ],
+    hdrs = [
+        "pass_context.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla:types",
+        "//tensorflow/compiler/xla:util",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@pybind11",
+    ],
+)
+
 # copybara:uncomment_begin(google-only)
 # py_proto_library(
 #     name = "hlo_pb2",

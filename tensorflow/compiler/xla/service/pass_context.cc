@@ -60,7 +60,7 @@ bool GetBool(const std::string& name, bool default_value) {
   return static_cast<bool>(GetInt(name, default_value));
 }
 
-std::string GetString(const std::string& name, std::string& default_value) {
+std::string GetString(const std::string& name, const std::string& default_value) {
   auto iter = current_context.find(name);
   if (iter == current_context.end()) {
     return default_value;

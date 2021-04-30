@@ -24,6 +24,17 @@ double GetBytes(const Shape& shape) {
   return ShapeUtil::ByteSizeOf(shape, /*pointer_size=*/8);
 };
 
+// Options for auto-sharding solver
+struct AutoShardingSolverOption {
+  bool force_data_parallel;
+  int forward_backward_sep_id;
+
+  bool override_all_reduce_cost;
+  double all_reduce_cost;
+
+  bool override_reduce_scatter_cost;
+  double reduce_scatter_cost;
+};
 
 // One sharding strategy 
 struct ShardingStrategy {
@@ -44,18 +55,33 @@ using AliasSet = absl::flat_hash_set<std::pair<size_t, size_t>>;
 // Cluster environment to model the communication cost
 class ClusterEnvironment {
  public:
-  ClusterEnvironment(int num_devices) : num_devices(num_devices) {}
+  ClusterEnvironment(int num_devices, const AutoShardingSolverOption& solver_option)
+    : num_devices(num_devices), solver_option(solver_option) {}
 
   double AllReduceCost(double num_bytes) const {
+    if (solver_option.override_all_reduce_cost) {
+      return solver_option.all_reduce_cost;
+    }
+
     return (alpha +
            beta * 2 * (num_devices - 1) / num_devices * num_bytes +
-           0.01);
+           0.1);
   }
 
   double AllGatherCost(double num_bytes) const {
     return (alpha +
            beta * (num_devices - 1) / num_devices * num_bytes +
-           0.001) + all_gather_penalty;
+           0.01) + all_gather_penalty;
+  }
+
+  double ReduceScatterCost(double num_bytes) const {
+    if (solver_option.override_reduce_scatter_cost) {
+      return solver_option.reduce_scatter_cost;
+    }
+
+    return (alpha +
+           beta * (num_devices - 1) / num_devices * num_bytes +
+           0.001);
   }
 
   double ReshardingCost(const Shape& shape, const HloSharding& src_sharding,
@@ -85,12 +111,54 @@ class ClusterEnvironment {
   const double beta = 1.0;
 
   // disencourage the apperance of partial reduction
-  const double partial_reduction_penalty = 1;
+  const double partial_reduction_penalty = 0;
 
   // prefer all-reduce to all-gather
-  const double all_gather_penalty = 10;
+  const double all_gather_penalty = 0;
+
   int num_devices;
+
+  // The solver option may override the cost of all-reduce and reduce-scatter
+  // to force data-parallel.
+  const AutoShardingSolverOption& solver_option;
 };
+
+InstructionIdMap BuildInstructionIdMap(const HloInstructionSequence& sequence) {
+  InstructionIdMap ret;
+
+  const std::vector<HloInstruction*>& instructions = sequence.instructions();
+  for (size_t i = 0; i < instructions.size(); ++i) {
+    ret[instructions[i]] = i;
+  }
+  return ret;
+}
+
+int EstimateForwardBackwardSep(const HloModule* module,
+                               const HloInstructionSequence& sequence,
+                               const InstructionIdMap& ins_id_map) {
+  HloComputation* entry = module->entry_computation();
+
+  // Count used_by map for every parameter
+  absl::flat_hash_map<const HloInstruction*, std::vector<int>> used_by;
+  for (const HloInstruction* inst : sequence.instructions()) {
+    for (size_t j = 0; j < inst->operand_count(); ++j) {
+      const HloInstruction* operand = inst->operand(j);
+      if (operand->opcode() == HloOpcode::kParameter) {
+        used_by[operand].push_back(ins_id_map.at(inst));
+      }
+    }
+  }
+
+  // Estimate forward/backward separation
+  int sep = 0;
+  for (const auto& iter : used_by) {
+    if (iter.second.size() > 2) {
+      sep = std::max(sep, iter.second.front() + 1);
+    }
+  }
+
+  return sep;
+}
 
 // Create a HloSharding that splits a single dim
 HloSharding Split(const Shape& shape, int dim, const ClusterEnvironment& cluster_env) {
@@ -103,7 +171,7 @@ HloSharding Split(const Shape& shape, int dim, const ClusterEnvironment& cluster
   return HloSharding::Tile(tile_assignment);
 }
 
-// Get the space dimentions of a dot instruction
+// Get the space dimensions of a dot instruction
 std::pair<std::vector<int64>, std::vector<int64>> GetSpaceDims(
   const Shape& lhs_shape,
   const Shape& rhs_shape,
@@ -146,7 +214,8 @@ std::vector<double> ReshardingCostVector(const std::vector<ShardingStrategy>& st
 // Build possible sharding strategies and their costs for all instructions
 std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
   const HloInstructionSequence& sequence,
-  const ClusterEnvironment& cluster_env
+  const ClusterEnvironment& cluster_env,
+  const AutoShardingSolverOption& solver_option
 ) {
   StrategyMap strategy_map;
   FollowMap follow_map;
@@ -177,7 +246,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
         // Replicate
         strategies.push_back(
           ShardingStrategy({"R", HloSharding::Replicate(),
-                            0, 0, GetBytes(ins->shape()),
+                            1, 0, GetBytes(ins->shape()),
                             {}}));
         break;
       }
@@ -479,7 +548,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           strategies.push_back(
             ShardingStrategy({
             "P = P + P", HloSharding::PartialReduction(),
-            0, 0, GetBytes(ins->shape()),
+            1, 0, GetBytes(ins->shape()),
             resharding_costs}));
         }
 
@@ -536,6 +605,18 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
                   HloSharding::Replicate(), cluster_env)}}));
         }
 
+        // Replicate with all-reduce
+        for (int dim : dimensions) {
+          strategies.push_back(
+            ShardingStrategy({
+            "R (all-reduce)", HloSharding::Replicate(),
+            0, cluster_env.AllReduceCost(GetBytes(ins->shape())), GetBytes(ins->shape()),
+            {ReshardingCostVector(strategy_map[operand], operand->shape(),
+                                  Split(operand->shape(), dim, cluster_env), cluster_env),
+             ReshardingCostVector(strategy_map[unit], unit->shape(),
+                                  HloSharding::Replicate(), cluster_env)}}));
+        }
+
         // Replicate
         strategies.push_back(
           ShardingStrategy({
@@ -575,39 +656,43 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           }}));
 
         // Split the space dim of rhs
-        strategies.push_back(
-          ShardingStrategy({
-          "Sr = R x Sr", Split(ins->shape(), space_base_dim + 1, cluster_env),
-          0, 0, GetBytes(ins->shape()) / cluster_env.num_devices, 
-          {
-            ReshardingCostVector(strategy_map[lhs], lhs->shape(), HloSharding::Replicate(), cluster_env),
-            ReshardingCostVector(strategy_map[rhs], rhs->shape(),
-                                 Split(rhs->shape(), rhs_space_dims[0], cluster_env), cluster_env),
-          }}));
-
+        if (!solver_option.force_data_parallel) {
+          strategies.push_back(
+            ShardingStrategy({
+            "Sr = R x Sr", Split(ins->shape(), space_base_dim + 1, cluster_env),
+            0, 0, GetBytes(ins->shape()) / cluster_env.num_devices, 
+            {
+              ReshardingCostVector(strategy_map[lhs], lhs->shape(), HloSharding::Replicate(), cluster_env),
+              ReshardingCostVector(strategy_map[rhs], rhs->shape(),
+                                   Split(rhs->shape(), rhs_space_dims[0], cluster_env), cluster_env),
+            }}));
+        }
+  
         // Split the contracting dim, do all-reduce immediately
-        strategies.push_back(
-          ShardingStrategy({
-          "R = Sk x Sk", HloSharding::Replicate(),
-          0, cluster_env.AllReduceCost(GetBytes(ins->shape())), GetBytes(ins->shape()),
-          {
-            ReshardingCostVector(strategy_map[lhs], lhs->shape(),
-              Split(lhs->shape(), dot_dnums.lhs_contracting_dimensions(0), cluster_env), cluster_env),
-            ReshardingCostVector(strategy_map[rhs], rhs->shape(),
-              Split(rhs->shape(), dot_dnums.rhs_contracting_dimensions(0), cluster_env), cluster_env),
-          }}));
+        if (!solver_option.force_data_parallel || i > solver_option.forward_backward_sep_id) {
+          strategies.push_back(
+            ShardingStrategy({
+            "R = Sk x Sk", HloSharding::Replicate(),
+            0, cluster_env.AllReduceCost(GetBytes(ins->shape())), GetBytes(ins->shape()),
+            {
+              ReshardingCostVector(strategy_map[lhs], lhs->shape(),
+                Split(lhs->shape(), dot_dnums.lhs_contracting_dimensions(0), cluster_env), cluster_env),
+              ReshardingCostVector(strategy_map[rhs], rhs->shape(),
+                Split(rhs->shape(), dot_dnums.rhs_contracting_dimensions(0), cluster_env), cluster_env),
+            }}));
 
-        // Split the contracting dim, defer the all-reduce
-        strategies.push_back(
-          ShardingStrategy({
-          "P = Sk x Sk", HloSharding::PartialReduction(),
-          0, 0, GetBytes(ins->shape()),
-          {
-            ReshardingCostVector(strategy_map[lhs], lhs->shape(),
-              Split(lhs->shape(), dot_dnums.lhs_contracting_dimensions(0), cluster_env), cluster_env),
-            ReshardingCostVector(strategy_map[rhs], rhs->shape(),
-              Split(rhs->shape(), dot_dnums.rhs_contracting_dimensions(0), cluster_env), cluster_env),
-          }}));
+          // Split the contracting dim, defer the all-reduce
+          strategies.push_back(
+            ShardingStrategy({
+            "P = Sk x Sk", HloSharding::PartialReduction(),
+            1, 0, GetBytes(ins->shape()),
+            {
+              ReshardingCostVector(strategy_map[lhs], lhs->shape(),
+                Split(lhs->shape(), dot_dnums.lhs_contracting_dimensions(0), cluster_env), cluster_env),
+              ReshardingCostVector(strategy_map[rhs], rhs->shape(),
+                Split(rhs->shape(), dot_dnums.rhs_contracting_dimensions(0), cluster_env), cluster_env),
+            }}));
+        }
 
         if (dot_dnums.lhs_batch_dimensions_size()) {
           strategies.clear();
@@ -661,16 +746,6 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
   }
 
   return std::make_pair(std::move(strategy_map), std::move(follow_map));
-}
-
-InstructionIdMap BuildInstructionIdMap(const HloInstructionSequence& sequence) {
-  InstructionIdMap ret;
-
-  const std::vector<HloInstruction*>& instructions = sequence.instructions();
-  for (size_t i = 0; i < instructions.size(); ++i) {
-    ret[instructions[i]] = i;
-  }
-  return ret;
 }
 
 AliasSet BuildAliasSet(
@@ -1205,6 +1280,16 @@ std::string PrintLivenessSet(const LivenessSet& liveness_set) {
   return os.str();
 }
 
+// Print sorted instructions
+std::string PrintInstructions(const HloInstructionSequence& sequence) {
+  std::ostringstream os;
+  const std::vector<HloInstruction*>& instructions = sequence.instructions();
+  for (size_t i = 0; i < instructions.size(); ++i) {
+    os << "Instruction " << i << ": " << instructions[i]->ToString() << "\n";
+  }
+  return os.str();
+}
+
 // Print strategy map for debugging
 std::string PrintStrategyMap(
   const StrategyMap& strategy_map,
@@ -1281,6 +1366,25 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     return false;
   }
 
+  AutoShardingSolverOption solver_option;
+  solver_option.force_data_parallel = false;
+  solver_option.override_all_reduce_cost = false;
+  solver_option.override_reduce_scatter_cost = false;
+
+  std::string strategy_name = pass_context::GetString("auto_sharding::solver_strategy",
+                                                      "normal");
+  if (strategy_name == "normal") {
+    ;
+  } else if (strategy_name == "force_data_parallel") {
+    solver_option.force_data_parallel = true;
+    solver_option.override_all_reduce_cost = true;
+    solver_option.all_reduce_cost = 1000;
+  } else if (strategy_name == "force_zero_data_parallel") {
+    solver_option.force_data_parallel = true;
+    solver_option.override_reduce_scatter_cost = true;
+    solver_option.reduce_scatter_cost = 1000;
+  }
+
   //std::cerr << "===== Enter AutoSharding =====" << std::endl;
   //std::cerr << module->ToString();
   //std::cerr << "=====================================" << std::endl;
@@ -1311,16 +1415,23 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   //std::cerr << hlo_live_range->ToString() << std::endl;
   //std::cerr << PrintLivenessSet(liveness_set);
 
+  // ----- Analyze forward/backward for force_data_parallel
+  const HloInstructionSequence& sequence = hlo_live_range->flattened_instruction_sequence();
+  InstructionIdMap ins_id_map = BuildInstructionIdMap(sequence);
+  if (solver_option.force_data_parallel) {
+    int forward_backward_sep_id = EstimateForwardBackwardSep(
+      module, sequence, ins_id_map);
+    solver_option.forward_backward_sep_id = forward_backward_sep_id;
+    //std::cerr << PrintInstructions(sequence) << std::endl;;
+    //std::cerr << "Forward/backward sep id: " << forward_backward_sep_id << std::endl;
+  }
+
   // ----- Build strategies and costs -----
   int num_devices = module->config().num_partitions();
-  ClusterEnvironment cluster_env(num_devices);
-
-  const HloInstructionSequence& sequence = hlo_live_range->flattened_instruction_sequence();
+  ClusterEnvironment cluster_env(num_devices, solver_option);
   StrategyMap strategy_map;
   FollowMap follow_map;
- 
-  std::tie(strategy_map, follow_map) = BuildStrategyAndCost(sequence, cluster_env);
-  InstructionIdMap ins_id_map = BuildInstructionIdMap(sequence);
+  std::tie(strategy_map, follow_map) = BuildStrategyAndCost(sequence, cluster_env, solver_option);
   AliasSet alias_set = BuildAliasSet(module, alias_analysis->dataflow_analysis(), ins_id_map);
   //std::cerr << PrintStrategyMap(strategy_map, sequence);
 
@@ -1342,7 +1453,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   HloInstruction* root_inst = entry->root_instruction();
 
   // Set sharding for inputs and intermdiates
-  for (HloInstruction* inst: entry->instructions()) {
+  for (HloInstruction* inst : entry->instructions()) {
     if (inst == root_inst) {
       continue;
     }

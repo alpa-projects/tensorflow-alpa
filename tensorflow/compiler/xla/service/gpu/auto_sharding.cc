@@ -27,7 +27,7 @@ double GetBytes(const Shape& shape) {
 
 // Options for the auto-sharding solver
 struct AutoShardingSolverOption {
-  bool force_data_parallel;
+  bool force_batch_dim_to_mesh_dim;
   int64 forward_backward_sep_id;
 
   bool override_all_reduce_cost;
@@ -169,6 +169,22 @@ class ClusterEnvironment {
     }
   }
 
+  std::string ToString() {
+    std::ostringstream os;
+    os << "device_mesh: " << device_mesh.ToString() << "\n";
+    os << "mesh_alpha: ";
+    for (auto x : mesh_alpha) {
+      os << x << " ";
+    }
+    os << "\n";
+    os << "mesh_beta: ";
+    for (auto x : mesh_beta) {
+      os << x << " ";
+    }
+    os << "\n";
+    return os.str();
+  }
+
   // Shape and bandwidth of the device mesh
   const Array<int64> device_mesh;
   const int num_devices;
@@ -302,6 +318,7 @@ InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& seque
   }
 
   // Init frontier
+  //std::cerr << "Depth : 0" << std::endl;
   size_t collected = 0;
   std::vector<const HloInstruction*> current_frontier;
   for (const HloInstruction* inst : instructions) {
@@ -309,6 +326,7 @@ InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& seque
       depth_map[inst] = 0;
       current_frontier.push_back(inst);
       collected++;
+      //std::cerr << inst->ToString() << std::endl;
     }
   }
 
@@ -329,8 +347,10 @@ InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& seque
 
     depth++;
     std::swap(current_frontier, next_frontier);
+    //std::cerr << "Depth :" << depth << std::endl;
     for (const HloInstruction* inst : current_frontier) {
       depth_map[inst] = depth;
+      //std::cerr << inst->ToString() << std::endl;
     }
   }
 
@@ -1257,7 +1277,7 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
 
   // Serialize edges and edge costs to 1d numpy arrays
   int64 N = instructions.size();
-  int64 M = pass_context::GetInt("auto_sharding::memory_budget_per_device", 1 << 30);
+  int64 M = pass_context::GetInt("auto_sharding::memory_budget_per_device", -1);
   std::vector<int> s_len_np = cost_graph.node_lens;
   const std::vector<int>& s_follow_np = cost_graph.follow_idx;
   std::vector<int> E_np;
@@ -1533,7 +1553,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   }
 
   AutoShardingSolverOption solver_option;
-  solver_option.force_data_parallel = false;
+  solver_option.force_batch_dim_to_mesh_dim = false;
   solver_option.override_all_reduce_cost = false;
   solver_option.override_reduce_scatter_cost = false;
 
@@ -1541,14 +1561,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
                                                       "normal");
   if (strategy_name == "normal") {
     ;
-  } else if (strategy_name == "force_data_parallel") {
-    solver_option.force_data_parallel = true;
-    solver_option.override_all_reduce_cost = true;
-    solver_option.all_reduce_cost = 1000;
-  } else if (strategy_name == "force_zero_data_parallel") {
-    solver_option.force_data_parallel = true;
-    solver_option.override_reduce_scatter_cost = true;
-    solver_option.reduce_scatter_cost = 1000;
+  } else {
+    LOG(FATAL) << "Invalid solver strategy: " << strategy_name;
   }
 
   //std::cerr << "===== Enter AutoSharding =====" << std::endl;
@@ -1581,20 +1595,24 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   //std::cerr << hlo_live_range->ToString() << std::endl;
   //std::cerr << PrintLivenessSet(liveness_set);
 
-  // ----- Analyze forward/backward for force_data_parallel
+  // ----- Analize depth -----
   const HloInstructionSequence& sequence = hlo_live_range->flattened_instruction_sequence();
   InstructionIdMap ins_id_map = BuildInstructionIdMap(sequence);
-  if (solver_option.force_data_parallel) {
-    int64 forward_backward_sep_id = EstimateForwardBackwardSep(
-      module, sequence, ins_id_map);
-    solver_option.forward_backward_sep_id = forward_backward_sep_id;
-    //std::cerr << PrintInstructions(sequence) << std::endl;;
-    //std::cerr << "Forward/backward sep id: " << forward_backward_sep_id << std::endl;
-  }
+  InstructionDepthMap ins_depth_map = BuildInstructionDepthMap(sequence);
+
+  // ----- Read parameters of device mesh -----
+  Array<int64> device_mesh(
+    pass_context::GetIntVector("auto_sharding::device_mesh_shape"));
+  device_mesh.SetValues(
+    pass_context::GetIntVector("auto_sharding::device_mesh_ids"));
+
+  ClusterEnvironment cluster_env(
+    device_mesh,
+    pass_context::GetDoubleVector("auto_sharding::device_mesh_alpha"),
+    pass_context::GetDoubleVector("auto_sharding::device_mesh_beta"),
+    solver_option);
 
   // ----- Build strategies and costs -----
-  Array2D<int64> device_mesh = {{1, 2, 3}, {4, 5, 6}};
-  ClusterEnvironment cluster_env(device_mesh, {1, 1}, {1, 1}, solver_option);
   StrategyMap strategy_map;
   FollowMap follow_map;
   std::tie(strategy_map, follow_map) = BuildStrategyAndCost(sequence, cluster_env, solver_option);

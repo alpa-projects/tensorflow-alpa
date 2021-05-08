@@ -3,6 +3,7 @@
 
 #include "tensorflow/compiler/xla/array.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding.h"
+#include "tensorflow/compiler/xla/shape_util.h"
 
 namespace xla {
 namespace gpu {
@@ -35,7 +36,7 @@ void AppendFlattenElements(std::vector<T>* result,
 
 // Return the index of key in a vector. -1 means not found.
 template <typename T>
-int GetIndex(const std::vector<T>& v, const T& key) {
+int64 GetIndex(const std::vector<T>& v, const T& key) {
   auto iter = std::find(v.cbegin(), v.cend(), key);
   
   if (iter != v.cend()) {
@@ -53,10 +54,32 @@ T GetDimLastValue(const Array<T>& array, int dim) {
   return array(indices);
 }
 
+// Check whether two HloSharding are equal.
+// Replicated can be equal to a PartileTile that puts
+// all devices in the last replicated dim.
 bool HloShardingEqual(const HloSharding& lhs, const HloSharding& rhs) {
   return lhs == rhs;
 }
 
+// Get the number of bytes of a shape
+double GetBytes(const Shape& shape) {
+  return ShapeUtil::ByteSizeOf(shape, /*pointer_size=*/8);
+};
+
+// Convert a vector to string
+template <typename T>
+std::string ToString(const std::vector<T>& vector) {
+  std::ostringstream os;
+  os << "[";
+  for (size_t i = 0; i < vector.size(); ++i) {
+    os << vector[i];
+    if (i != vector.size() - 1) {
+      os << ", ";
+    }
+  }
+  os << "]";
+  return os.str();
+}
 
 }  // namespace gpu
 }  // namespace xla

@@ -13,6 +13,7 @@ namespace xla {
 // A global context to pass arguments from python to xla passes
 namespace pass_context {
 
+// TODO: replace this with absl::any in "absl/types/any.h"
 class AnyObject {
  public:
   enum class Type : uint8 {

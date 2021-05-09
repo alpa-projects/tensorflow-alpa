@@ -29,11 +29,11 @@ struct AutoShardingSolverOption {
   bool force_batch_dim_to_mesh_dim;
   int64 forward_backward_sep_id;
 
-  bool override_all_reduce_cost;
-  double all_reduce_cost;
-
   bool override_all_gather_cost;
   double all_gather_cost;
+
+  bool override_all_reduce_cost;
+  double all_reduce_cost;
 
   bool override_reduce_scatter_cost;
   double reduce_scatter_cost;
@@ -98,34 +98,38 @@ HloSharding BroadcastSharding(const HloSharding& input_spec,
     HloSharding::Tile(new_tile_assignment);
 }
 
-// Cluster environment to model the communication cost
+// The cluster has a multi-dimensional device mesh topology.
+// Each mesh dimension has its own latency and bandwidth.
+// We use alpha-beta model to model the communication cost.
 class ClusterEnvironment {
  public:
   ClusterEnvironment(const Array<int64>& device_mesh,
                      const std::vector<double>& mesh_alpha,
                      const std::vector<double>& mesh_beta,
                      const AutoShardingSolverOption& solver_option)
-    : device_mesh(device_mesh), num_devices(device_mesh.num_elements()),
+    : device_mesh(device_mesh), total_devices(device_mesh.num_elements()),
       mesh_alpha(mesh_alpha), mesh_beta(mesh_beta),
       solver_option(solver_option) {}
-
-  double AllReduceCost(double num_bytes, int mesh_dim) const {
-    if (solver_option.override_all_reduce_cost) {
-      return solver_option.all_reduce_cost;
-    }
-
-    return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * 2 * (num_devices - 1) / num_devices * num_bytes +
-            0.1);
-  }
 
   double AllGatherCost(double num_bytes, int mesh_dim) const {
     if (solver_option.override_all_gather_cost) {
       return solver_option.all_gather_cost;
     }
 
+    int64 num_devices = device_mesh.dim(mesh_dim);
     return (mesh_alpha[mesh_dim] +
             mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes +
+            0.1);
+  }
+
+  double AllReduceCost(double num_bytes, int mesh_dim) const {
+    if (solver_option.override_all_reduce_cost) {
+      return solver_option.all_reduce_cost;
+    }
+
+    int64 num_devices = device_mesh.dim(mesh_dim);
+    return (mesh_alpha[mesh_dim] +
+            mesh_beta[mesh_dim] * 2 * (num_devices - 1) / num_devices * num_bytes +
             0.01);
   }
 
@@ -134,28 +138,25 @@ class ClusterEnvironment {
       return solver_option.reduce_scatter_cost;
     }
 
+    int64 num_devices = device_mesh.dim(mesh_dim);
     return (mesh_alpha[mesh_dim] +
             mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes +
             0.001);
   }
 
+  // Get the corresponding mesh dimension for ever tensor dimension
+  // -1 means replicated on that dimension
   std::vector<int> GetTensorDimToMeshDim(const Shape& shape,
-                                         const HloSharding& raw_spec) const {
+                                         const HloSharding& spec) const {
     CHECK(shape.IsArray());
-    HloSharding converted_spec = HloSharding::Manual();
-    const HloSharding* spec;
 
-    if (raw_spec.IsReplicated()) {
-      // TODO: This can be accelerated
-      converted_spec = Tile(shape, {}, {}, *this);
-      spec = &converted_spec;
-    } else {
-      spec = &raw_spec;
+    if (spec.IsReplicated()) {
+      return std::vector<int>(shape.rank(), -1);
     }
 
     std::vector<int> tensor_dim_vals(shape.rank(), 0);
     for (int64 i = 0; i < shape.rank(); ++i) {
-      tensor_dim_vals[i] = GetDimLastValue(spec->tile_assignment(), i);
+      tensor_dim_vals[i] = GetDimLastValue(spec.tile_assignment(), i);
     }
 
     std::vector<int> mesh_dim_vals(device_mesh.num_dimensions(), 0);
@@ -165,9 +166,9 @@ class ClusterEnvironment {
 
     std::vector<int> ret(shape.rank(), -1);
     for (int64 i = 0; i < shape.rank(); ++i) {
-      if (spec->tile_assignment().dim(i) != 1) {
+      if (spec.tile_assignment().dim(i) != 1) {
         for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
-          if (tensor_dim_vals[i] == tensor_dim_vals[j]) {
+          if (tensor_dim_vals[i] == mesh_dim_vals[j]) {
             ret[i] = j;
           }
         }
@@ -177,10 +178,11 @@ class ClusterEnvironment {
     return ret;
   }
 
+  // The communication cost of resharding a tensor from src to dst
   double ReshardingCost(const Shape& shape, const HloSharding& src_spec,
                         const HloSharding& dst_spec) const {
-    if (HloShardingEqual(src_spec, dst_spec)) {
-      return 0;
+    if (src_spec == dst_spec) {
+      return 0.0;
     }
 
     std::vector<int> src_tensor_dim_to_mesh_dim =
@@ -200,6 +202,8 @@ class ClusterEnvironment {
       // TODO: this can be more accurate
       cost += AllGatherCost(GetBytes(shape), src_mesh_dim);
     }
+
+    return cost;
   }
 
   std::string ToString() {
@@ -220,7 +224,7 @@ class ClusterEnvironment {
 
   // Shape and bandwidth of the device mesh
   const Array<int64> device_mesh;
-  const int num_devices;
+  const int total_devices;
   const std::vector<double> mesh_alpha;
   const std::vector<double> mesh_beta;
 
@@ -245,22 +249,22 @@ HloSharding Tile(const Shape& shape,
   int64 split_prod = 1;
   for (size_t i = 0; i < tensor_dims.size(); ++i) {
     tile_assignment_dimensions[tensor_dims[i]] = cluster_env.device_mesh.dim(mesh_dims[i]);
-    split_prod *= cluster_env.device_mesh.dim(i);
+    split_prod *= cluster_env.device_mesh.dim(mesh_dims[i]);
   }
 
   // Replicate on reminding mesh dimensions
   bool replicate_on_last_tile_dim = false;
-  if (split_prod < cluster_env.num_devices) {
-    tile_assignment_dimensions.push_back(cluster_env.num_devices / split_prod);
+  if (split_prod < cluster_env.total_devices) {
+    tile_assignment_dimensions.push_back(cluster_env.total_devices / split_prod);
     replicate_on_last_tile_dim = true;
   }
 
   // Map device ids from device_mesh to tile_assignment_devices
-  std::vector<int64> tile_assignment_devices(cluster_env.num_devices);
-
-  std::function<void(int64, std::vector<int64>)> generate_tile_assignment_devices;
+  std::vector<int64> tile_assignment_devices;
+  tile_assignment_devices.reserve(cluster_env.total_devices);
 
   std::vector<int64> tmp_indices(cluster_env.device_mesh.num_dimensions(), 0);
+  std::function<void(int64, std::vector<int64>)> generate_tile_assignment_devices;
   generate_tile_assignment_devices = [&]
     (int64 tensor_dim, std::vector<int64> mesh_indices) {
       if (tensor_dim == shape.rank() - 1) {
@@ -271,7 +275,7 @@ HloSharding Tile(const Shape& shape,
         int64 next_mesh_dim = -1;
 
         int64 index = GetIndex(tensor_dims, next_tensor_dim);
-        if (index > 0) {
+        if (index >= 0) {
           next_mesh_dim = mesh_dims[index];
         }
 
@@ -288,8 +292,12 @@ HloSharding Tile(const Shape& shape,
   generate_tile_assignment_devices(-1, mesh_indices);
 
   // Make HloSharding
-  Array<int64> tile_assignment(tile_assignment_devices);
-  tile_assignment.Reshape(tile_assignment_dimensions);
+  Array<int64> tile_assignment(tile_assignment_dimensions);
+  //std::cerr << "shape: " << shape.ToString() << std::endl;
+  //std::cerr << "tensor dims: " << ToString(tensor_dims) << std::endl;
+  //std::cerr << "mesh dims: " << ToString(mesh_dims) << std::endl;
+  //std::cerr << "tile_assignment: " << ToString(tile_assignment.dimensions()) << std::endl;
+  tile_assignment.SetValues(tile_assignment_devices);
 
   return replicate_on_last_tile_dim ?
      HloSharding::PartialTile(tile_assignment):
@@ -311,8 +319,6 @@ InstructionIdMap BuildInstructionIdMap(const HloInstructionSequence& sequence) {
 int64 EstimateForwardBackwardSep(const HloModule* module,
                                  const HloInstructionSequence& sequence,
                                  const InstructionIdMap& ins_id_map) {
-  HloComputation* entry = module->entry_computation();
-
   // Count used_by map for every parameter
   absl::flat_hash_map<const HloInstruction*, std::vector<int64>> used_by;
   for (const HloInstruction* inst : sequence.instructions()) {
@@ -495,7 +501,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           HloSharding output_spec = BroadcastSharding(
             src_strategies[sid].output_sharding, ins->shape(), ins->dimensions());
 
-          std::string name = ToString(output_spec.tile_assignment().dimensions());
+          std::string name = SimpleToString(output_spec);
           double compute_cost = 0;
           double communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
@@ -521,7 +527,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
             continue;
           }
 
-          std::string name = ToString(output_spec->tile_assignment().dimensions());
+          std::string name = SimpleToString(*output_spec);
           double compute_cost = 0;
           double communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec->NumTiles();
@@ -541,7 +547,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           HloSharding output_spec = hlo_sharding_util::TransposeSharding(
             src_strategies[sid].output_sharding, ins->dimensions());
 
-          std::string name = ToString(output_spec.tile_assignment().dimensions());
+          std::string name = SimpleToString(output_spec);
           double compute_cost = 0;
           double communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
@@ -615,7 +621,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
         for (int64 sid = 0; sid < src_strategies.size(); ++sid) {
           HloSharding output_spec = src_strategies[sid].output_sharding;
 
-          std::string name = ToString(output_spec.tile_assignment().dimensions());
+          std::string name = SimpleToString(output_spec);
           double compute_cost = 0;
           double communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
@@ -694,9 +700,9 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
             communication_cost += cluster_env.AllReduceCost(memory_cost, mesh_dim);
           }
 
-          std::string name = ToString(output_spec.tile_assignment().dimensions());
+          std::string name = SimpleToString(output_spec);
           if (!all_reduce_dims.empty()) {
-            name += "(all-reduce @ " + ToString(all_reduce_dims) + ")";
+            name += " (all-reduce @ " + ToString(all_reduce_dims) + ")";
           }
           strategies.push_back(
             ShardingStrategy({name, output_spec,
@@ -1484,18 +1490,18 @@ std::string PrintAutoShardingSolution(
   }
 
   // Print the memory usage
-  os << "=== Memory ===\n";
-  for (size_t i = 0; i < N; ++i) {
-    double mem = 0.0;
-    for (const auto& val : liveness_set.at(i)) {
-      const HloInstruction* ins = val->instruction();
-      int ins_idx = ins_id_map.at(ins);
-      int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
-      const ShardingStrategy& strategy = strategy_map.at(ins)[stra_idx];
-      mem += strategy.memory_cost;
-    }
-    os << "Time " << i << ": " << mem / (1024 * 1024) << " MB\n";
-  }
+  //os << "=== Memory ===\n";
+  //for (size_t i = 0; i < N; ++i) {
+  //  double mem = 0.0;
+  //  for (const auto& val : liveness_set.at(i)) {
+  //    const HloInstruction* ins = val->instruction();
+  //    int ins_idx = ins_id_map.at(ins);
+  //    int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
+  //    const ShardingStrategy& strategy = strategy_map.at(ins)[stra_idx];
+  //    mem += strategy.memory_cost;
+  //  }
+  //  os << "Time " << i << ": " << mem / (1024 * 1024) << " MB\n";
+  //}
 
   return os.str();
 }
@@ -1507,8 +1513,14 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   AutoShardingSolverOption solver_option;
   solver_option.force_batch_dim_to_mesh_dim = false;
+  solver_option.override_all_gather_cost = false;
   solver_option.override_all_reduce_cost = false;
   solver_option.override_reduce_scatter_cost = false;
+  if (pass_context::GetBool("auto_sharding::force_all_gather_cost", false)) {
+    solver_option.override_all_gather_cost = true;
+    solver_option.all_gather_cost =
+      pass_context::GetDouble("auto_sharding::all_gather_cost");
+  }
 
   std::string strategy_name = pass_context::GetString("auto_sharding::solver_strategy",
                                                       "normal");

@@ -42,6 +42,8 @@ int64 GetInt(const std::string& name, int64 default_value);
 
 bool GetBool(const std::string& name, bool default_value);
 
+double GetDouble(const std::string& name);
+
 std::string GetString(const std::string& name, const std::string& default_value);
 
 std::vector<int64> GetIntVector(const std::string& name);

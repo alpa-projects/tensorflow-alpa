@@ -75,6 +75,23 @@ int64 GetInt(const std::string& name, int64 default_value) {
   }
 }
 
+double GetDouble(const std::string& name) {
+  auto iter = current_context.find(name);
+  if (iter == current_context.end()) {
+    LOG(FATAL) << "Cannot find " << name << " in the pass context";
+  } else {
+    const AnyObject& obj = iter->second;
+    switch (obj.type) {
+      case AnyObject::Type::kDouble:
+        return obj.double_val;
+      case AnyObject::Type::kInt:
+        return static_cast<double>(obj.int_val);
+      default:
+        LOG(FATAL) << "Get value of '" << name << "' with an invalid type";
+    }
+  }
+}
+
 bool GetBool(const std::string& name, bool default_value) {
   return static_cast<bool>(GetInt(name, default_value));
 }

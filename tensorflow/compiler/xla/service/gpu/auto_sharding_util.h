@@ -20,10 +20,10 @@ void AppendFlattenElements(std::vector<T>* result,
     result->push_back(array(cur_indices));
   } else {
     int next_depth = cur_depth + 1;
-    int index = indices[next_depth];
+    int64 index = indices[next_depth];
 
     if (index == -1) {
-      for (int i = 0; i < array.dim(next_depth); ++i) {
+      for (int64 i = 0; i < array.dim(next_depth); ++i) {
         cur_indices[next_depth] = i;
         AppendFlattenElements(result, array, indices, next_depth, cur_indices);
       }
@@ -79,6 +79,13 @@ std::string ToString(const std::vector<T>& vector) {
   }
   os << "]";
   return os.str();
+}
+
+std::string SimpleToString(const HloSharding& spec) {
+  if (spec.IsReplicated()) {
+    return "R";
+  }
+  return ToString(spec.tile_assignment().dimensions());
 }
 
 }  // namespace gpu

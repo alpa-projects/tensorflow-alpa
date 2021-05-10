@@ -166,7 +166,11 @@ class ClusterEnvironment {
         continue;
       }
       // TODO: this can be more accurate
-      cost += AllGatherCost(GetBytes(shape), src_mesh_dim);
+      if (dst_tensor_dim_to_mesh_dim[i] == -1) {
+        cost += AllGatherCost(GetBytes(shape), src_mesh_dim);
+      }
+      // do not allow other re-sharding strategies (e.g., collective-permute)
+      return INFINITY_COST;
     }
 
     return cost;

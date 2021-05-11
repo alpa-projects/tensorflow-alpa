@@ -324,8 +324,19 @@ PYBIND11_MODULE(xla_extension, m) {
   distributed_runtime_client.def("connect", &DistributedRuntimeClient::Connect)
       .def("shutdown", &DistributedRuntimeClient::Shutdown);
 
-  m.def("get_distributed_runtime_service", &GetDistributedRuntimeService);
-  m.def("get_distributed_runtime_client", &GetDistributedRuntimeClient);
+  //m.def("get_distributed_runtime_service", &GetDistributedRuntimeService);
+  //m.def("get_distributed_runtime_client", &GetDistributedRuntimeClient);
+
+  m.def("get_distributed_runtime_service", [](std::string address, int num_nodes) {
+    DistributedRuntimeServiceImpl::Options service_options;
+    service_options.num_nodes = num_nodes;
+    return GetDistributedRuntimeService(address, service_options);
+  });
+  m.def("get_distributed_runtime_client", [](std::string address, int node_id) {
+    DistributedRuntimeClient::Options client_options;
+    client_options.node_id = node_id;
+    return GetDistributedRuntimeClient(address, client_options);
+  });
 
   m.def("collect_garbage", []() { GlobalPyRefManager()->CollectGarbage(); });
 

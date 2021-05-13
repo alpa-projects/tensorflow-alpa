@@ -37,6 +37,9 @@ struct AutoShardingSolverOption {
 
   bool override_reduce_scatter_cost;
   double reduce_scatter_cost;
+
+  bool load_strategy;
+
 };
 
 // One sharding strategy
@@ -1237,7 +1240,7 @@ class CostGraph {
 };
 
 
-std::pair<std::vector<int>, std::vector<int>> CallSolver(
+std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   const HloModule* module,
   const HloInstructionSequence& sequence,
   const LivenessSet& liveness_set,
@@ -1377,7 +1380,7 @@ std::pair<std::vector<int>, std::vector<int>> CallSolver(
 
   // Call the solver function in python
   size_t num_edges = E_np.size() / 2;
-  std::vector<int> s_val, e_val;
+  std::vector<int64> s_val, e_val;
 
   PyGILState_STATE gstate = PyGILState_Ensure();
   {
@@ -1482,8 +1485,8 @@ std::string PrintAutoShardingSolution(
   const StrategyMap& strategy_map,
   const CostGraph& cost_graph,
   const InstructionIdMap& ins_id_map,
-  const std::vector<int>& s_val,
-  const std::vector<int>& e_val
+  const std::vector<int64>& s_val,
+  const std::vector<int64>& e_val
 ) {
   std::ostringstream os;
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
@@ -1535,14 +1538,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     solver_option.all_gather_cost =
       pass_context::GetDouble("auto_sharding::all_gather_cost");
   }
-
-  std::string strategy_name = pass_context::GetString("auto_sharding::solver_strategy",
-                                                      "normal");
-  if (strategy_name == "normal") {
-    ;
-  } else {
-    LOG(FATAL) << "Invalid solver strategy: " << strategy_name;
-  }
+  solver_option.load_strategy =
+      pass_context::GetBool("auto_sharding::load_strategy", false);
 
   //std::cerr << "===== Enter AutoSharding =====" << std::endl;
   //std::cerr << module->ToString();
@@ -1598,15 +1595,19 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     sequence, ins_depth_map, cluster_env, solver_option);
   AliasSet alias_set = BuildAliasSet(module, alias_analysis->dataflow_analysis(), ins_id_map);
   //std::cerr << PrintStrategyMap(strategy_map, sequence);
-
+ 
   // ----- Build cost graph and merge unimporant nodes -----
   CostGraph cost_graph(sequence, strategy_map, follow_map, ins_id_map);
   cost_graph.Simplify();
 
   // ----- Call the ILP Solver -----
-  std::vector<int> s_val, e_val;
-  std::tie(s_val, e_val) = CallSolver(module, sequence, liveness_set,
-                                      strategy_map, cost_graph, ins_id_map, alias_set);
+  std::vector<int64> s_val, e_val;
+  if (!solver_option.load_strategy) {
+    std::tie(s_val, e_val) = CallSolver(module, sequence, liveness_set,
+                                        strategy_map, cost_graph, ins_id_map, alias_set);
+  } else {
+    s_val = pass_context::GetIntVector("auto_sharding::strategy_vector");
+  }
   if (pass_context::GetBool("auto_sharding::print_strategy", false)) {
     std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
                                            cost_graph, ins_id_map, s_val, e_val);

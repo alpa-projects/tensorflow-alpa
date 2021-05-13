@@ -1639,9 +1639,11 @@ PjRtStreamExecutorExecutable::PjRtStreamExecutorExecutable(
     // This must go after `executables_` is initialized.
     VLOG(3) << "PjRtStreamExecutorExecutable device_assignment:\n"
             << device_assignment_->ToString();
-    //CHECK_GE(addressable_devices_.size(), 1) << device_assignment_->ToString();
-    //CHECK_LE(addressable_devices_.size(), client_->addressable_device_count())
-    //    << "Inconsistent local device count.";
+    if (!pass_context::GetBool("build_option::pass_through_device_assignment", false)) {
+      CHECK_GE(addressable_devices_.size(), 1) << device_assignment_->ToString();
+      CHECK_LE(addressable_devices_.size(), client_->addressable_device_count())
+          << "Inconsistent local device count.";
+    }
     num_partitions = device_assignment_->computation_count();
   }
 

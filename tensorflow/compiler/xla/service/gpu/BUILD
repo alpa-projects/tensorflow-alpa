@@ -1409,6 +1409,7 @@ cc_library(
     ],
     deps = [
         ":alias_passthrough_params",
+        ":auto_sharding",
         ":cudnn_batchnorm_rewriter",
         ":fusion_bitcast_lift",
         ":fusion_merger",
@@ -2040,6 +2041,23 @@ cc_library(
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
+    ],
+)
+
+cc_library(
+    name = "auto_sharding",
+    srcs = ["auto_sharding.cc"],
+    hdrs = ["auto_sharding.h", "auto_sharding_util.h"],
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:dump",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_live_range",
+        "//tensorflow/compiler/xla/service:hlo_memory_scheduler",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "//tensorflow/compiler/xla/service:hlo_sharding_util",
+        "//tensorflow/compiler/xla/service:pass_context",
+        "@pybind11",
     ],
 )
 

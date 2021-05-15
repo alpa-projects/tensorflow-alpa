@@ -42,6 +42,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/service/name_uniquer.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/platform_util.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -404,6 +405,12 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           &HloPrintOptions::leading_and_trailing_instructions_number,
           &HloPrintOptions::set_leading_and_trailing_instructions_number);
 
+  py::class_<HloSharding> hlo_sharding_class(m, "HloSharding");
+  hlo_sharding_class
+      .def("proto_tuple", [](const HloSharding& hlo_sharding) {
+        return hlo_sharding.ToProto();
+      });
+
   py::class_<HloModule, std::shared_ptr<HloModule>> hlo_module_class(
       m, "HloModule");
   hlo_module_class
@@ -412,7 +419,9 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           static_cast<std::string (HloModule::*)(const HloPrintOptions&) const>(
               &HloModule::ToString),
           py::arg("options") = HloPrintOptions())
-      .def("as_serialized_hlo_module_proto", &GetHloModuleSerializedProto);
+      .def("as_serialized_hlo_module_proto", &GetHloModuleSerializedProto)
+      .def("spmd_output_sharding", &HloModule::spmd_output_sharding)
+      .def("spmd_parameters_shardings", &HloModule::spmd_parameters_shardings);
 
   m.def("hlo_module_to_dot_graph",
         [](const HloModule& hlo_module) -> StatusOr<std::string> {
@@ -625,6 +634,9 @@ void BuildXlaCompilerSubmodule(py::module& m) {
                     &ExecutableBuildOptions::use_spmd_partitioning,
                     &ExecutableBuildOptions::set_use_spmd_partitioning);
 
+  m.def("set_pass_context", &pass_context::SetPassContext);
+  m.def("clear_pass_context", &pass_context::ClearPassContext);
+
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)
       .value("HIGH", PrecisionConfig::HIGH)
@@ -652,5 +664,6 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .value("IFFT", FftType::IFFT)
       .value("RFFT", FftType::RFFT)
       .value("IRFFT", FftType::IRFFT);
+
 }
 }  // namespace xla

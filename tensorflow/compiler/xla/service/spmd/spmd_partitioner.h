@@ -316,6 +316,7 @@ class PartitionedHlo {
     SpmdBuilder* b;
     HloModule* module;
     int64_t num_replicas;
+    int64_t num_partitions;
     HloInstruction* partition_id;
     SPMDCollectiveOpsCreator collective_ops_creator;
     int64_t* next_channel_id;
@@ -383,6 +384,9 @@ class PartitionedHlo {
 
   // Helper function to broadcast data from a single device to all devices.
   PartitionedHlo Broadcast() const;
+
+  // Helper function to reshard a partial reduction tensor to a replicated tensor.
+  PartitionedHlo AllReduce() const;
 
   // Helper function to reshard the tensor using AllToAll (instead of the
   // default of Replicate followed by Slice).

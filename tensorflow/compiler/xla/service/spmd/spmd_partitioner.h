@@ -303,6 +303,7 @@ class PartitionedHlo {
     SpmdBuilder* b;
     HloModule* module;
     int64 num_replicas;
+    int64 num_partitions;
     HloInstruction* partition_id;
     SPMDCollectiveOpsCreator collective_ops_creator;
     int64* next_channel_id;
@@ -366,6 +367,9 @@ class PartitionedHlo {
 
   // Helper function to broadcast data from a single device to all devices.
   PartitionedHlo Broadcast() const;
+
+  // Helper function to reshard a partial reduction tensor to a replicated tensor.
+  PartitionedHlo AllReduce() const;
 
   // Helper function to reshard the tensor using AllToAll (instead of the
   // default of Replicate followed by Slice).
@@ -507,6 +511,7 @@ class SpmdPartitioningVisitor : public DfsHloVisitorWithDefault {
     state.b = &b_;
     state.module = module_;
     state.num_replicas = num_replicas_;
+    state.num_partitions = num_partitions_;
     state.partition_id = partition_id_;
     state.collective_ops_creator = collective_ops_creator_;
     state.next_channel_id = next_channel_id_;

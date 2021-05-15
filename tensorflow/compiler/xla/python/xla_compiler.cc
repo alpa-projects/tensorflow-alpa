@@ -46,6 +46,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_module_config.h"
 #include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/service/name_uniquer.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/platform_util.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -459,6 +460,12 @@ void BuildXlaCompilerSubmodule(py::module& m) {
                     &HloPrintOptions::is_in_nested_computation,
                     &HloPrintOptions::set_is_in_nested_computation);
 
+  py::class_<HloSharding> hlo_sharding_class(m, "HloSharding");
+  hlo_sharding_class
+      .def("proto_tuple", [](const HloSharding& hlo_sharding) {
+        return hlo_sharding.ToProto();
+      });
+
   py::class_<HloModule, std::shared_ptr<HloModule>> hlo_module_class(
       m, "HloModule");
   hlo_module_class
@@ -469,24 +476,8 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           py::arg("options") = HloPrintOptions())
       .def("as_serialized_hlo_module_proto", &GetHloModuleSerializedProto)
       .def("from_serialized_hlo_module_proto", &HloModuleFromSerializedProto)
-      .def_property_readonly(
-          "spmd_output_sharding",
-          [](const HloModule& m) -> absl::optional<xla::OpSharding> {
-            if (!m.has_spmd_output_sharding()) return absl::nullopt;
-            return m.spmd_output_sharding().ToProto();
-          })
-      .def_property_readonly(
-          "spmd_parameters_shardings",
-          [](const HloModule& m)
-              -> absl::optional<std::vector<xla::OpSharding>> {
-            if (!m.has_spmd_parameters_shardings()) return absl::nullopt;
-            std::vector<xla::OpSharding> param_shardings;
-            for (const auto& parameter_sharding :
-                 m.spmd_parameters_shardings()) {
-              param_shardings.push_back(parameter_sharding.ToProto());
-            }
-            return param_shardings;
-          });
+      .def("spmd_output_sharding", &HloModule::spmd_output_sharding)
+      .def("spmd_parameters_shardings", &HloModule::spmd_parameters_shardings);
 
   m.def("hlo_module_to_dot_graph",
         [](const HloModule& hlo_module) -> StatusOr<std::string> {
@@ -753,6 +744,9 @@ void BuildXlaCompilerSubmodule(py::module& m) {
                       &xla::OpSharding::mutable_tuple_shardings);
   DefRepeatedProperty(op_sharding, "last_tile_dims",
                       &xla::OpSharding::mutable_last_tile_dims);
+
+  m.def("set_pass_context", &pass_context::SetPassContext);
+  m.def("clear_pass_context", &pass_context::ClearPassContext);
 
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)

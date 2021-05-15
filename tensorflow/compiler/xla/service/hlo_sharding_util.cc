@@ -1147,7 +1147,7 @@ void DevicesForShardingInternal(
     return;
   }
 
-  if (sharding.IsReplicated()) {
+  if (sharding.IsReplicated() || sharding.IsPartialReduction()) {
     for (int64 device : available_devices) {
       if (!HloSharding::IsReservedDevice(device)) {
         used->insert(device);

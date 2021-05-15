@@ -5895,3 +5895,19 @@ xla_py_proto_library(
     visibility = ["//visibility:public"],
     deps = [":hlo_proto"],
 )
+
+cc_library(
+    name = "pass_context",
+    srcs = [
+        "pass_context.cc",
+    ],
+    hdrs = [
+        "pass_context.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla:types",
+        "//tensorflow/compiler/xla:util",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@pybind11",
+    ],
+)

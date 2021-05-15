@@ -97,6 +97,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_cost_analysis.h"
 #include "tensorflow/compiler/xla/service/hlo_input_output_alias_config.h"
 #include "tensorflow/compiler/xla/service/maybe_owning_device_memory.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/shaped_buffer.h"
 #include "tensorflow/compiler/xla/service/transfer_manager.h"
 #include "tensorflow/compiler/xla/shape.h"
@@ -1707,9 +1708,11 @@ PjRtStreamExecutorExecutable::PjRtStreamExecutorExecutable(
     // This must go after `executables_` is initialized.
     VLOG(3) << "PjRtStreamExecutorExecutable device_assignment:\n"
             << device_assignment_->ToString();
-    CHECK_GE(addressable_devices_.size(), 1) << device_assignment_->ToString();
-    CHECK_LE(addressable_devices_.size(), client_->addressable_device_count())
-        << "Inconsistent local device count.";
+    if (!pass_context::GetBool("build_option::pass_through_device_assignment", false)) {
+      CHECK_GE(addressable_devices_.size(), 1) << device_assignment_->ToString();
+      CHECK_LE(addressable_devices_.size(), client_->addressable_device_count())
+          << "Inconsistent local device count.";
+    }
     num_partitions = device_assignment_->computation_count();
   }
 
@@ -2293,33 +2296,35 @@ PjRtStreamExecutorClient::GetExecutableExtras(CompileOptions* options) {
       &num_replicas, &num_partitions, &device_assignment));
 
   // Find devices that are addressable by this client/task.
-  if (device_assignment != nullptr) {
-    addressable_device_logical_ids.reserve(num_replicas * num_partitions);
-    addressable_devices.reserve(num_replicas * num_partitions);
-    for (int replica = 0; replica < num_replicas; ++replica) {
-      for (int partition = 0; partition < num_partitions; ++partition) {
-        int device_id = (*device_assignment)(replica, partition);
-        TF_ASSIGN_OR_RETURN(PjRtDevice * device, LookupDevice(device_id));
-        if (device->process_index() != process_index()) {
-          VLOG(3) << "Non-local device: " << device_id;
-          continue;
+  if (!pass_context::GetBool("build_option::pass_through_device_assignment", false)) {
+    if (device_assignment != nullptr) {
+      addressable_device_logical_ids.reserve(num_replicas * num_partitions);
+      addressable_devices.reserve(num_replicas * num_partitions);
+      for (int replica = 0; replica < num_replicas; ++replica) {
+        for (int partition = 0; partition < num_partitions; ++partition) {
+          int device_id = (*device_assignment)(replica, partition);
+          TF_ASSIGN_OR_RETURN(PjRtDevice * device, LookupDevice(device_id));
+          if (device->process_index() != process_index()) {
+            VLOG(3) << "Non-local device: " << device_id;
+            continue;
+          }
+          PjRtExecutable::LogicalDeviceIds logica_device_ids;
+          logica_device_ids.replica = replica;
+          logica_device_ids.partition = partition;
+          addressable_device_logical_ids.push_back(std::move(logica_device_ids));
+          addressable_devices.push_back(device);
         }
-        PjRtExecutable::LogicalDeviceIds logica_device_ids;
-        logica_device_ids.replica = replica;
-        logica_device_ids.partition = partition;
-        addressable_device_logical_ids.push_back(std::move(logica_device_ids));
-        addressable_devices.push_back(device);
       }
-    }
-    if (addressable_devices.empty()) {
-      return InvalidArgument(
-          "Device assignment (%s) does not have any local devices.",
-          device_assignment->ToString());
-    }
+      if (addressable_devices.empty()) {
+        return InvalidArgument(
+            "Device assignment (%s) does not have any local devices.",
+            device_assignment->ToString());
+      }
 
-    if (build_options.device_ordinal() < 0) {
-      build_options.set_device_ordinal(
-          addressable_devices.front()->local_hardware_id());
+      if (build_options.device_ordinal() < 0) {
+        build_options.set_device_ordinal(
+            addressable_devices.front()->local_hardware_id());
+      }
     }
   }
   return extras;

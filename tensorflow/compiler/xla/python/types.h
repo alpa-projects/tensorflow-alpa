@@ -483,6 +483,43 @@ struct type_caster<xla::OpSharding> {
 
     return true;
   }
+
+  static handle cast_non_tuple(const xla::OpSharding& src) {
+    CHECK(src.type() != xla::OpSharding::TUPLE);
+
+    std::vector<int64_t> tile_assignment_dimensions(
+        src.tile_assignment_dimensions().begin(),
+        src.tile_assignment_dimensions().end());
+    std::vector<int64_t> tile_assignment_devices(
+        src.tile_assignment_devices().begin(),
+        src.tile_assignment_devices().end());
+    return pybind11::make_tuple(
+      static_cast<int>(src.type()),
+      tile_assignment_dimensions,
+      tile_assignment_devices,
+      pybind11::list(),
+      src.replicate_on_last_tile_dim()
+    ).release();
+  }
+
+  static handle cast(xla::OpSharding src, return_value_policy /* policy */, handle /* parent */) {
+    if (src.type() == xla::OpSharding::TUPLE) {
+      std::vector<handle> tuple_shardings;
+      for (const auto& x : src.tuple_shardings()) {
+        tuple_shardings.push_back(cast_non_tuple(x));
+      }
+
+      return pybind11::make_tuple(
+        static_cast<int>(src.type()),
+        pybind11::list(),
+        pybind11::list(),
+        tuple_shardings,
+        src.replicate_on_last_tile_dim()
+      ).release();
+    } else {
+      return cast_non_tuple(src);
+    }
+  }
 };
 
 }  // namespace detail

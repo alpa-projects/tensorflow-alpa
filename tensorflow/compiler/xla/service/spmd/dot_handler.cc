@@ -1601,12 +1601,22 @@ StatusOr<HloInstruction*> PartitionBaseCase(
     for (const auto& cd : dims_mapping.contracting_dims) {
       lhs_contracting_dims.push_back(cd.lhs);
     }
-    auto ar = lhs.state().partitioner->AllReduceAlongShardingDims(
-        b, dot, lhs.sharding(), lhs.state().next_channel_id,
-        lhs_contracting_dims, lhs.state().collective_ops_creator,
-        MakeBinaryAdd(output_base_shape.element_type(), module));
-    ar->set_sharding(HloSharding::Replicate());
-    return PartitionedHlo(ar, output_base_shape, lhs.state())
+
+    HloInstruction* ar_or_not;
+    if (output_sharding.IsPartialReduction()) {
+      // Defer all-reduce to explore the opportunity of the following simplification:
+      // `allreduce(x) + allreduce(y)` == `allreduce(x + y)`
+      ar_or_not = dot;
+      ar_or_not->set_sharding(HloSharding::PartialReduction());
+    } else {
+      // Run allreduce immediately
+      ar_or_not = lhs.state().partitioner->AllReduceAlongShardingDims(
+          b, dot, lhs.sharding(), lhs.state().next_channel_id,
+          lhs_contracting_dims, lhs.state().collective_ops_creator,
+          MakeBinaryAdd(output_base_shape.element_type(), module));
+      ar_or_not->set_sharding(HloSharding::Replicate());
+    }
+    return PartitionedHlo(ar_or_not, output_base_shape, lhs.state())
         .Reshard(output_sharding)
         .hlo();
   }

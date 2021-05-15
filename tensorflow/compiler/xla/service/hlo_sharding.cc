@@ -331,7 +331,9 @@ std::string HloSharding::ToString(bool include_metadata) const {
   if (replicated_) {
     return StrCat("{replicated", metadata, "}");
   }
-
+  if (partial_reduction_) {
+    return StrCat("{partial_reduction", metadata, "}");
+  }
   if (manual_) {
     return StrCat("{manual", metadata, "}");
   }
@@ -340,6 +342,7 @@ std::string HloSharding::ToString(bool include_metadata) const {
         "{maximal device=", static_cast<int64_t>(*tile_assignment_.begin()),
         metadata, "}");
   }
+
   return StrCat("{devices=[", StrJoin(tile_assignment_.dimensions(), ","), "]",
                 StrJoin(tile_assignment_, ","),
                 replicate_on_last_tile_dim_ ? " last_tile_dim_replicate" : "",

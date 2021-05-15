@@ -639,5 +639,14 @@ GetOutputInfo(const HloModule& hlo_module, const BufferAssignment& assignment) {
   return output;
 }
 
+int64 GpuExecutable::TotalAllocationSize() const {
+  int64 total_size = 0;
+  for (const BufferAllocation& allocation : allocations_) {
+    //std::cerr << allocation.ToString();
+    total_size += allocation.size();
+  }
+  return total_size;
+}
+
 }  // namespace gpu
 }  // namespace xla

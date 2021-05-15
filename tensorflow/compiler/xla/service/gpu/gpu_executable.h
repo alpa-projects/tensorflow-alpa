@@ -139,6 +139,8 @@ class GpuExecutable : public Executable {
       const ServiceExecutableRunOptions* run_options,
       VariantArguments arguments);
 
+  int64 TotalAllocationSize() const override;
+
   absl::Span<const BufferAllocation> GetAllocations() const {
     return allocations_;
   }

@@ -49,7 +49,6 @@ class HloSwapInsertion : public HloModulePass {
   std::unique_ptr<CallGraph> call_graph_;
 
   const ShapeSizeFunction size_function_;
-
   int64 memory_limit_bytes_;
 
   std::unique_ptr<TuplePointsToAnalysis> points_to_analysis_;

@@ -33,7 +33,6 @@
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/logging.h"
 
-// TODO: opaque is not passed into the custom call yet
 // TODO: has_indirect_use
 // todo: store the space for parameter specifically, instead of wasting time and space for it
 // todo: handle calls
@@ -46,6 +45,8 @@ using ::tensorflow::strings::HumanReadableNumBytes;
 
 using BufferId = int64;
 using BufferIdList = absl::InlinedVector<BufferId, 3>;
+
+Shape keyShape = ShapeUtil::MakeShape(S64, {});
 
 class Item{
 private: 
@@ -342,7 +343,9 @@ class MemoryRecorder {
             Item *swapOutItem = new Item;
             swapOutItem->isSwap = true;
             swapOutItem->instruction = computation_->AddInstruction(
-              HloInstruction::CreateCustomCall(toReleaseBuffer.shape, {toReleaseBuffer.defining_instruction->instruction}, "GPUSwapOut"));
+              HloInstruction::CreateCustomCall(keyShape, 
+                {toReleaseBuffer.defining_instruction->instruction}, "GPUSwapOut", 
+                /*opaque=*/toReleaseBuffer.shape.SerializeAsString()));
             VLOG(3) << "\tcreate swap out for buffer: " 
               << toReleaseBid;
             registerRelease(swapOutItem, toReleaseBid, rest_size > 0 ? 0 : -rest_size);
@@ -567,7 +570,7 @@ Status MemoryRecorder::PrepareForInstruction(Item *item) {
     swapIn->isSwap = true;
     swapIn->instruction = computation_->AddInstruction(
       HloInstruction::CreateCustomCall(buffer.shape, 
-        {swapOut->instruction}, "GPUSwapIn"));
+        {swapOut->instruction}, "GPUSwapIn", /*opaque=*/buffer.shape.SerializeAsString()));
     VLOG(3) << "\tcreate swap in for buffer: " << bid;
     // if already discarded, swap in after discarded
     Item *lastUse = last_use_inst.at(bid);
@@ -589,7 +592,7 @@ Status MemoryRecorder::PrepareForInstruction(Item *item) {
   for (auto bid : item->buffers_defined) {
     auto& buffer = buffers_.at(bid);
     // CHECK(b.defining_instruction == item)
-    LOG(WARNING) << "\tgetting space for buffers_defined: " << bid
+    VLOG(3) << "\tgetting space for buffers_defined: " << bid
       << ", space size: " << AllocatedSize(buffer);
     getSpaceFor(AllocatedSize(buffer), item);
     registerAlloc(item, bid, AllocatedSize(buffer));

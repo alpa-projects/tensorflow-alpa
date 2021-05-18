@@ -422,3 +422,38 @@ cc_library(
         "@tf_runtime//:support",
     ],
 )
+
+cc_library(
+    name = "pjrt_gpu_swap", 
+    srcs = ["swap.cu.cc"], 
+    hdrs = ["swap.h"], 
+    defines = if_cuda(["GOOGLE_CUDA=1"]),
+    deps = [
+        "//tensorflow/compiler/xla/service:custom_call_target_registry",
+        "//tensorflow/compiler/xla:shape_util",
+        "@com_google_absl//absl/container:flat_hash_map",
+    ]  + if_cuda([
+        "@local_config_cuda//cuda:cuda_headers",
+    ])
+)
+
+tf_cc_test(
+    name = "gpu_swap_test",
+    srcs = ["swap_test.cc"],
+    tags = [
+        "requires-gpu-nvidia",
+    ],
+    deps = [
+        ":gpu_device",
+        ":pjrt_client",
+        ":pjrt_gpu_swap", 
+        "//tensorflow/compiler/xla:test",
+        "//tensorflow/compiler/xla/client:executable_build_options",
+        "//tensorflow/compiler/xla/client:xla_builder",
+        "//tensorflow/compiler/xla/service:gpu_plugin",
+        "//tensorflow/compiler/xla/tests:literal_test_util",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core/platform:random",
+    ],
+)

@@ -458,10 +458,13 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
                               {FollowInsCostVecotr(src_strategies.size(), sid)}}));
         }
 
-        // Split one dim if the operand is a constant
+        // If the operand is a constant, do not follow it.
+        // Register new strategies instead.
         if (operand->shape().rank() == 0) {
-          follow_map.erase(ins);  // erase follow
+          follow_map.erase(ins);
+          strategies.clear();
 
+          // Split one dim 
           for (int64 i = 0; i < ins->shape().rank(); ++i) {
             for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
               if (device_mesh.dim(j) == 1 ||
@@ -480,6 +483,12 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
                                   {std::vector<double>(src_strategies.size(), 0.0)}}));
             }
           }
+
+          // Replicate
+          strategies.push_back(
+            ShardingStrategy({"R", HloSharding::Replicate(),
+                              2, 0, GetBytes(ins->shape()),
+                             {std::vector<double>(src_strategies.size(), 0.0)}}));
         }
 
         break;
@@ -534,6 +543,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
       case HloOpcode::kPad:
       case HloOpcode::kSlice:
       case HloOpcode::kDynamicSlice:
+      case HloOpcode::kConcatenate: // TODO: revisit
       case HloOpcode::kDynamicUpdateSlice: {
         const HloInstruction* operand = ins->operand(0);
         follow_map[ins] = operand;
@@ -892,6 +902,20 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           ShardingStrategy({
           "tuple_follow", HloSharding::Replicate(),
           0, 0, 0, resharding_costs}));
+        break;
+      }
+      case HloOpcode::kRngGetAndUpdateState: {
+        strategies.push_back(
+          ShardingStrategy({"R", HloSharding::Replicate(),
+                            0, 0, GetBytes(ins->shape()),
+                            {}}));
+        break;
+      }
+      case HloOpcode::kIota: {
+        // Manual means this op will be sharded by sharding propagation.
+        HloSharding output_spec = HloSharding::Manual();
+        strategies.push_back(
+          ShardingStrategy({"manual", output_spec, 0, 0, 0, {}}));
         break;
       }
       default:
@@ -1547,7 +1571,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   // ----- Get a sequential schedule and do liveness analysis -----
   auto size_fn = [](const BufferValue& buffer) {
-    return static_cast<double>(ShapeUtil::ByteSizeOf(buffer.shape(), /*pointer_size=*/8));
+    return GetBytes(buffer.shape());
   };
   TF_ASSIGN_OR_RETURN(HloSchedule schedule,
                       ScheduleModule(module, size_fn,
@@ -1627,7 +1651,11 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     if (iter != strategy_map.end()) {
       int ins_idx = ins_id_map[inst];
       int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
-      inst->set_sharding(iter->second[stra_idx].output_sharding);
+      const HloSharding& sharding_spec = iter->second[stra_idx].output_sharding;
+      if (sharding_spec.IsManual()) {
+        continue;
+      }
+      inst->set_sharding(sharding_spec);
     }
   }
 

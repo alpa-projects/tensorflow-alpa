@@ -346,12 +346,12 @@ PYBIND11_MODULE(xla_extension, m) {
       std::vector<std::vector<GlobalDeviceId>> communication_groups =
         GetCommunicationGroups(hlo_module.get());
 
-      for (size_t i = 0; i < communication_groups.size(); ++i) {
-        for (size_t j = 0; j < communication_groups[i].size(); ++j) {
-          std::cerr << communication_groups[i][j] << " ";
-        }
-        std::cerr << std::endl;
-      }
+      //for (size_t i = 0; i < communication_groups.size(); ++i) {
+      //  for (size_t j = 0; j < communication_groups[i].size(); ++j) {
+      //    std::cerr << communication_groups[i][j] << " ";
+      //  }
+      //  std::cerr << std::endl;
+      //}
 
       InitNcclCommunicators(
         distributed_client, node_id, device_to_node, communication_groups);

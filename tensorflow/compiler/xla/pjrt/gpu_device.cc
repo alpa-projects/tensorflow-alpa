@@ -525,14 +525,13 @@ Status InitNcclCommunicators(
       std::vector<gpu::LocalParticipant> local_participants,
       gpu::GetLocalParticipants(group, &local_devices));
     gpu::NcclCliqueKey key(group);
-    gpu::NcclCliqueCache().GetOrTryCreateIfAbsent(
-      key, [&](const gpu::NcclCliqueKey &key_){
-        std::cerr << "Create: " << key_.ToString() << std::endl;
-        //for (auto x : local_participants) {
-        //  std::cerr << "local device: " << x.device_ordinal << " " << x.rank << std::endl;
-        //}
-        return gpu::CreateNcclClique(key_, local_participants, &callback);
-    });
+    TF_ASSIGN_OR_RETURN(gpu::NcclClique* clique,
+      gpu::NcclCliqueCache().GetOrTryCreateIfAbsent(
+        key, [&](const gpu::NcclCliqueKey &key_){
+          std::cerr << "Create: " << key_.ToString() << std::endl;
+          return gpu::CreateNcclClique(key_, local_participants, &callback);
+    }));
+    break;
   }
 
   return Status::OK();

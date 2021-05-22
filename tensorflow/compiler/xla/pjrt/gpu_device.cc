@@ -528,10 +528,8 @@ Status InitNcclCommunicators(
     TF_ASSIGN_OR_RETURN(gpu::NcclClique* clique,
       gpu::NcclCliqueCache().GetOrTryCreateIfAbsent(
         key, [&](const gpu::NcclCliqueKey &key_){
-          std::cerr << "Create: " << key_.ToString() << std::endl;
           return gpu::CreateNcclClique(key_, local_participants, &callback);
     }));
-    break;
   }
 
   return Status::OK();

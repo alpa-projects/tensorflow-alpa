@@ -329,7 +329,7 @@ PYBIND11_MODULE(xla_extension, m) {
 
   m.def("init_nccl_communicators", [](
       int node_id,
-      std::shared_ptr<PyClient> py_client,
+      PyClient* py_client,
       std::shared_ptr<DistributedRuntimeClient> distributed_client,
       PyExecutable* py_executable) {
     absl::Span<PjRtDevice* const> devices = py_client->pjrt_client()->devices();
@@ -346,9 +346,10 @@ PYBIND11_MODULE(xla_extension, m) {
       std::vector<std::vector<GlobalDeviceId>> communication_groups =
         GetCommunicationGroups(hlo_module.get());
 
-      TF_RETURN_IF_ERROR(InitNcclCommunicators(
-        distributed_client, node_id, device_to_node, communication_groups));
+      //TF_RETURN_IF_ERROR(InitNcclCommunicators(
+      //  std::move(distributed_client), node_id, device_to_node, communication_groups));
     }
+    std::cerr << "c++ done" << std::endl;
   });
 
   BuildProfilerSubmodule(&m);

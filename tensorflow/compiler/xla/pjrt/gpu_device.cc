@@ -528,9 +528,9 @@ Status InitNcclCommunicators(
     gpu::NcclCliqueCache().GetOrTryCreateIfAbsent(
       key, [&](const gpu::NcclCliqueKey &key_){
         std::cerr << "Create: " << key_.ToString() << std::endl;
-        for (auto x : local_participants) {
-          std::cerr << "local device: " << x.device_ordinal << " " << x.rank << std::endl;
-        }
+        //for (auto x : local_participants) {
+        //  std::cerr << "local device: " << x.device_ordinal << " " << x.rank << std::endl;
+        //}
         return gpu::CreateNcclClique(key_, local_participants, &callback);
     });
   }

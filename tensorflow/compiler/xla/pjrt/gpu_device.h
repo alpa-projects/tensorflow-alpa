@@ -59,6 +59,13 @@ StatusOr<std::unique_ptr<PjRtClient>> GetGpuClient(
     bool asynchronous, const GpuAllocatorConfig& allocator_config,
     std::shared_ptr<DistributedRuntimeClient> distributed_client, int node_id);
 
+// Initialize nccl communicators for given communication groups.
+Status InitNcclCommunicators(
+  std::shared_ptr<DistributedRuntimeClient> distributed_client,
+  int node_id,
+  const std::vector<int>& device_to_node,
+  const std::vector<std::vector<GlobalDeviceId>> communication_groups);
+
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_PJRT_GPU_DEVICE_H_

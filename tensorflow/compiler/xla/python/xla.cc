@@ -328,10 +328,10 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("dlpack_managed_tensor_to_buffer", DLPackManagedTensorToBuffer);
 
   m.def("init_nccl_communicators", [](
-      int node_id,
-      PyClient* py_client,
+      const PyClient* py_client,
       std::shared_ptr<DistributedRuntimeClient> distributed_client,
-      PyExecutable* py_executable) {
+      int node_id,
+      const HloModule& module) {
     absl::Span<PjRtDevice* const> devices = py_client->pjrt_client()->devices();
     std::vector<int> device_to_node;
     device_to_node.reserve(devices.size());
@@ -339,17 +339,11 @@ PYBIND11_MODULE(xla_extension, m) {
       device_to_node.push_back(device->process_index());
     }
 
-    TF_ASSIGN_OR_RETURN(std::vector<std::shared_ptr<HloModule>> hlo_modules,
-                        py_executable->pjrt_executable().GetHloModules());
+    std::vector<std::vector<GlobalDeviceId>> communication_groups =
+      GetCommunicationGroups(&module);
 
-    for (const auto& hlo_module : hlo_modules) {
-      std::vector<std::vector<GlobalDeviceId>> communication_groups =
-        GetCommunicationGroups(hlo_module.get());
-
-      //TF_RETURN_IF_ERROR(InitNcclCommunicators(
-      //  std::move(distributed_client), node_id, device_to_node, communication_groups));
-    }
-    std::cerr << "c++ done" << std::endl;
+    TF_RETURN_IF_ERROR(InitNcclCommunicators(
+      std::move(distributed_client), node_id, device_to_node, communication_groups));
   });
 
   BuildProfilerSubmodule(&m);

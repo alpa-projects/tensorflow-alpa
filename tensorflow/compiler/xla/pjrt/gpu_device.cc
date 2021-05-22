@@ -527,7 +527,7 @@ Status InitNcclCommunicators(
     gpu::NcclCliqueKey key(group);
     gpu::NcclCliqueCache().GetOrTryCreateIfAbsent(
       key, [&](const gpu::NcclCliqueKey &key_){
-        return gpu::CreateNcclClique(key_, local_participants, nullptr);
+        return gpu::CreateNcclClique(key_, local_participants, callback);
     });
   }
 

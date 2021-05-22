@@ -317,8 +317,6 @@ std::vector<std::vector<GlobalDeviceId>> GetCommunicationGroups(
   const HloModule* hlo_module) {
   std::vector<std::vector<GlobalDeviceId>> groups;
 
-  std::cerr << hlo_module->ToString();
-
   for (HloComputation* computation : hlo_module->computations()) {
     for (HloInstruction* instruction : computation->MakeInstructionPostOrder()) {
       auto coll = DynCast<HloCollectiveInstruction>(instruction);

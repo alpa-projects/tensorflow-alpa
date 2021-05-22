@@ -2063,10 +2063,10 @@ PjRtStreamExecutorExecutable::Execute(
         num_partitions());
   }
 
-  VLOG(1) << "Executing computation " << name()
+  std::cerr << "Executing computation " << name()
           << "; num_replicas=" << num_replicas()
           << " num_partitions=" << num_partitions()
-          << " num_addressable_devices=" << num_addressable_devices;
+          << " num_addressable_devices=" << num_addressable_devices << std::endl;
   std::vector<StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>>> results(
       num_addressable_devices);
   if (num_addressable_devices == 1) {

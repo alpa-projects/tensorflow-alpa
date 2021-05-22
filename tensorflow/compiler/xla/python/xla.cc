@@ -331,7 +331,7 @@ PYBIND11_MODULE(xla_extension, m) {
       int node_id,
       std::shared_ptr<PyClient> py_client,
       std::shared_ptr<DistributedRuntimeClient> distributed_client,
-      std::shared_ptr<PyExecutable> py_executable) {
+      PyExecutable* py_executable) {
     absl::Span<PjRtDevice* const> devices = py_client->pjrt_client()->devices();
     std::vector<int> device_to_node;
     device_to_node.reserve(devices.size());
@@ -346,15 +346,8 @@ PYBIND11_MODULE(xla_extension, m) {
       std::vector<std::vector<GlobalDeviceId>> communication_groups =
         GetCommunicationGroups(hlo_module.get());
 
-      //for (size_t i = 0; i < communication_groups.size(); ++i) {
-      //  for (size_t j = 0; j < communication_groups[i].size(); ++j) {
-      //    std::cerr << communication_groups[i][j] << " ";
-      //  }
-      //  std::cerr << std::endl;
-      //}
-
-      InitNcclCommunicators(
-        distributed_client, node_id, device_to_node, communication_groups);
+      TF_RETURN_IF_ERROR(InitNcclCommunicators(
+        distributed_client, node_id, device_to_node, communication_groups));
     }
   });
 

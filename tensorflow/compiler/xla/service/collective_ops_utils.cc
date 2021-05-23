@@ -313,4 +313,30 @@ StatusOr<std::vector<GlobalDeviceId>> GetParticipatingDevices(
   }
 }
 
+std::vector<std::vector<GlobalDeviceId>> GetCommunicationGroups(
+  const HloModule* hlo_module) {
+  std::vector<std::vector<GlobalDeviceId>> groups;
+
+  for (HloComputation* computation : hlo_module->computations()) {
+    for (HloInstruction* instruction : computation->MakeInstructionPostOrder()) {
+      auto coll = DynCast<HloCollectiveInstruction>(instruction);
+      if (!coll) {
+        continue;
+      }
+      for (const auto& group : coll->replica_groups()) {
+        std::vector<GlobalDeviceId> device_ids;
+        if (group.replica_ids().size() <= 1) {
+          continue;
+        }
+        for (int64 device_id : group.replica_ids()) {
+          device_ids.push_back(GlobalDeviceId(device_id));
+        }
+        groups.push_back(std::move(device_ids));
+      }
+    }
+  }
+
+  return groups;
+}
+
 }  // end namespace xla

@@ -322,6 +322,7 @@ cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "//tensorflow/compiler/xla/service/gpu:gpu_executable_run_options",
+        "//tensorflow/compiler/xla/service/gpu:nccl_utils",
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla/client:client_library",
         "//tensorflow/compiler/xla/pjrt/distributed:client",

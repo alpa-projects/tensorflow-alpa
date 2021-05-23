@@ -912,10 +912,9 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kIota: {
-        // Manual means this op will be sharded by sharding propagation.
-        HloSharding output_spec = HloSharding::Manual();
+        HloSharding output_spec = Undefined();
         strategies.push_back(
-          ShardingStrategy({"manual", output_spec, 0, 0, 0, {}}));
+          ShardingStrategy({"undefined", output_spec, 0, 0, 0, {}}));
         break;
       }
       default:
@@ -1652,7 +1651,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       int ins_idx = ins_id_map[inst];
       int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
       const HloSharding& sharding_spec = iter->second[stra_idx].output_sharding;
-      if (sharding_spec.IsManual()) {
+      if (IsUndefined(sharding_spec)) {
         continue;
       }
       inst->set_sharding(sharding_spec);

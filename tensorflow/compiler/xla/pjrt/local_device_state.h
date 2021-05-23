@@ -161,9 +161,9 @@ class LocalDeviceState {
   // Returns a fresh, PRNG-generated random seed for an XLA computation.
   int GetNewPrngSeed();
 
- private:
   Status SynchronizeAllActivity();
 
+ private:
   AllocationModel allocation_model_;
 
   EventPool event_pool_;

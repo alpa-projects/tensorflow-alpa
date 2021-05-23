@@ -130,6 +130,15 @@ PYBIND11_MODULE(xla_extension, m) {
           "client",
           [](const ClientAndPtr<PjRtDevice>& device) { return device.client; })
       .def("__str__", &PjRtDevice::DebugString)
+      .def("synchronize_all_activity", [](PjRtDevice& device) {
+             PjRtStreamExecutorDevice* stream_device =
+               dynamic_cast<PjRtStreamExecutorDevice*>(&device);
+             CHECK_NE(stream_device, nullptr);
+             TF_ASSIGN_OR_RETURN(LocalDeviceState* local_device,
+                                 stream_device->GetLocalDeviceState());
+             local_device->SynchronizeAllActivity();
+             return Status::OK();
+           })
       .def("transfer_to_infeed",
            [](PjRtDevice& device, const LiteralSlice& literal) {
              GlobalPyRefManager()->CollectGarbage();

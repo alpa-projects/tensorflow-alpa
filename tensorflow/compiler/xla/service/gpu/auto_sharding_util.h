@@ -141,6 +141,18 @@ std::string SimpleToString(const HloSharding& spec) {
   return ToString(spec.tile_assignment().dimensions());
 }
 
+// We reuse "Manual" to represent "Undefined" sharding strategy.
+// If an op has an"Undefined" strategy, it means auto-sharding pass does not
+// decide the sharding strategy for this op. 
+// We rely on the later sharding propagation pass to assign strategies to them.
+HloSharding Undefined() {
+  return HloSharding::Manual();
+}
+
+bool IsUndefined(const HloSharding& hlo_sharding) {
+  return hlo_sharding.IsManual();
+}
+
 // Propagate sharding for broadcast.
 // The output will be tiled along the broadcasted dimension the same way
 // as the input for the broadcast while the other dimensions are kept

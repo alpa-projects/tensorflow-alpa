@@ -172,6 +172,54 @@ std::string LocalParticipantsToString(
   return absl::StrJoin(parts, ",");
 }
 
+struct NcclCliqueParticipantData : public ParticipantData {
+  using ParticipantData::ParticipantData;
+  std::string ToString() const override { return ""; }
+};
+
+class NcclCliqueRendezvous
+    : public Rendezvous<NcclCliqueParticipantData, LockedNcclClique> {
+ public:
+  NcclCliqueRendezvous(const RendezvousKey& rendezvous_key,
+                       const std::vector<LocalParticipant>& local_participants,
+                       const NcclUniqueIdCallback* callback)
+      : Rendezvous(rendezvous_key),
+        key_(std::move(rendezvous_key.global_devices)),
+        local_participants_(local_participants),
+        callback_(callback),
+        counter_(nullptr) {}
+
+  StatusOr<LockedNcclClique> RunCollectiveOp(
+      const NcclCliqueParticipantData&) override {
+    tensorflow::mutex_lock lock(mu_);
+    bool primary = !initialized_;
+    if (primary) {
+      maybe_clique_ = NcclCliqueCache().GetOrTryCreateIfAbsent(
+          key_, [&](const NcclCliqueKey& key) {
+            return CreateNcclClique(key, local_participants_, callback_);
+          });
+      initialized_ = true;
+    }
+    TF_ASSIGN_OR_RETURN(NcclClique * clique, maybe_clique_);
+    std::unique_ptr<absl::MutexLock> clique_lock;
+    if (primary) {
+      clique_lock = std::make_unique<absl::MutexLock>(clique->mu());
+      counter_ = new absl::BlockingCounter(local_participants_.size());
+    }
+    return LockedNcclClique(*clique, std::move(clique_lock), counter_);
+  }
+
+ private:
+  NcclCliqueKey key_;
+  const std::vector<LocalParticipant>& local_participants_;
+  const NcclUniqueIdCallback* callback_;
+
+  StatusOr<NcclClique*> maybe_clique_;
+  absl::BlockingCounter* counter_;
+};
+
+}  // namespace
+
 StatusOr<std::unique_ptr<NcclClique>> CreateNcclClique(
     const NcclCliqueKey& key,
     const std::vector<LocalParticipant>& local_participants,
@@ -303,8 +351,6 @@ class NcclCliqueRendezvous
   StatusOr<NcclClique*> maybe_clique_;
   absl::BlockingCounter* counter_;
 };
-
-}  // namespace
 
 StatusOr<std::vector<LocalParticipant>> GetLocalParticipants(
     const std::vector<GlobalDeviceId>& participants,

@@ -150,6 +150,11 @@ class NcclCliqueMap {
 
 NcclCliqueMap& NcclCliqueCache();
 
+StatusOr<std::unique_ptr<NcclClique>> CreateNcclClique(
+    const NcclCliqueKey& key,
+    const std::vector<LocalParticipant>& local_participants,
+    const NcclUniqueIdCallback* callback);
+
 // Acquires a locked NCCL clique for use in NCCL collective operations.
 StatusOr<LockedNcclClique> AcquireNcclClique(
     const RendezvousKey& rendezvous_key, int local_device_ordinal,

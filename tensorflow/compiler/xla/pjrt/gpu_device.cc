@@ -31,6 +31,7 @@ limitations under the License.
 #endif  // NCCL_ENABLED
 #include "tensorflow/compiler/xla/client/client_library.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_executable_run_options.h"
+#include "tensorflow/compiler/xla/service/gpu/nccl_utils.h"
 #include "tensorflow/compiler/xla/service/platform_util.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/util.h"
@@ -494,6 +495,44 @@ StatusOr<std::unique_ptr<PjRtClient>> GetGpuClient(
       std::move(host_memory_allocator),
       /*should_stage_host_to_device_transfers=*/true,
       /*gpu_run_options=*/std::move(gpu_run_options)));
+}
+
+Status InitNcclCommunicators(
+  std::shared_ptr<DistributedRuntimeClient> distributed_client,
+  int node_id,
+  const std::vector<int>& device_to_node,
+  const std::vector<std::vector<GlobalDeviceId>> communication_groups) {
+
+  absl::flat_hash_map<GlobalDeviceId, int> device_to_node_map;
+  std::vector<GlobalDeviceId> local_devices;
+
+  for (size_t device_id = 0; device_id < device_to_node.size(); ++device_id) {
+    device_to_node_map[GlobalDeviceId(device_id)] = device_to_node[device_id];
+    if (device_to_node[device_id] == node_id) {
+      local_devices.push_back(GlobalDeviceId(device_id));
+    }
+  }
+
+  auto nccl_id_store = std::make_shared<NcclIdStore>(
+      node_id, distributed_client, device_to_node_map);
+  gpu::NcclUniqueIdCallback callback = [nccl_id_store](
+    const gpu::NcclCliqueKey& key) {
+      return nccl_id_store->GetNcclUniqueId(key);
+  };
+
+  for (const auto& group : communication_groups) {
+    TF_ASSIGN_OR_RETURN(
+      std::vector<gpu::LocalParticipant> local_participants,
+      gpu::GetLocalParticipants(group, &local_devices));
+    gpu::NcclCliqueKey key(group);
+    TF_ASSIGN_OR_RETURN(gpu::NcclClique* clique,
+      gpu::NcclCliqueCache().GetOrTryCreateIfAbsent(
+        key, [&](const gpu::NcclCliqueKey &key_){
+          return gpu::CreateNcclClique(key_, local_participants, &callback);
+    }));
+  }
+
+  return Status::OK();
 }
 
 }  // namespace xla

@@ -151,6 +151,7 @@ Status GpuExecutable::ExecuteThunks(
     LOG(WARNING) << "PROFILING: profiling is enabled";
   }
 
+  // TODO: use run_options->run_options().host_to_device_stream() etc. 
   // Stream 0 indicates `main_stream` and substreams start from stream 1.
   std::vector<StreamPool::Ptr> sub_streams;
   sub_streams.reserve(thunk_schedule_->StreamCount() - 1);
@@ -222,7 +223,9 @@ Status GpuExecutable::ExecuteThunks(
         gpu_options && gpu_options->nccl_unique_id_callback()
             ? &gpu_options->nccl_unique_id_callback()
             : nullptr};
+    LOG(WARNING) << "start execute on stream " << stream_no;
     TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(thunk_params));
+    LOG(WARNING) << "success here";
     if (thunk_schedule_->Depended(thunk.get())) {
       auto finish_event = absl::make_unique<se::Event>(main_stream->parent());
       finish_event->Init();

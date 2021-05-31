@@ -425,16 +425,16 @@ cc_library(
 
 cc_library(
     name = "pjrt_gpu_swap", 
-    srcs = ["swap.cu.cc"], 
+    srcs = ["swap.cc"], 
     hdrs = ["swap.h"], 
     defines = if_cuda(["GOOGLE_CUDA=1"]),
     deps = [
-        "//tensorflow/compiler/xla/service:custom_call_target_registry",
-        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:custom_call_target_registry", 
+        "//tensorflow/compiler/xla/service:executable", 
+        "//tensorflow/compiler/xla:shape_util", 
+        "//tensorflow/compiler/xla:types", 
         "@com_google_absl//absl/container:flat_hash_map",
-    ]  + if_cuda([
-        "@local_config_cuda//cuda:cuda_headers",
-    ])
+    ]
 )
 
 tf_cc_test(

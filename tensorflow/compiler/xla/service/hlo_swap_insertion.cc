@@ -46,7 +46,7 @@ using ::tensorflow::strings::HumanReadableNumBytes;
 using BufferId = int64;
 using BufferIdList = absl::InlinedVector<BufferId, 3>;
 
-Shape keyShape = ShapeUtil::MakeShape(S64, {});
+static const Shape keyShape = ShapeUtil::MakeShape(S64, {});
 
 class Item{
 private: 
@@ -55,7 +55,7 @@ private:
 public: 
   HloInstruction *instruction;
   BufferIdList buffers_defined, buffers_output, buffers_used;
-  // the order of this instruction for all not-swap instructions
+  // the order of this computation for all not-swap instructions
   int64 position;
   bool isSwap = false;
 
@@ -340,23 +340,23 @@ class MemoryRecorder {
             instruction_list.addEdge(lastUseInst, item);
           } else {
             // add the swap out to CPU instruction
-            Item *swapOutItem = new Item;
-            swapOutItem->isSwap = true;
-            swapOutItem->instruction = computation_->AddInstruction(
+            Item *swapOut = new Item;
+            swapOut->isSwap = true;
+            swapOut->instruction = computation_->AddInstruction(
               HloInstruction::CreateCustomCall(keyShape, 
-                {toReleaseBuffer.defining_instruction->instruction}, "GPUSwapOut", 
-                /*opaque=*/toReleaseBuffer.shape.SerializeAsString()));
-            VLOG(3) << "\tcreate swap out for buffer: " 
-              << toReleaseBid;
-            registerRelease(swapOutItem, toReleaseBid, rest_size > 0 ? 0 : -rest_size);
+                {toReleaseBuffer.defining_instruction->instruction}, "__builtin$SwapOut", 
+                /*opaque=*/std::to_string(swap_key_++)));
+            Cast<HloCustomCallInstruction>(swapOut->instruction)->set_custom_call_has_side_effect(true);
+            VLOG(3) << "\tcreate swap out for buffer: " << toReleaseBid;
+            registerRelease(swapOut, toReleaseBid, rest_size > 0 ? 0 : -rest_size);
             // add control flow edge from its producer to the swap instruction
-            instruction_list.addEdge(toRelease.second, swapOutItem);
+            instruction_list.addEdge(toRelease.second, swapOut);
             Item *lastUseItem = last_use_inst.at(toReleaseBid);
-            if (lastUseItem != nullptr) instruction_list.addEdge(lastUseItem, swapOutItem); // todo: instead, make Item* in released_after an inlined buffer<Item *> and add this to the buffer
-            last_use_inst.at(toReleaseBid) = swapOutItem;
+            if (lastUseItem != nullptr) instruction_list.addEdge(lastUseItem, swapOut); // todo: instead, make Item* in released_after an inlined buffer<Item *> and add this to the buffer
+            last_use_inst.at(toReleaseBid) = swapOut;
 
-            instruction_list.addEdge(swapOutItem, item);
-            swap_out_inst[toReleaseBid] = swapOutItem;
+            instruction_list.addEdge(swapOut, item);
+            swap_out_inst[toReleaseBid] = swapOut;
           }
         }
         memory_usage_ -= size;
@@ -436,6 +436,7 @@ class MemoryRecorder {
   const HloSwapInsertion::ShapeSizeFunction& size_function_;
   // last_use_inst is assigned only after swap out is assigned
   std::vector<Item *> swap_out_inst, last_use_inst;
+  int64 swap_key_ = 0;
   Item *preparing_for = nullptr;
   int64 memory_bound_;
   int64 free_memory, memory_usage_;
@@ -466,7 +467,7 @@ MemoryRecorder::MemoryRecorder(
       Buffer *buffer;
       // TODO: work on the while later
       if (instruction->opcode() == HloOpcode::kWhile) {
-        LOG(WARNING) << "while is ignored as not implemented now";
+        CHECK(false) << "while is ignored as not implemented now";
       //   // The while instruction defines no new buffers. Instead it reuses the
       //   // buffers of its operand. Find the Buffer of its operand at the
       //   // proper ShapeIndex.
@@ -570,7 +571,9 @@ Status MemoryRecorder::PrepareForInstruction(Item *item) {
     swapIn->isSwap = true;
     swapIn->instruction = computation_->AddInstruction(
       HloInstruction::CreateCustomCall(buffer.shape, 
-        {swapOut->instruction}, "GPUSwapIn", /*opaque=*/buffer.shape.SerializeAsString()));
+        {swapOut->instruction}, "__builtin$SwapIn", 
+        /*opaque=*/Cast<HloCustomCallInstruction>(swapOut->instruction)->opaque()));
+    Cast<HloCustomCallInstruction>(swapIn->instruction)->set_custom_call_has_side_effect(true);
     VLOG(3) << "\tcreate swap in for buffer: " << bid;
     // if already discarded, swap in after discarded
     Item *lastUse = last_use_inst.at(bid);

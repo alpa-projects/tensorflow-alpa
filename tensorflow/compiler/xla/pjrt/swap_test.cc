@@ -11,7 +11,7 @@
 namespace xla{
 namespace{
 
-TEST(GpuSwap, Basics) {
+TEST(GpuSwap, Thunks) {
   TF_ASSERT_OK_AND_ASSIGN(
       std::unique_ptr<PjRtClient> client,
       GetGpuClient(/*asynchronous=*/true, GpuAllocatorConfig(),
@@ -25,8 +25,9 @@ TEST(GpuSwap, Basics) {
 
   XlaBuilder builder("acomputation");
   auto p0 = Parameter(&builder, 0, shape, "param");
-  auto swap_out = CustomCall(&builder, "GPUSwapOut", {p0}, keyShape, /*opaque=*/shape.SerializeAsString());
-  auto swap_in = CustomCall(&builder, "GPUSwapIn", {swap_out}, shape, shape.SerializeAsString());
+  int64 key = 10;
+  auto swap_out = CustomCall(&builder, "__builtin$SwapOut", {p0}, keyShape, /*opaque=*/std::to_string(key));
+  auto swap_in = CustomCall(&builder, "__builtin$SwapIn", {swap_out}, shape, std::to_string(key));
   TF_ASSERT_OK_AND_ASSIGN(XlaComputation computation, builder.Build());
 
   CompileOptions compile_options;
@@ -39,7 +40,6 @@ TEST(GpuSwap, Basics) {
   TF_ASSERT_OK_AND_ASSIGN(
       std::unique_ptr<PjRtExecutable> executable,
       client->Compile(computation, std::move(compile_options)));
-  // compiler ends. 
   // start execution
     // prepare
   std::vector<int32> inputs(n);

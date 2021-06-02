@@ -918,7 +918,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kCustomCall: {
-        if (ins.IsCustomCall("xla_pipeline_marker")) {
+        if (ins->IsCustomCall("xla_pipeline_marker")) {
           const HloInstruction* operand = ins->operand(0);
           follow_map[ins] = operand;
           const std::vector<ShardingStrategy>& src_strategies = strategy_map.at(operand);

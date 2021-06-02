@@ -917,6 +917,28 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           ShardingStrategy({"undefined", output_spec, 0, 0, 0, {}}));
         break;
       }
+      case HloOpcode::kGetTupleElement: {
+        const HloInstruction* operand = ins->operand(0);
+        follow_map[ins] = operand;
+        const std::vector<ShardingStrategy>& src_strategies = strategy_map.at(operand);
+        for (int64 sid = 0; sid < src_strategies.size(); ++sid) {
+          HloSharding output_spec = src_strategies[sid].output_sharding.GetSubSharding(
+              operand->shape(), {instruction->tuple_index()});
+
+          std::string name = SimpleToString(output_spec);
+          double compute_cost = 0;
+          double communication_cost = 0;
+          double memory_cost = 0;
+          std::vector<std::vector<double>> resharding_costs = {
+            FollowInsCostVector(src_strategies.size(), sid)};
+
+          strategies.push_back(
+            ShardingStrategy({name, output_spec,
+                              compute_cost, communication_cost, memory_cost,
+                              resharding_costs}));
+        }
+        break;
+      }
       case HloOpcode::kCustomCall: {
         if (ins->IsCustomCall("xla_pipeline_marker")) {
           const HloInstruction* operand = ins->operand(0);

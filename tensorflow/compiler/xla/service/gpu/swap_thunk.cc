@@ -17,7 +17,7 @@ SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
                           std::vector<int64> byte_sizes, 
                           int64 key
                           )
-    : Thunk(Thunk::kCopy, thunk_info),  // todo: kCopy? kSwap? 
+    : Thunk(Thunk::kSwapOut, thunk_info),  // todo: kCopy? kSwap? 
       operands_(std::move(operands)),
       result_(std::move(result)),
       byte_sizes_(std::move(byte_sizes)), 
@@ -53,7 +53,6 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   TF_ASSIGN_OR_RETURN(const DeviceAssignment::LogicalID logical_id,
                       params.device_assn->LogicalIdForDevice(global_device_id));
   int partitionId = logical_id.computation_id;
-  LOG(WARNING) << "inside the thunk";
 
   auto host_memory_ref = local_host_memory_table().GetOrCreate(executable_key_, key_);
   if (host_memory_ref->empty()) {
@@ -92,7 +91,7 @@ SwapInThunk::SwapInThunk(ThunkInfo thunk_info,
                         std::vector<BufferAllocation::Slice> results,
                         std::vector<int64> byte_sizes, 
                         int64 key)
-    : Thunk(Thunk::kCopy, thunk_info),  // todo: kCopy? kSwap?
+    : Thunk(Thunk::kSwapIn, thunk_info),  // todo: kCopy? kSwap?
       operand_(std::move(operand)),
       results_(std::move(results)),
       byte_sizes_(std::move(byte_sizes)), 

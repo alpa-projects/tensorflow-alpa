@@ -27,6 +27,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/gpu_executable_run_options.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_types.h"
 #include "tensorflow/compiler/xla/service/gpu/hlo_execution_profiler.h"
+#include "tensorflow/compiler/xla/service/gpu/swap_thunk.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/buffer_assignment_util.h"
 #include "tensorflow/compiler/xla/service/logical_buffer.h"
@@ -155,6 +156,11 @@ Status GpuExecutable::ExecuteThunks(
     // execute before the program is scheduled to start on the main stream.
     sub_streams.back()->ThenWaitFor(main_stream);
   }
+  const int sub_stream_size = sub_streams.size();
+  se::Stream* host_to_device_stream = 
+    run_options->run_options().host_to_device_stream();
+  se::Stream* device_to_host_stream = 
+    run_options->run_options().device_to_host_stream();
 
   HloExecutionProfiler profiler(do_profile, hlo_execution_profile, main_stream,
                                 sub_streams, entry_computation_profile_index_);
@@ -174,7 +180,13 @@ Status GpuExecutable::ExecuteThunks(
     ScopedAnnotation annotation([&] { return thunk->profile_annotation(); });
 
     int32 stream_no = thunk_schedule_->StreamNumberForThunk(thunk.get());
-    se::Stream* stream =
+    se::Stream* stream;
+    if (thunk->kind() == Thunk::kSwapIn) 
+      stream = host_to_device_stream;
+    else if (thunk->kind() == Thunk::kSwapOut) 
+      stream = device_to_host_stream;
+    else 
+    stream =
         (stream_no == 0 ? main_stream : sub_streams[stream_no - 1].get());
 
     for (const Thunk* dependency : thunk_schedule_->DependsOn(thunk.get())) {
@@ -198,9 +210,7 @@ Status GpuExecutable::ExecuteThunks(
         gpu_options && gpu_options->nccl_unique_id_callback()
             ? &gpu_options->nccl_unique_id_callback()
             : nullptr};
-    LOG(WARNING) << "start execute on stream " << stream_no;
     TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(thunk_params));
-    LOG(WARNING) << "success here";
     if (thunk_schedule_->Depended(thunk.get())) {
       auto finish_event = absl::make_unique<se::Event>(main_stream->parent());
       finish_event->Init();

@@ -1832,6 +1832,7 @@ StatusOr<ScopedShapedBuffer> PjRtStreamExecutorExecutable::EnqueueExecution(
   ExecutableRunOptions run_options;
   run_options.set_stream(device_state->compute_stream());
   run_options.set_host_to_device_stream(device_state->host_to_device_stream());
+  run_options.set_device_to_host_stream(device_state->GetDeviceToHostStream());
   run_options.set_allocator(client_->allocator());
   run_options.set_intra_op_thread_pool(
       client_->client()->backend().eigen_intra_op_thread_pool_device());

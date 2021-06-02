@@ -382,7 +382,7 @@ std::vector<double> ReshardingCostVector(const std::vector<ShardingStrategy>& st
   return ret;
 }
 
-std::vector<double> FollowInsCostVecotr(int64 source_len, int64 index) {
+std::vector<double> FollowInsCostVector(int64 source_len, int64 index) {
   std::vector<double> ret(source_len, INFINITY_COST);
   ret[index] = 0;
   return ret;
@@ -455,7 +455,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           strategies.push_back(
             ShardingStrategy({name, output_spec,
                               compute_cost, communication_cost, memory_cost,
-                              {FollowInsCostVecotr(src_strategies.size(), sid)}}));
+                              {FollowInsCostVector(src_strategies.size(), sid)}}));
         }
 
         // If the operand is a constant, do not follow it.
@@ -464,7 +464,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           follow_map.erase(ins);
           strategies.clear();
 
-          // Split one dim 
+          // Split one dim
           for (int64 i = 0; i < ins->shape().rank(); ++i) {
             for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
               if (device_mesh.dim(j) == 1 ||
@@ -515,7 +515,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           strategies.push_back(
             ShardingStrategy({name, *output_spec,
                               compute_cost, communication_cost, memory_cost,
-                              {FollowInsCostVecotr(src_strategies.size(), sid)}}));
+                              {FollowInsCostVector(src_strategies.size(), sid)}}));
         }
         break;
       }
@@ -536,7 +536,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           strategies.push_back(
             ShardingStrategy({name, output_spec,
                               compute_cost, communication_cost, memory_cost,
-                              {FollowInsCostVecotr(src_strategies.size(), sid)}}));
+                              {FollowInsCostVector(src_strategies.size(), sid)}}));
         }
         break;
       }
@@ -565,7 +565,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           double memory_cost = GetBytes(ins->shape()) / output_spec->NumTiles();
           std::vector<std::vector<double>> resharding_costs;
           resharding_costs.push_back(
-            FollowInsCostVecotr(src_strategies.size(), sid));
+            FollowInsCostVector(src_strategies.size(), sid));
           for (int64 k = 1; k < ins->operand_count(); ++k) {
             resharding_costs.push_back(
               ReshardingCostVector(strategy_map[ins->operand(k)],
@@ -650,7 +650,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           for (int64 k = 0; k < ins->operand_count(); ++k) {
             if (k == follow_idx) {
               resharding_costs.push_back(
-                FollowInsCostVecotr(src_strategies.size(), sid));
+                FollowInsCostVector(src_strategies.size(), sid));
             } else {
               resharding_costs.push_back(
                 ReshardingCostVector(strategy_map[ins->operand(k)],
@@ -728,7 +728,7 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
           strategies.push_back(
             ShardingStrategy({name, output_spec,
                               compute_cost, communication_cost, memory_cost,
-                              {FollowInsCostVecotr(src_strategies.size(), sid),
+                              {FollowInsCostVector(src_strategies.size(), sid),
                                ReshardingCostVector(strategy_map[unit], unit->shape(),
                                  HloSharding::Replicate(), cluster_env)
                               }}));
@@ -915,6 +915,33 @@ std::pair<StrategyMap, FollowMap> BuildStrategyAndCost(
         HloSharding output_spec = Undefined();
         strategies.push_back(
           ShardingStrategy({"undefined", output_spec, 0, 0, 0, {}}));
+        break;
+      }
+      case HloOpcode::kCustomCall: {
+        if (ins.IsCustomCall("xla_pipeline_marker")) {
+          const HloInstruction* operand = ins->operand(0);
+          follow_map[ins] = operand;
+          const std::vector<ShardingStrategy>& src_strategies = strategy_map.at(operand);
+
+          for (int64 sid = 0; sid < src_strategies.size(); ++sid) {
+            HloSharding output_spec = src_strategies[sid].output_sharding;
+
+            std::string name = SimpleToString(output_spec);
+            double compute_cost = 0;
+            double communication_cost = 0;
+            // TODO (zhuohan): The memory cost of the marker should eventually be 0.
+            double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+            std::vector<std::vector<double>> resharding_costs = {
+              FollowInsCostVector(src_strategies.size(), sid)};
+
+            strategies.push_back(
+              ShardingStrategy({name, output_spec,
+                                compute_cost, communication_cost, memory_cost,
+                                resharding_costs}));
+          }
+        } else {
+          LOG(FATAL) << "Unknown CustomCall instruction: " + ins->name();
+        }
         break;
       }
       default:
@@ -1618,7 +1645,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     sequence, ins_depth_map, cluster_env, solver_option);
   AliasSet alias_set = BuildAliasSet(module, alias_analysis->dataflow_analysis(), ins_id_map);
   //std::cerr << PrintStrategyMap(strategy_map, sequence);
- 
+
   // ----- Build cost graph and merge unimporant nodes -----
   CostGraph cost_graph(sequence, strategy_map, follow_map, ins_id_map);
   cost_graph.Simplify();

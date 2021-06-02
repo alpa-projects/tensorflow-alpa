@@ -27,6 +27,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/gpu_executable_run_options.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_types.h"
 #include "tensorflow/compiler/xla/service/gpu/hlo_execution_profiler.h"
+#include "tensorflow/compiler/xla/service/gpu/swap_thunk.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/buffer_assignment_util.h"
 #include "tensorflow/compiler/xla/service/logical_buffer.h"
@@ -223,9 +224,7 @@ Status GpuExecutable::ExecuteThunks(
         gpu_options && gpu_options->nccl_unique_id_callback()
             ? &gpu_options->nccl_unique_id_callback()
             : nullptr};
-    LOG(WARNING) << "start execute on stream " << stream_no;
     TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(thunk_params));
-    LOG(WARNING) << "success here";
     if (thunk_schedule_->Depended(thunk.get())) {
       auto finish_event = absl::make_unique<se::Event>(main_stream->parent());
       finish_event->Init();

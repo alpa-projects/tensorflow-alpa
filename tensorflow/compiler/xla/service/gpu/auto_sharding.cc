@@ -408,11 +408,11 @@ std::vector<double> FollowInsCostVector(int64 source_len, int64 index) {
 std::unique_ptr<StrategyVector> FollowInsStrategyVector(
     const std::unique_ptr<StrategyVector>& src_strategies_ptr,
     const Shape& shape,
-    size_t instruction_id;
+    size_t instruction_id,
     bool have_memory_cost,
     LeafStrategies &leaf_strategies) {
   const StrategyVector &src_strategies = *src_strategies_ptr;
-  std::unique_ptr<StrategyVector> strategies_ptr = make_unique<StrategyVector>();
+  std::unique_ptr<StrategyVector> strategies_ptr = absl::make_unique<StrategyVector>();
   StrategyVector &strategies = *strategies_ptr;
   strategies.instruction_id = instruction_id;
   if (src_strategies.is_tuple) {
@@ -471,7 +471,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
     std::unique_ptr<StrategyVector> strategies_ptr;
     switch (ins->opcode()) {
       case HloOpcode::kParameter: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -504,7 +504,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kConstant: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -516,7 +516,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kBroadcast: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -579,7 +579,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kReshape: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -615,7 +615,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kTranspose: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -650,7 +650,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kDynamicSlice:
       case HloOpcode::kConcatenate: // TODO: revisit
       case HloOpcode::kDynamicUpdateSlice: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -743,7 +743,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       // Ternary elementwise operations.
       case HloOpcode::kSelect:
       case HloOpcode::kClamp: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -792,7 +792,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kReduce: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -879,7 +879,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kDot: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -1042,7 +1042,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kTuple: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = true;
         strategies.id = -1;
@@ -1060,7 +1060,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kRngGetAndUpdateState: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());
@@ -1072,7 +1072,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         break;
       }
       case HloOpcode::kIota: {
-        strategies_ptr = std::make_unique<StrategyVector>();
+        strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
         AddLeafStrategies(leaf_strategies, strategies_ptr.get());

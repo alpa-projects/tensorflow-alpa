@@ -1703,6 +1703,8 @@ std::string PrintStrategyMap(
   return os.str();
 }
 
+// TODO (zhuohan): make prints work again
+/* 
 // Print auto sharding strategy for debugging
 std::string PrintAutoShardingSolution(
   const HloInstructionSequence& sequence,
@@ -1746,6 +1748,7 @@ std::string PrintAutoShardingSolution(
 
   return os.str();
 }
+*/
 
 StatusOr<bool> AutoSharding::Run(HloModule* module) {
   if (!pass_context::GetBool("auto_sharding::enable", false)) {
@@ -1813,64 +1816,76 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   // ----- Build strategies and costs -----
   StrategyMap strategy_map;
-  strategy_map = BuildStrategyAndCost(
+  LeafStrategies leaf_strategies;
+  std::tie(strategy_map, leaf_strategies) = BuildStrategyAndCost(
     sequence, ins_depth_map, cluster_env, solver_option);
-  AliasSet alias_set = BuildAliasSet(module, alias_analysis->dataflow_analysis());
+  AliasSet alias_set = BuildAliasSet(module, alias_analysis->dataflow_analysis(), strategy_map);
   //std::cerr << PrintStrategyMap(strategy_map, sequence);
 
   // ----- Build cost graph and merge unimporant nodes -----
-  CostGraph cost_graph(sequence, strategy_map);
+  CostGraph cost_graph(leaf_strategies);
   cost_graph.Simplify();
 
   // ----- Call the ILP Solver -----
   std::vector<int64> s_val, e_val;
   if (!solver_option.load_strategy) {
-    std::tie(s_val, e_val) = CallSolver(module, sequence, liveness_set,
-                                        strategy_map, cost_graph, alias_set);
+    std::tie(s_val, e_val) = CallSolver(sequence, liveness_set, strategy_map, 
+                                        leaf_strategies, cost_graph, alias_set);
   } else {
     s_val = pass_context::GetIntVector("auto_sharding::strategy_vector");
   }
+
+  // TODO (zhuohan): make prints work again
+  /*
   if (pass_context::GetBool("auto_sharding::print_strategy", false)) {
     std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
                                            cost_graph, s_val, e_val);
   }
+  */
 
   // ----- Set Sharding -----
   HloComputation* entry = module->entry_computation();
-  HloInstruction* root_inst = entry->root_instruction();
 
-  // Set sharding for inputs and intermdiates
   for (HloInstruction* inst : entry->instructions()) {
-    if (inst == root_inst) {
-      continue;
-    }
-
     auto iter = strategy_map.find(inst);
     if (iter != strategy_map.end()) {
-      // TODO (zhuohan): deal with tuple here
-      int ins_idx = ins_id_map[inst];
-      int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
-      const HloSharding& sharding_spec = iter->second[stra_idx].output_sharding;
-      if (IsUndefined(sharding_spec)) {
-        continue;
+      const std::unique_ptr<StrategyVector> &strategies_ptr = iter->second;
+      if (strategies_ptr->is_tuple) {
+        const Shape& out_shape = inst->shape();
+        ShapeTree<HloSharding> tuple_sharding(out_shape, HloSharding::Replicate());
+        std::function<void(
+            const std::unique_ptr<StrategyVector> &strategies_ptr_)> get_flattened_shardings;
+        std::vector<HloSharding> flattened_shardings;
+        get_flattened_shardings = [&]( 
+            const std::unique_ptr<StrategyVector> &strategies_ptr_) {
+          if (strategies_ptr_->is_tuple) {
+            for (const auto& child : strategies_ptr->childs) {
+              get_flattened_shardings(child);
+            }
+          } else {
+            int ins_idx = strategies_ptr_->id;
+            int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
+            flattened_shardings.push_back(strategies_ptr_->leaf_vector[stra_idx].output_sharding);
+          }
+        }
+        get_flattened_shardings(strategies_ptr);
+        int i = 0;
+        for (auto &leaf : tuple_sharding.leaves()) {
+          *leaf = flattened_shardings[i++];
+        }
+        CHECK_EQ(i, flattened_shardings.size());
+        inst->set_sharding(HloSharding::Tuple(tuple_sharding));
+      } else {
+        int ins_idx = strategies_ptr->id;
+        int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
+        const HloSharding& sharding_spec = strategies_ptr->leaf_vector[stra_idx].output_sharding;
+        if (IsUndefined(sharding_spec)) {
+          continue;
+        }
+        inst->set_sharding(sharding_spec);
       }
-      inst->set_sharding(sharding_spec);
     }
   }
-
-  // set sharding for outputs
-  std::vector<HloSharding> shardings;
-  const Shape& out_shape = entry->root_instruction()->shape();
-  ShapeTree<HloSharding> tuple_sharding(out_shape, HloSharding::Replicate());
-  for (int i = 0; i < out_shape.tuple_shapes_size(); ++i) {
-    // TODO (zhuohan): deal with tuple here
-    const HloInstruction* operand = root_inst->operand(i);
-    int ins_idx = ins_id_map[operand];
-    int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
-    *tuple_sharding.mutable_element({i}) =
-      strategy_map[operand][stra_idx].output_sharding;
-  }
-  entry->root_instruction()->set_sharding(HloSharding::Tuple(tuple_sharding));
 
   //std::cerr << "===== Exit AutoSharding =====" << std::endl;
   //std::cerr << module->ToString();

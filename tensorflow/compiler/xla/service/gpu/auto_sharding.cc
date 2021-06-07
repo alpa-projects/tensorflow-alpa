@@ -433,7 +433,7 @@ std::unique_ptr<StrategyVector> FollowInsStrategyVector(
   } else {
     CHECK(shape.IsArray());
     strategies.is_tuple = false;
-    AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+    AddLeafStrategies(leaf_strategies, strategies_ptr);
     strategies.following = src_strategies_ptr.get();
     strategies.connected.push_back(src_strategies_ptr.get());
     strategies.leaf_vector.reserve(src_strategies.leaf_vector.size());
@@ -474,7 +474,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         // Split one dim
         for (int64 i = 0; i < ins->shape().rank(); ++i) {
@@ -507,7 +507,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         strategies.leaf_vector.push_back(
           ShardingStrategy({"R", HloSharding::Replicate(),
@@ -519,10 +519,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         const HloInstruction* operand = ins->operand(0);
-        const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+        const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
@@ -546,7 +546,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         // If the operand is a constant, do not follow it.
         // Register new strategies instead.
         if (operand->shape().rank() == 0) {
-          strategies.follow_id = -1;
+          strategies.following = nullptr;
           strategies.leaf_vector.clear();
 
           // Split one dim
@@ -582,10 +582,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         const HloInstruction* operand = ins->operand(0);
-        const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+        const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
@@ -618,10 +618,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         const HloInstruction* operand = ins->operand(0);
-        const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+        const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
@@ -653,10 +653,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         const HloInstruction* operand = ins->operand(0);
-        const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+        const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
@@ -746,7 +746,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         int64 follow_idx = 0;
         // Follow the deepest instruction
@@ -756,7 +756,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           }
         }
         const HloInstruction* operand = ins->operand(follow_idx);
-        const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+        const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
@@ -795,7 +795,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         int64 follow_idx = 0;
         // Follow the deepest instruction
@@ -807,7 +807,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const HloInstruction* operand = ins->operand(0);
         const HloInstruction* unit = ins->operand(1);
         const auto& dimensions = ins->dimensions();
-        const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+        const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
@@ -882,7 +882,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         strategies.following = nullptr;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
@@ -1051,7 +1051,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies.childs.reserve(ins->operand_count());
         for (size_t i = 0; i < ins->operand_count(); ++i) {
           const HloInstruction* operand = ins->operand(i);
-        const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+        const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
           strategies.childs.push_back(
               std::move(FollowInsStrategyVector(
                   src_strategies_ptr, operand->shape(), instrcution_id,
@@ -1063,7 +1063,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         strategies.leaf_vector.push_back(
           ShardingStrategy({"R", HloSharding::Replicate(),
@@ -1075,7 +1075,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies_ptr = absl::make_unique<StrategyVector>();
         StrategyVector &strategies = *strategies_ptr;
         strategies.is_tuple = false;
-        AddLeafStrategies(leaf_strategies, strategies_ptr.get());
+        AddLeafStrategies(leaf_strategies, strategies_ptr);
         strategies.instruction_id = instruction_id;
         HloSharding output_spec = Undefined();
         strategies.leaf_vector.push_back(
@@ -1084,7 +1084,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       }
       case HloOpcode::kGetTupleElement: {
         const HloInstruction* operand = ins->operand(0);
-        const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+        const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(src_strategies.is_tuple);
         strategies_ptr = FollowInsStrategyVector(
@@ -1095,7 +1095,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kCustomCall: {
         if (ins->IsCustomCall("xla_pipeline_marker")) {
           const HloInstruction* operand = ins->operand(0);
-          const std::unique_ptr<StrategyVector> src_strategies_ptr = strategy_map.at(operand);
+          const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
           const StrategyVector& src_strategies = *src_strategies_ptr;
           CHECK(src_strategies.is_tuple);
           // TODO (zhuohan): The memory cost of the marker should eventually be 0.

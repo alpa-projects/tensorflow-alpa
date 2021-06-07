@@ -1054,7 +1054,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const std::unique_ptr<StrategyVector> &src_strategies_ptr = strategy_map.at(operand);
           strategies.childs.push_back(
               std::move(FollowInsStrategyVector(
-                  src_strategies_ptr, operand->shape(), instrcution_id,
+                  src_strategies_ptr, operand->shape(), instruction_id,
                   /* have_memory_cost= */ false, leaf_strategies)));
         }
         break;
@@ -1088,8 +1088,8 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(src_strategies.is_tuple);
         strategies_ptr = FollowInsStrategyVector(
-            src_strategies.childs[ins->tuple_index()], ins->shape(), instrcution_id,
-            /* have_memory_cost= */ false, n_strategy_vectors);
+            src_strategies.childs[ins->tuple_index()], ins->shape(), instruction_id,
+            /* have_memory_cost= */ false, leaf_strategies);
         break;
       }
       case HloOpcode::kCustomCall: {
@@ -1099,9 +1099,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           const StrategyVector& src_strategies = *src_strategies_ptr;
           CHECK(src_strategies.is_tuple);
           // TODO (zhuohan): The memory cost of the marker should eventually be 0.
-          strategies_ptr = FollowInsStrategyVector(src_strategies_ptr, ins->shape(), instrcution_id,
+          strategies_ptr = FollowInsStrategyVector(src_strategies_ptr, ins->shape(), instruction_id,
                                                    /* have_memory_cost= */ true,
-                                                   n_strategy_vectors);
+                                                   leaf_strategies);
         } else {
           LOG(FATAL) << "Unknown CustomCall instruction: " + ins->name();
         }
@@ -1111,8 +1111,8 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         LOG(FATAL) << "Unhandled instruction: " + ins->name();
     }
 
-    CHECK(strategies.is_tuple || !strategies.leaf_vector.empty());
-    strategy_map[ins] = strategies;
+    CHECK(strategies_ptr->is_tuple || !strategies_ptr->leaf_vector.empty());
+    strategy_map[ins] = std::move(strategies_ptr);
   }
 
   return std::make_pair(std::move(strategy_map), std::move(leaf_strategies));
@@ -1141,14 +1141,14 @@ AliasSet BuildAliasSet(
       const std::unique_ptr<StrategyVector>& dst_strategies_ptr) {
     if (src_strategies_ptr->is_tuple) {
       CHECK(dst_strategies_ptr->is_tuple);
-      CHECKEQ(src_strategies_ptr->childs.size(), dst_strategies_ptr->childs.size());
+      CHECK_EQ(src_strategies_ptr->childs.size(), dst_strategies_ptr->childs.size());
       for (size_t i = 0; i < src_strategies_ptr->childs.size(); ++i) {
         traverse_tuple_alias(src_strategies_ptr->childs[i], dst_strategies_ptr->childs[i]);
       }
     } else {
       alias_set.insert(std::make_pair(src_strategies_ptr->id, dst_strategies_ptr->id));
     }
-  }
+  };
   alias_config.ForEachAlias(
     [&](const ShapeIndex& output_index, const HloInputOutputAliasConfig::Alias& alias) {
       const HloInstruction* src_ins = parameter_instructions[alias.parameter_number];

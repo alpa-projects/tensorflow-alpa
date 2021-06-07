@@ -1871,7 +1871,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
         get_flattened_shardings(strategies_ptr);
         int i = 0;
         for (auto &leaf : tuple_sharding.leaves()) {
-          *leaf = flattened_shardings[i++];
+          leaf.second = flattened_shardings[i++];
         }
         CHECK_EQ(i, flattened_shardings.size());
         inst->set_sharding(HloSharding::Tuple(tuple_sharding));

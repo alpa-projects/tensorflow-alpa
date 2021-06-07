@@ -1245,9 +1245,9 @@ class CostGraph {
     adjacency.assign(leaf_strategies.size(), absl::flat_hash_set<int>());
 
     for (const auto& strategies_ptr : leaf_strategies) {
-      node_lens.push_back(leaf_strategies->leaf_vector.size());
+      node_lens.push_back(strategies_ptr->leaf_vector.size());
 
-      for (const auto& strategy : leaf_strategies->leaf_vector) {
+      for (const auto& strategy : strategies_ptr->leaf_vector) {
         CHECK_EQ(strategy.resharding_costs.size(), strategies_ptr->connected.size());
       }
 

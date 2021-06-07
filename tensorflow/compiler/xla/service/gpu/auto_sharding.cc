@@ -1576,7 +1576,7 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   };
 
   std::vector<int> L_np;
-  std::vector<std::vector<int>> liveness_set_indices(N, {});
+  std::vector<std::vector<int>> liveness_set_indices(N);
   for (size_t i = 0; i < N; ++i) {
     if (filter_func(leaf_strategies[i]->instruction_id)) {
       std::vector<int>& current_liveness_set_indices = liveness_set_indices[i];
@@ -1589,7 +1589,7 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
         } else {
           current_liveness_set_indices.push_back(strategies_ptr->id);
         }
-      }
+      };
       for (const HloValue* value : liveness_set[leaf_strategies[i]->instruction_id]) {
         traverse_live_instructions(strategy_map.at(value->instruction()));
       }
@@ -1600,7 +1600,7 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   }
 
   for (const auto& indices : liveness_set_indices) {
-    L_np.insert(L_np.end(), indices.start(), indices.end());
+    L_np.insert(L_np.end(), indices.begin(), indices.end());
   }
 
   // Call the solver function in python
@@ -1677,6 +1677,8 @@ std::string PrintInstructions(const HloInstructionSequence& sequence) {
   return os.str();
 }
 
+// TODO (zhuohan): make prints work again
+/* 
 // Print strategy map for debugging
 std::string PrintStrategyMap(
   const StrategyMap& strategy_map,
@@ -1703,8 +1705,6 @@ std::string PrintStrategyMap(
   return os.str();
 }
 
-// TODO (zhuohan): make prints work again
-/* 
 // Print auto sharding strategy for debugging
 std::string PrintAutoShardingSolution(
   const HloInstructionSequence& sequence,
@@ -1867,7 +1867,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
             int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
             flattened_shardings.push_back(strategies_ptr_->leaf_vector[stra_idx].output_sharding);
           }
-        }
+        };
         get_flattened_shardings(strategies_ptr);
         int i = 0;
         for (auto &leaf : tuple_sharding.leaves()) {

@@ -6,7 +6,6 @@
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/errors.h"
-#include "tensorflow/compiler/xla/pjrt/swap.h"
 
 namespace xla {
 namespace gpu {

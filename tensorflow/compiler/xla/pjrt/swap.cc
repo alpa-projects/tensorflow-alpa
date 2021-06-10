@@ -2,7 +2,11 @@
 
 #ifdef GOOGLE_CUDA
 namespace xla{
-// using bufferInfoMap = absl::flat_hash_map<const ShapeIndex, void *>;
+
+HostMemoryTable& local_host_memory_table(){
+  static HostMemoryTable local_host_memory_table_;
+  return local_host_memory_table_;
+}
 
 HostMemoryTable::HostMemoryTable() {}
 

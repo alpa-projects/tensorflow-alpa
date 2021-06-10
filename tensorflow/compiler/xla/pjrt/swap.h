@@ -34,9 +34,6 @@ class HostMemoryTable {
                       std::unique_ptr<AddressList>> lists_;
 };
 
-HostMemoryTable& local_host_memory_table(){
-  static HostMemoryTable local_host_memory_table_;
-  return local_host_memory_table_;
-}
+HostMemoryTable& local_host_memory_table();
 } // namespace xla
 #endif  // TENSORFLOW_COMPILER_XLA_PJRT_SWAP_H_

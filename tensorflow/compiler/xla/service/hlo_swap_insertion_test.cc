@@ -22,8 +22,6 @@ namespace op = xla::testing::opcode_matchers;
 
 using ::testing::_;
 
-// Inherits methods to create rematerializable computations. See
-// RematerializationTestBase for more.
 class HloSwapInsertionTest : public HloTestBase {
  protected:
   StatusOr<bool> RunHloSwapInsertion(int64 memory_limit_bytes,
@@ -34,13 +32,7 @@ class HloSwapInsertionTest : public HloTestBase {
         ComputationSchedulerToModuleScheduler(DefaultMemoryScheduler));
     TF_EXPECT_OK(scheduler.Run(module).status());
     HloSwapInsertion swap(
-        ByteSizeOf, memory_limit_bytes//,
-        // /*sizes=*/nullptr,
-        // HloRematerialization::RematerializationPass::kPreFusion,
-        // /*block_size_limit=*/1, /*block_rematerialization_factor=*/1, nullptr,
-        // HloRematerialization::RematerializationMode::kRecomputeAndCompress,
-        // min_remat_size
-        );
+        ByteSizeOf, memory_limit_bytes);
     auto result = swap.Run(module);
     TF_EXPECT_OK(scheduler.Run(module).status());
     return result;
@@ -177,6 +169,7 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
       module->AddEntryComputation(MakeSimpleComputation());
   // memory constraint: (1+30) * 4
   RunHloSwapInsertion(35 * 4, module.get());
+  // TODO(yonghao): add a checker
 }
 
 };  // namespace

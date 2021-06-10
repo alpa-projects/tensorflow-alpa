@@ -35,7 +35,9 @@ class SwapOutThunk : public Thunk {
 
   Status Initialize(const GpuExecutable& executable,
                     se::StreamExecutor* executor) override;
+
   Status ExecuteOnStream(const ExecuteParams& params) override;
+
   ~SwapOutThunk() override;
 
  private:

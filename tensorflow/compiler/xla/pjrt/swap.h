@@ -8,7 +8,7 @@
 #include "absl/container/flat_hash_map.h"
 
 namespace xla{
-// TODO: HostMemoryTable. A shape acquires its host copy by a key and a int64 RunId
+// TODO(yonghao): A shape acquires its host copy by a key and a int64 RunId
 
 class HostMemoryTable {
  private: 

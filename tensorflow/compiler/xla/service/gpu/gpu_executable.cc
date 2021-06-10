@@ -143,7 +143,6 @@ Status GpuExecutable::ExecuteThunks(
     LOG(WARNING) << "PROFILING: profiling is enabled";
   }
 
-  // TODO: use run_options->run_options().host_to_device_stream() etc. 
   // Stream 0 indicates `main_stream` and substreams start from stream 1.
   std::vector<StreamPool::Ptr> sub_streams;
   sub_streams.reserve(thunk_schedule_->StreamCount() - 1);
@@ -157,9 +156,9 @@ Status GpuExecutable::ExecuteThunks(
   }
   const int sub_stream_size = sub_streams.size();
   se::Stream* host_to_device_stream = 
-    run_options->run_options().host_to_device_stream();
+      run_options->run_options().host_to_device_stream();
   se::Stream* device_to_host_stream = 
-    run_options->run_options().device_to_host_stream();
+      run_options->run_options().device_to_host_stream();
 
   HloExecutionProfiler profiler(do_profile, hlo_execution_profile, main_stream,
                                 sub_streams, entry_computation_profile_index_);
@@ -180,13 +179,14 @@ Status GpuExecutable::ExecuteThunks(
 
     int32 stream_no = thunk_schedule_->StreamNumberForThunk(thunk.get());
     se::Stream* stream;
-    if (thunk->kind() == Thunk::kSwapIn) 
+    if (thunk->kind() == Thunk::kSwapIn) {
       stream = host_to_device_stream;
-    else if (thunk->kind() == Thunk::kSwapOut) 
+    } else if (thunk->kind() == Thunk::kSwapOut) {
       stream = device_to_host_stream;
-    else 
-    stream =
-        (stream_no == 0 ? main_stream : sub_streams[stream_no - 1].get());
+    } else {
+      stream =
+          (stream_no == 0 ? main_stream : sub_streams[stream_no - 1].get());
+    }
 
     for (const Thunk* dependency : thunk_schedule_->DependsOn(thunk.get())) {
       stream->ThenWaitFor(FindOrDie(thunk_to_finish_event, dependency).get());

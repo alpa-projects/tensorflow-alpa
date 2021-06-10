@@ -26,7 +26,7 @@ SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
 Status SwapOutThunk::Initialize(const GpuExecutable& executable,
                                 se::StreamExecutor* executor) {
   // register the key of the executable
-  executable_key_ = 0;  // TODO
+  executable_key_ = 0;  // TODO(yonghao)
   return Status::OK();
 }
 
@@ -66,17 +66,16 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   for (int32 i = 0;i < operands_.size();++i) {
     const BufferAllocation::Slice& slice = operands_.at(i);
-    if (!slice.allocation())
+    if (!slice.allocation()) {
       return InternalError("custom call input missing buffer allocation");
+    }
     se::DeviceMemoryBase destination_data = 
-      params.buffer_allocations->GetDeviceAddress(slice);
+        params.buffer_allocations->GetDeviceAddress(slice);
 
     void *source_address_ = host_memory_ref->at(i);
-    params.stream->ThenMemcpy(source_address_, destination_data, byte_sizes_.at(i));
+    params.stream->ThenMemcpy(source_address_, destination_data, 
+                              byte_sizes_.at(i));
   }
-  se::DeviceMemoryBase destination_data = 
-    params.buffer_allocations->GetDeviceAddress(result_);
-  params.stream->ThenMemcpy(&destination_data, &formal_out, 8);
 #else   //  GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   return Unavailable(
       "Swap on GPU are not supported in this configuration. Please "
@@ -99,7 +98,7 @@ SwapInThunk::SwapInThunk(ThunkInfo thunk_info,
 
 Status SwapInThunk::Initialize(const GpuExecutable& executable,
                                 se::StreamExecutor* executor) {
-  executable_key_ = 0;  // TODO
+  executable_key_ = 0;  // TODO(yonghao)
   return Status::OK();
 }
 
@@ -117,10 +116,11 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   for (int32 i = 0; i < results_.size();++i) {
     const BufferAllocation::Slice& slice = results_.at(i);
-    if (!slice.allocation())
-      return InternalError("custom call input missing buffer allocation");
+    if (!slice.allocation()) {
+      return InternalError("custom call output missing buffer allocation");
+    }
     se::DeviceMemoryBase destination_data = 
-      params.buffer_allocations->GetDeviceAddress(slice);
+        params.buffer_allocations->GetDeviceAddress(slice);
 
     void *source_address_ = host_memory_ref->at(i);
     params.stream->ThenMemcpy(&destination_data, source_address_, byte_sizes_.at(i));

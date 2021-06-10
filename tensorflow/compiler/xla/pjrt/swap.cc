@@ -1,9 +1,9 @@
 #include "tensorflow/compiler/xla/pjrt/swap.h"
 
 #ifdef GOOGLE_CUDA
-namespace xla{
+namespace xla {
 
-HostMemoryTable& local_host_memory_table(){
+HostMemoryTable& local_host_memory_table() {
   static HostMemoryTable local_host_memory_table_;
   return local_host_memory_table_;
 }
@@ -33,7 +33,9 @@ const HostMemoryTable::AddressList* HostMemoryTable::Get(int64 executable_key, i
 
 const HostMemoryTable::AddressList* HostMemoryTable::GetOrNull(int64 executable_key, int64 key) {
   auto iter = lists_.find(std::make_pair(executable_key, key));
-  if(iter == lists_.end()) return nullptr;
+  if(iter == lists_.end()) {
+    return nullptr;
+  }
   return iter->second.get();
 }
 
@@ -42,7 +44,7 @@ void HostMemoryTable::remove(int64 executable_key, int64 key) {
 }
 
 int64 HostMemoryTable::getOrCreateExecutableKey(const Executable &e) {
-  // TODO
+  // TODO(yonghao)
   return 0;
 }
 

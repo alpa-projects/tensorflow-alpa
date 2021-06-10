@@ -19,12 +19,15 @@ class HloSwapInsertion : public HloModulePass {
   using ShapeSizeFunction = std::function<int64(const Shape&)>;
   explicit HloSwapInsertion(
     const ShapeSizeFunction& size_function, int64 memory_limit_bytes
-  ):size_function_(size_function), 
-    memory_limit_bytes_(memory_limit_bytes){}
+  )
+  : size_function_(size_function), 
+    memory_limit_bytes_(memory_limit_bytes) {}
   
   ~HloSwapInsertion() override = default;
 
-  absl::string_view name() const override { return "swapInsertion"; }
+  absl::string_view name() const override { 
+    return "swap-Insertion"; 
+  }
 
   StatusOr<bool> Run(HloModule* module) override;
  private: 

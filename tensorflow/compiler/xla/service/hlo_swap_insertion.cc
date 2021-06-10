@@ -33,7 +33,7 @@
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/logging.h"
 
-// TODO: has_indirect_use
+// TODO(yonghao): has_indirect_use
 // todo: store the space for parameter specifically, instead of wasting time and space for it
 // todo: handle calls
 // todo: reschedule the code and decouple
@@ -48,7 +48,7 @@ using BufferIdList = absl::InlinedVector<BufferId, 3>;
 
 static const Shape keyShape = ShapeUtil::MakeShape(S64, {});
 
-class Item{
+class Item {
 private: 
   Item* next = nullptr;
   Item* prev = nullptr;
@@ -62,7 +62,7 @@ public:
   friend class InstructionList;
 };
 
-struct ItemUse{
+struct ItemUse {
   Item *user;
   int64 operand_number;
   absl::optional<int64> index;
@@ -78,8 +78,8 @@ struct ItemUse{
 
 using UsesList = absl::InlinedVector<ItemUse, 3>;
 
-class InstructionList{
-public: 
+class InstructionList {
+ public: 
   explicit InstructionList(const HloInstructionSequence& order) {
     int64 position = 0;
     Item* last = nullptr;
@@ -136,7 +136,7 @@ public:
 
   Item* next(Item* item) const { return item->next; }
 
-private: 
+ private: 
   Item* first_;
 
   absl::flat_hash_map<const HloInstruction*, Item*> item_map_;
@@ -211,7 +211,7 @@ class MemoryRecorder {
 
   Status RecycleAfterInstruction(Item *item);
 
-  int64 memory_usage() const {return memory_usage_;} 
+  int64 memory_usage() const { return memory_usage_; } 
 
  private: 
   struct Buffer {
@@ -251,14 +251,14 @@ class MemoryRecorder {
     bool isParameter;
 
     // return if the buffer is already in GPU
-    bool inGPU() {return latest_alloc != nullptr;}
+    bool inGPU() { return latest_alloc != nullptr; }
 
     bool isSwappedIn() {
       return latest_alloc != defining_instruction;
     }
 
     // set if the buffer is in GPU
-    void setInGPU(Item *swap_in_inst){
+    void setInGPU(Item *swap_in_inst) {
       // check: defining_instruction == nullptr << "already in with define instruction " << defining_instruction->ToString() << " while meeting another define instruction " << swap_in_inst->ToString();
       latest_alloc = swap_in_inst;
     }
@@ -343,16 +343,18 @@ class MemoryRecorder {
             Item *swapOut = new Item;
             swapOut->isSwap = true;
             swapOut->instruction = computation_->AddInstruction(
-              HloInstruction::CreateCustomCall(keyShape, 
-                {toReleaseBuffer.defining_instruction->instruction}, "__builtin$SwapOut", 
-                /*opaque=*/std::to_string(swap_key_++)));
-            Cast<HloCustomCallInstruction>(swapOut->instruction)->set_custom_call_has_side_effect(true);
+                HloInstruction::CreateCustomCall(keyShape, 
+                  {toReleaseBuffer.defining_instruction->instruction}, 
+                  "__builtin$SwapOut", /*opaque=*/std::to_string(swap_key_++)));
+            Cast<HloCustomCallInstruction>(swapOut->instruction)
+                ->set_custom_call_has_side_effect(true);
             VLOG(3) << "\tcreate swap out for buffer: " << toReleaseBid;
             registerRelease(swapOut, toReleaseBid, rest_size > 0 ? 0 : -rest_size);
             // add control flow edge from its producer to the swap instruction
             instruction_list.addEdge(toRelease.second, swapOut);
             Item *lastUseItem = last_use_inst.at(toReleaseBid);
-            if (lastUseItem != nullptr) instruction_list.addEdge(lastUseItem, swapOut); // todo: instead, make Item* in released_after an inlined buffer<Item *> and add this to the buffer
+            if (lastUseItem != nullptr) instruction_list.addEdge(lastUseItem, swapOut); 
+            // todo: instead, make Item* in released_after an inlined buffer<Item *> and add this to the buffer
             last_use_inst.at(toReleaseBid) = swapOut;
 
             instruction_list.addEdge(swapOut, item);
@@ -423,11 +425,11 @@ class MemoryRecorder {
       allocated.append(std::to_string(iter->first));
     }
     VLOG(1) << "\tfree: " << free_memory 
-      << ", released: " << released_memory 
-      << ", alloced: " << alloced_memory;
+        << ", released: " << released_memory 
+        << ", alloced: " << alloced_memory;
     if (memory_bound_ == -1) return;
-    CHECK(alloced_memory + released_memory + free_memory == memory_bound_) << "memory leak. allocated are: " + allocated
-    << "released are: ";
+    CHECK(alloced_memory + released_memory + free_memory == memory_bound_) 
+        << "memory leak. allocated are: " + allocated;
   }
 
   HloComputation* computation_;
@@ -457,13 +459,14 @@ MemoryRecorder::MemoryRecorder(
   free_memory = memory_bound;
   memory_usage_ = 0;
   PointsToSet::BufferSet live_out_set = 
-    points_to_analysis.GetPointsToSet(computation->root_instruction())
-    .CreateFlattenedSet();
+      points_to_analysis.GetPointsToSet(computation->root_instruction())
+      .CreateFlattenedSet();
   std::map<const LogicalBuffer*, BufferId> logical_buffer_to_id;
   for (auto *item = inst_list.first(); item != nullptr; item = inst_list.next(item)) {
     const HloInstruction * const instruction = item->instruction;
 
-    for (const LogicalBuffer *logical_buffer : points_to_analysis.GetBuffersDefinedByInstruction(instruction)) {
+    for (const LogicalBuffer *logical_buffer : 
+        points_to_analysis.GetBuffersDefinedByInstruction(instruction)) {
       Buffer *buffer;
       // TODO: work on the while later
       if (instruction->opcode() == HloOpcode::kWhile) {
@@ -510,7 +513,8 @@ MemoryRecorder::MemoryRecorder(
       logical_buffer_to_id[logical_buffer] = buffer->id;
     }
 
-    for (const LogicalBuffer *logical_buffer : points_to_analysis.GetPointsToSet(instruction).CreateFlattenedSet()) {
+    for (const LogicalBuffer *logical_buffer : 
+        points_to_analysis.GetPointsToSet(instruction).CreateFlattenedSet()) {
       item->buffers_output.push_back(logical_buffer_to_id[logical_buffer]);
     }
   }
@@ -540,9 +544,9 @@ std::pair<bool, std::vector<Item*>> MemoryRecorder::allocReleasedMemory(int64 si
       size -= p.second;
     }
   }
-  if (size > 0) 
+  if (size > 0) {
     return std::make_pair(false, std::vector<Item *>());
-  else {
+  } else {
     for (auto iter = released_after.begin(); iter != released_after.end();) {
       if (iter->first == tail) break;
       released_after.erase(iter++);
@@ -557,10 +561,11 @@ Status MemoryRecorder::PrepareForInstruction(Item *item) {
   for (auto bid : item->buffers_used) {
     auto& buffer = buffers_.at(bid);
     if (buffer.inGPU()) { 
-      if (buffer.isSwappedIn())
+      if (buffer.isSwappedIn()) {
         buffer.defining_instruction
           ->instruction
           ->ReplaceUseWith(item->instruction, buffer.latest_alloc->instruction);
+      }
       last_use_inst.at(bid) = item;
       continue;
     }
@@ -573,12 +578,14 @@ Status MemoryRecorder::PrepareForInstruction(Item *item) {
       HloInstruction::CreateCustomCall(buffer.shape, 
         {swapOut->instruction}, "__builtin$SwapIn", 
         /*opaque=*/Cast<HloCustomCallInstruction>(swapOut->instruction)->opaque()));
-    Cast<HloCustomCallInstruction>(swapIn->instruction)->set_custom_call_has_side_effect(true);
+    Cast<HloCustomCallInstruction>(swapIn->instruction)
+        ->set_custom_call_has_side_effect(true);
     VLOG(3) << "\tcreate swap in for buffer: " << bid;
     // if already discarded, swap in after discarded
     Item *lastUse = last_use_inst.at(bid);
-    if (lastUse != nullptr)
+    if (lastUse != nullptr) {
       instruction_list.addEdge(lastUse, swapIn);
+    }
 
     buffer.setInGPU(swapIn);
     getSpaceFor(AllocatedSize(buffer), swapIn);
@@ -622,8 +629,9 @@ Status MemoryRecorder::RecycleAfterInstruction(Item *item) {
   for (auto bid : item->buffers_defined) {
     auto &buffer = buffers_.at(bid);
     // if no other use, recycle
-    if (buffer.unfinished_user_count == 0)
+    if (buffer.unfinished_user_count == 0) {
       registerRelease(item, bid, AllocatedSize(buffer));
+    }
   }
   SelfCHECK();
   return Status::OK();

@@ -155,9 +155,9 @@ Status GpuExecutable::ExecuteThunks(
     sub_streams.back()->ThenWaitFor(main_stream);
   }
   const int sub_stream_size = sub_streams.size();
-  se::Stream* host_to_device_stream = 
+  se::Stream* host_to_device_stream =
       run_options->run_options().host_to_device_stream();
-  se::Stream* device_to_host_stream = 
+  se::Stream* device_to_host_stream =
       run_options->run_options().device_to_host_stream();
 
   HloExecutionProfiler profiler(do_profile, hlo_execution_profile, main_stream,

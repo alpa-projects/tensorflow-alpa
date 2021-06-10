@@ -15,22 +15,20 @@
 
 namespace xla {
 class HloSwapInsertion : public HloModulePass {
- public: 
+ public:
   using ShapeSizeFunction = std::function<int64(const Shape&)>;
-  explicit HloSwapInsertion(
-    const ShapeSizeFunction& size_function, int64 memory_limit_bytes
-  )
-  : size_function_(size_function), 
-    memory_limit_bytes_(memory_limit_bytes) {}
-  
+  explicit HloSwapInsertion(const ShapeSizeFunction& size_function,
+                            int64 memory_limit_bytes)
+      : size_function_(size_function),
+        memory_limit_bytes_(memory_limit_bytes) {}
+
   ~HloSwapInsertion() override = default;
 
-  absl::string_view name() const override { 
-    return "swap-Insertion"; 
-  }
+  absl::string_view name() const override { return "swap-Insertion"; }
 
   StatusOr<bool> Run(HloModule* module) override;
- private: 
+
+ private:
   virtual StatusOr<bool> SwapInsertionComputation(HloComputation* computation,
                                                   HloSchedule* schedule,
                                                   int64 memory_limit_bytes);
@@ -45,13 +43,13 @@ class HloSwapInsertion : public HloModulePass {
   // Returns the peak memory usage of the called computations for the given
   // instruction. Zero is returned if the instruction calls no computations.
   StatusOr<int64> CalledComputationsMemoryUsage(
-    const HloInstruction* instruction) const;
+      const HloInstruction* instruction) const;
 
   // Call graph of the hlo_module.
   std::unique_ptr<CallGraph> call_graph_;
 
   const ShapeSizeFunction size_function_;
-  
+
   int64 memory_limit_bytes_;
 
   std::unique_ptr<TuplePointsToAnalysis> points_to_analysis_;

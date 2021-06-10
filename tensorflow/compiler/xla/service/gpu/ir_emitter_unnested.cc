@@ -1093,7 +1093,7 @@ Status IrEmitterUnnested::EmitCustomCallFromMlir(MlirEmitterInput input) {
     if (call.call_target_name() == "SliceToDynamic") {
       return EmitSliceToDynamicFromMlir(input);
     }
-    if (call.call_target_name() == kBuiltinSwapOutTarget || 
+    if (call.call_target_name() == kBuiltinSwapOutTarget ||
         call.call_target_name() == kBuiltinSwapInTarget) {
       return EmitSwapThunkFromMlir(input);
     }
@@ -1691,25 +1691,32 @@ Status IrEmitterUnnested::EmitSwapThunkFromMlir(MlirEmitterInput input) {
   int64 key = std::stoll(custom_call.backend_config().str());
   std::vector<int64> byte_sizes;
   if (call_target_name == kBuiltinSwapOutTarget) {
-    CHECK(results.size() == 1) << "builtinSwapOut meets multiple results, is: " << results.size();
-    CHECK(results[0].size() == 8) << "builtinSwapOut meets result size incorrect, is: " << results[0].size();
+    CHECK(results.size() == 1)
+        << "builtinSwapOut meets multiple results, is: " << results.size();
+    CHECK(results[0].size() == 8)
+        << "builtinSwapOut meets result size incorrect, is: "
+        << results[0].size();
     byte_sizes.reserve(operands.size());
     for (auto slice : operands) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapOutThunk>(
-        input.thunk_info, std::move(operands), results[0], 
+        input.thunk_info, std::move(operands), results[0],
         std::move(byte_sizes), key));
   } else {
-    CHECK(call_target_name == kBuiltinSwapInTarget) << "unexpected custom call target for emit swap thunk";
-    CHECK(operands.size() == 1) << "builtinSwapIn meets multiple operands, is: " << operands.size();
-    CHECK(operands[0].size() == 8) << "builtinSwapIn meets result size incorrect, is: " << operands[0].size();
+    CHECK(call_target_name == kBuiltinSwapInTarget)
+        << "unexpected custom call target for emit swap thunk";
+    CHECK(operands.size() == 1)
+        << "builtinSwapIn meets multiple operands, is: " << operands.size();
+    CHECK(operands[0].size() == 8)
+        << "builtinSwapIn meets result size incorrect, is: "
+        << operands[0].size();
     byte_sizes.reserve(results.size());
     for (auto slice : results) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapInThunk>(
-        input.thunk_info, operands[0], std::move(results), 
+        input.thunk_info, operands[0], std::move(results),
         std::move(byte_sizes), key));
   }
 
@@ -5821,7 +5828,7 @@ Status IrEmitterUnnested::EmitOp(MlirEmitterInput mlir_input) {
     if (call.call_target_name() == "SliceToDynamic") {
       return EmitSliceToDynamicFromMlir(mlir_input);
     }
-    if (call.call_target_name() == kBuiltinSwapOutTarget || 
+    if (call.call_target_name() == kBuiltinSwapOutTarget ||
         call.call_target_name() == kBuiltinSwapInTarget) {
       return EmitSwapThunkFromMlir(mlir_input);
     }

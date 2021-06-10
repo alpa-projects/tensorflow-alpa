@@ -16,10 +16,10 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_SWAP_THUNK_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_SWAP_THUNK_H_
 
+#include "tensorflow/compiler/xla/pjrt/swap.h"
 #include "tensorflow/compiler/xla/service/gpu/buffer_allocations.h"
 #include "tensorflow/compiler/xla/service/gpu/hlo_execution_profiler.h"
 #include "tensorflow/compiler/xla/service/gpu/thunk.h"
-#include "tensorflow/compiler/xla/pjrt/swap.h"
 
 namespace xla {
 namespace gpu {
@@ -29,8 +29,7 @@ class SwapOutThunk : public Thunk {
  public:
   SwapOutThunk(ThunkInfo thunk_info,
                std::vector<BufferAllocation::Slice> operands,
-               BufferAllocation::Slice result,
-               std::vector<int64> byte_sizes, 
+               BufferAllocation::Slice result, std::vector<int64> byte_sizes,
                int64 key);
 
   Status Initialize(const GpuExecutable& executable,
@@ -52,11 +51,9 @@ class SwapOutThunk : public Thunk {
 // Thunk to run a GPU swap in
 class SwapInThunk : public Thunk {
  public:
-  SwapInThunk(ThunkInfo thunk_info,
-              BufferAllocation::Slice operands,
+  SwapInThunk(ThunkInfo thunk_info, BufferAllocation::Slice operands,
               std::vector<BufferAllocation::Slice> results,
-              std::vector<int64> byte_sizes, 
-              int64 key);
+              std::vector<int64> byte_sizes, int64 key);
 
   Status Initialize(const GpuExecutable& executable,
                     se::StreamExecutor* executor) override;

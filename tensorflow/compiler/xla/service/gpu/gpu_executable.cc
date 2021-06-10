@@ -151,7 +151,6 @@ Status GpuExecutable::ExecuteThunks(
     LOG(WARNING) << "PROFILING: profiling is enabled";
   }
 
-  // TODO: use run_options->run_options().host_to_device_stream() etc. 
   // Stream 0 indicates `main_stream` and substreams start from stream 1.
   std::vector<StreamPool::Ptr> sub_streams;
   sub_streams.reserve(thunk_schedule_->StreamCount() - 1);

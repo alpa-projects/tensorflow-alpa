@@ -63,7 +63,7 @@ struct StrategyVector {
   // the followed strategy. Used for merging nodes.
   StrategyVector *following;
   // the conneced nodes used for resharding costs;
-  std::vector<StrategyVector *> connected;
+  std::vector<StrategyVector *> in_nodes;
   // Used when is_tuple == False. Leaf strategy vector.
   std::vector<ShardingStrategy> leaf_vector;
   // Used when is_tuple == True. A list of strategy vectors of child nodes.
@@ -435,7 +435,7 @@ std::unique_ptr<StrategyVector> FollowInsStrategyVector(
     strategies.is_tuple = false;
     AddLeafStrategies(leaf_strategies, strategies_ptr);
     strategies.following = src_strategies_ptr.get();
-    strategies.connected.push_back(src_strategies_ptr.get());
+    strategies.in_nodes.push_back(src_strategies_ptr.get());
     strategies.leaf_vector.reserve(src_strategies.leaf_vector.size());
     for (int64 sid = 0; sid < src_strategies.leaf_vector.size(); ++sid) {
       HloSharding output_spec = src_strategies.leaf_vector[sid].output_sharding;
@@ -526,7 +526,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector& src_strategies = *src_strategies_ptr;
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
-        strategies.connected.push_back(src_strategies_ptr.get());
+        strategies.in_nodes.push_back(src_strategies_ptr.get());
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies.leaf_vector.size(); ++sid) {
@@ -590,7 +590,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies.connected.push_back(strategy_map.at(ins->operand(i)).get());
+          strategies.in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
 
         // Create follow strategies
@@ -626,7 +626,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies.connected.push_back(strategy_map.at(ins->operand(i)).get());
+          strategies.in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
 
         // Create follow strategies
@@ -661,7 +661,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies.connected.push_back(strategy_map.at(ins->operand(i)).get());
+          strategies.in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
 
         // Create follow strategies
@@ -761,7 +761,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies.connected.push_back(strategy_map.at(ins->operand(i)).get());
+          strategies.in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
 
         for (int64 sid = 0; sid < src_strategies.leaf_vector.size(); ++sid) {
@@ -812,7 +812,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         CHECK(!src_strategies.is_tuple);
         strategies.following = src_strategies_ptr.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies.connected.push_back(strategy_map.at(ins->operand(i)).get());
+          strategies.in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
 
         // Map old dims to new dim
@@ -886,7 +886,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies.instruction_id = instruction_id;
         strategies.following = nullptr;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies.connected.push_back(strategy_map.at(ins->operand(i)).get());
+          strategies.in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
         const HloInstruction* lhs = ins->operand(0);
         const HloInstruction* rhs = ins->operand(1);
@@ -1248,11 +1248,11 @@ class CostGraph {
       node_lens.push_back(strategies_ptr->leaf_vector.size());
 
       for (const auto& strategy : strategies_ptr->leaf_vector) {
-        CHECK_EQ(strategy.resharding_costs.size(), strategies_ptr->connected.size());
+        CHECK_EQ(strategy.resharding_costs.size(), strategies_ptr->in_nodes.size());
       }
 
-      for (size_t i = 0; i < strategies_ptr->connected.size(); ++i) {
-        size_t src_idx = strategies_ptr->connected[i]->id;
+      for (size_t i = 0; i < strategies_ptr->in_nodes.size(); ++i) {
+        size_t src_idx = strategies_ptr->in_nodes[i]->id;
         size_t dst_idx = strategies_ptr->id;
 
         Matrix edge_cost(node_lens[src_idx], node_lens[dst_idx]);

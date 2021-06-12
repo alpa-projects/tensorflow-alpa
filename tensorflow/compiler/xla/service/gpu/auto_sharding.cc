@@ -416,7 +416,7 @@ std::unique_ptr<StrategyVector> CreateTupleStrategyVector(size_t instruction_id)
 }
 
 std::unique_ptr<StrategyVector> FollowInsStrategyVector(
-    const StrategyVector const *src_strategies,
+    const StrategyVector * const src_strategies,
     const Shape& shape,
     size_t instruction_id,
     bool have_memory_cost,
@@ -514,7 +514,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kBroadcast: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand);
+        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies.get();
         strategies->in_nodes.push_back(src_strategies.get());
@@ -572,7 +572,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kReshape: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand);
+        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
@@ -603,7 +603,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kTranspose: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand);
+        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
@@ -633,7 +633,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kDynamicUpdateSlice: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand);
+        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
@@ -728,7 +728,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           }
         }
         const HloInstruction* operand = ins->operand(follow_idx);
-        const StrategyVector * const src_strategies = strategy_map.at(operand);
+        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies.get();
         for (int64 i = 0; i < ins->operand_count(); ++i) {
@@ -774,9 +774,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const HloInstruction* operand = ins->operand(0);
         const HloInstruction* unit = ins->operand(1);
         const auto& dimensions = ins->dimensions();
-        const StrategyVector * const src_strategies = strategy_map.at(operand);
+        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies.get();
+        strategies->following = src_strategies;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
           strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
@@ -1009,7 +1009,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies->childs.reserve(ins->operand_count());
         for (size_t i = 0; i < ins->operand_count(); ++i) {
           const HloInstruction* operand = ins->operand(i);
-        const StrategyVector * const src_strategies = strategy_map.at(operand);
+        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
           strategies->childs.push_back(
               std::move(FollowInsStrategyVector(
                   src_strategies, operand->shape(), instruction_id,
@@ -1034,7 +1034,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       }
       case HloOpcode::kGetTupleElement: {
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand);
+        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(src_strategies->is_tuple);
         strategies = FollowInsStrategyVector(
             src_strategies->childs[ins->tuple_index()], ins->shape(), instruction_id,
@@ -1044,7 +1044,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kCustomCall: {
         if (ins->IsCustomCall("xla_pipeline_marker")) {
           const HloInstruction* operand = ins->operand(0);
-          const StrategyVector * const src_strategies = strategy_map.at(operand);
+          const StrategyVector * const src_strategies = strategy_map.at(operand).get();
           CHECK(src_strategies->is_tuple);
           // TODO (zhuohan): The memory cost of the marker should eventually be 0.
           strategies = FollowInsStrategyVector(src_strategies, ins->shape(), instruction_id,

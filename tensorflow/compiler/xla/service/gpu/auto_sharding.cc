@@ -1528,7 +1528,7 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   for (size_t i = 0; i < N; ++i) {
     if (filter_func(leaf_strategies[i]->instruction_id)) {
       std::vector<int>& current_liveness_set_indices = liveness_set_indices[i];
-      std::function<void(const StrategyVector * const traverse_live_instructions;
+      std::function<void(const StrategyVector * const)> traverse_live_instructions;
       traverse_live_instructions = [&](const StrategyVector * const strategies) {
         if (strategies->is_tuple) {
           for (const auto& child : strategies->childs) {

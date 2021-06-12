@@ -438,8 +438,8 @@ std::unique_ptr<StrategyVector> FollowInsStrategyVector(
   } else {
     CHECK(shape.IsArray());
     strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
-    strategies->following = src_strategies.get();
-    strategies->in_nodes.push_back(src_strategies.get());
+    strategies->following = src_strategies;
+    strategies->in_nodes.push_back(src_strategies);
     strategies->leaf_vector.reserve(src_strategies->leaf_vector.size());
     for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
       HloSharding output_spec = src_strategies->leaf_vector[sid].output_sharding;
@@ -516,8 +516,8 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const HloInstruction* operand = ins->operand(0);
         const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies.get();
-        strategies->in_nodes.push_back(src_strategies.get());
+        strategies->following = src_strategies;
+        strategies->in_nodes.push_back(src_strategies);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -574,7 +574,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const HloInstruction* operand = ins->operand(0);
         const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies.get();
+        strategies->following = src_strategies;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
           strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
@@ -605,7 +605,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const HloInstruction* operand = ins->operand(0);
         const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies.get();
+        strategies->following = src_strategies;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
           strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
@@ -635,7 +635,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const HloInstruction* operand = ins->operand(0);
         const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies.get();
+        strategies->following = src_strategies;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
           strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }
@@ -730,7 +730,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const HloInstruction* operand = ins->operand(follow_idx);
         const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies.get();
+        strategies->following = src_strategies;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
           strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
         }

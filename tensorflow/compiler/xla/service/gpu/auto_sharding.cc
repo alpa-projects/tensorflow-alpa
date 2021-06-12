@@ -1465,6 +1465,8 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   std::vector<int> A_np;
   std::vector<double> v_np;
   for (const auto& pair : alias_set) {
+    const StrategyVector * const src_strategies = leaf_strategies[pair.first];
+    const StrategyVector * const dst_strategies = leaf_strategies[pair.second];
 
     Matrix raw_cost(src_strategies->leaf_vector.size(), dst_strategies->leaf_vector.size());
     for (size_t i = 0; i < src_strategies->leaf_vector.size(); ++i) {

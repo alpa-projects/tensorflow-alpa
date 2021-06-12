@@ -416,7 +416,8 @@ std::unique_ptr<StrategyVector> CreateTupleStrategyVector(size_t instruction_id)
 }
 
 void SetInNodesWithInstruction(std::unique_ptr<StrategyVector> &strategies, 
-                               const HloInstruction* ins) {
+                               const HloInstruction* ins,
+                               const StrategyMap& strategy_map) {
   for (int64 i = 0; i < ins->operand_count(); ++i) {
     strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
   }
@@ -524,7 +525,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        SetInNodesWithInstruction(strategies, ins);
+        SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -582,7 +583,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        SetInNodesWithInstruction(strategies, ins);
+        SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -611,7 +612,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        SetInNodesWithInstruction(strategies, ins);
+        SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -639,7 +640,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        SetInNodesWithInstruction(strategies, ins);
+        SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -732,7 +733,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        SetInNodesWithInstruction(strategies, ins);
+        SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
           HloSharding output_spec = src_strategies->leaf_vector[sid].output_sharding;
@@ -776,7 +777,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        SetInNodesWithInstruction(strategies, ins);
+        SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         // Map old dims to new dim
         std::vector<int64> old_dim_to_new_dim;
@@ -844,7 +845,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kDot: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         strategies->following = nullptr;
-        SetInNodesWithInstruction(strategies, ins);
+        SetInNodesWithInstruction(strategies, ins, strategy_map);
         const HloInstruction* lhs = ins->operand(0);
         const HloInstruction* rhs = ins->operand(1);
         const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();

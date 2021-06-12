@@ -1539,7 +1539,7 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
         }
       };
       for (const HloValue* value : liveness_set[leaf_strategies[i]->instruction_id]) {
-        traverse_live_instructions(strategy_map.at(value->instruction()));
+        traverse_live_instructions(strategy_map.at(value->instruction()).get());
       }
       L_np.push_back(current_liveness_set_indices.size());
     } else {

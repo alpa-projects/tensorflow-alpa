@@ -1037,7 +1037,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const StrategyVector * const src_strategies = strategy_map.at(operand).get();
         CHECK(src_strategies->is_tuple);
         strategies = FollowInsStrategyVector(
-            src_strategies->childs[ins->tuple_index()], ins->shape(), instruction_id,
+            src_strategies->childs[ins->tuple_index()].get(), ins->shape(), instruction_id,
             /* have_memory_cost= */ false, leaf_strategies);
         break;
       }
@@ -1442,7 +1442,8 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
 
   // Serialize node costs
   std::vector<double> c_np, d_np, m_np;
-  for (size_t i = 0; i < N; ++i) {
+  for (size_t i = 0; i < N; ++i) {  
+    const StrategyVector * const strategies = leaf_strategies[i];
     if (s_follow_np[i] < 0) {
       for (size_t j = 0; j < strategies->leaf_vector.size(); ++j) {
         c_np.push_back(strategies->leaf_vector[j].compute_cost);

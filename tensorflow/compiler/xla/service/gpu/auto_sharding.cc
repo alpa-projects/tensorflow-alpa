@@ -659,7 +659,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
             FollowInsCostVector(src_strategies->leaf_vector.size(), sid));
           for (int64 k = 1; k < ins->operand_count(); ++k) {
             resharding_costs.push_back(
-              ReshardingCostVector(*strategy_map.at(ins->operand(k)),
+              ReshardingCostVector(strategy_map.at(ins->operand(k)),
                 ins->operand(k)->shape(), *output_spec, cluster_env)
             );
           }
@@ -749,7 +749,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
                 FollowInsCostVector(src_strategies->leaf_vector.size(), sid));
             } else {
               resharding_costs.push_back(
-                ReshardingCostVector(*strategy_map.at(ins->operand(k)),
+                ReshardingCostVector(strategy_map.at(ins->operand(k)),
                   ins->operand(k)->shape(), output_spec, cluster_env)
               );
             }
@@ -837,7 +837,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
             ShardingStrategy({name, output_spec,
                               compute_cost, communication_cost, memory_cost,
                               {FollowInsCostVector(src_strategies->leaf_vector.size(), sid),
-                               ReshardingCostVector(*strategy_map.at(unit), unit->shape(),
+                               ReshardingCostVector(strategy_map.at(unit), unit->shape(),
                                  HloSharding::Replicate(), cluster_env)
                               }}));
         }
@@ -878,9 +878,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           ShardingStrategy({"SS = SR x RS @ {0, 1}", output_spec,
           0, 0, GetBytes(ins->shape()) / output_spec.NumTiles(),
           {
-            ReshardingCostVector(*strategy_map.at(lhs), lhs->shape(),
+            ReshardingCostVector(strategy_map.at(lhs), lhs->shape(),
               Tile(lhs->shape(), {lhs_space_dims[0]}, {0}, cluster_env), cluster_env),
-            ReshardingCostVector(*strategy_map.at(rhs), rhs->shape(),
+            ReshardingCostVector(strategy_map.at(rhs), rhs->shape(),
               Tile(rhs->shape(), {rhs_space_dims[0]}, {1}, cluster_env), cluster_env),
           }}));
 
@@ -891,9 +891,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           ShardingStrategy({"SS = SR x RS @ {1, 0}", output_spec,
           0, 0, GetBytes(ins->shape()) / output_spec.NumTiles(),
           {
-            ReshardingCostVector(*strategy_map.at(lhs), lhs->shape(),
+            ReshardingCostVector(strategy_map.at(lhs), lhs->shape(),
               Tile(lhs->shape(), {lhs_space_dims[0]}, {1}, cluster_env), cluster_env),
-            ReshardingCostVector(*strategy_map.at(rhs), rhs->shape(),
+            ReshardingCostVector(strategy_map.at(rhs), rhs->shape(),
               Tile(rhs->shape(), {rhs_space_dims[0]}, {0}, cluster_env), cluster_env),
           }}));
 
@@ -907,9 +907,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
             ShardingStrategy({"SR = SS x SR @ {0, 1} (allreduce @ 1)", output_spec,
             0, cluster_env.AllReduceCost(memory_cost, 1), memory_cost,
             {
-              ReshardingCostVector(*strategy_map.at(lhs), lhs->shape(),
+              ReshardingCostVector(strategy_map.at(lhs), lhs->shape(),
                 Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1}, cluster_env), cluster_env),
-              ReshardingCostVector(*strategy_map.at(rhs), rhs->shape(),
+              ReshardingCostVector(strategy_map.at(rhs), rhs->shape(),
                 Tile(rhs->shape(), {rhs_con_dims[0]}, {1}, cluster_env), cluster_env),
             }}));
         }
@@ -922,9 +922,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
             ShardingStrategy({"SR = SS x SR @ {1, 0} (allreduce @ 0)", output_spec,
             0, cluster_env.AllReduceCost(memory_cost, 0),  memory_cost,
             {
-              ReshardingCostVector(*strategy_map.at(lhs), lhs->shape(),
+              ReshardingCostVector(strategy_map.at(lhs), lhs->shape(),
                 Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0}, cluster_env), cluster_env),
-              ReshardingCostVector(*strategy_map.at(rhs), rhs->shape(),
+              ReshardingCostVector(strategy_map.at(rhs), rhs->shape(),
                 Tile(rhs->shape(), {rhs_con_dims[0]}, {0}, cluster_env), cluster_env),
             }}));
         }
@@ -939,9 +939,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
             ShardingStrategy({"RS = RS x SS @ {0, 1} (allreduce @ 0)", output_spec,
             0, cluster_env.AllReduceCost(memory_cost, 0),  memory_cost,
             {
-              ReshardingCostVector(*strategy_map.at(lhs), lhs->shape(),
+              ReshardingCostVector(strategy_map.at(lhs), lhs->shape(),
                 Tile(lhs->shape(), {lhs_con_dims[0]}, {0}, cluster_env), cluster_env),
-              ReshardingCostVector(*strategy_map.at(rhs), rhs->shape(),
+              ReshardingCostVector(strategy_map.at(rhs), rhs->shape(),
                 Tile(rhs->shape(), {rhs_con_dims[0], rhs_space_dims[0]}, {0, 1}, cluster_env), cluster_env),
             }}));
         }
@@ -955,9 +955,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
             ShardingStrategy({"RS = RS x SS @ {1, 0} (allreduce @ 1)", output_spec,
             0, cluster_env.AllReduceCost(memory_cost, 1),  memory_cost,
             {
-              ReshardingCostVector(*strategy_map.at(lhs), lhs->shape(),
+              ReshardingCostVector(strategy_map.at(lhs), lhs->shape(),
                 Tile(lhs->shape(), {lhs_con_dims[0]}, {1}, cluster_env), cluster_env),
-              ReshardingCostVector(*strategy_map.at(rhs), rhs->shape(),
+              ReshardingCostVector(strategy_map.at(rhs), rhs->shape(),
                 Tile(rhs->shape(), {rhs_con_dims[0], rhs_space_dims[0]}, {1, 0}, cluster_env), cluster_env),
             }}));
         }
@@ -977,9 +977,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
               ShardingStrategy({name, output_spec,
               0, 0, GetBytes(ins->shape()) / output_spec.NumTiles(),
               {
-                ReshardingCostVector(*strategy_map.at(lhs), lhs->shape(),
+                ReshardingCostVector(strategy_map.at(lhs), lhs->shape(),
                   Tile(lhs->shape(), {lhs_batch_dims[i]}, {j}, cluster_env), cluster_env),
-                ReshardingCostVector(*strategy_map.at(rhs), rhs->shape(),
+                ReshardingCostVector(strategy_map.at(rhs), rhs->shape(),
                   Tile(rhs->shape(), {rhs_batch_dims[i]}, {j}, cluster_env), cluster_env),
               }}));
           }
@@ -995,9 +995,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
             "Sb = Sb x Sb @ {0, 1}", output_spec,
             0, 0, GetBytes(ins->shape()) / output_spec.NumTiles(),
             {
-              ReshardingCostVector(*strategy_map.at(lhs), lhs->shape(),
+              ReshardingCostVector(strategy_map.at(lhs), lhs->shape(),
                 Tile(lhs->shape(), {lhs_batch_dims[0], lhs_batch_dims[1]}, {0, 1}, cluster_env), cluster_env),
-              ReshardingCostVector(*strategy_map.at(rhs), rhs->shape(),
+              ReshardingCostVector(strategy_map.at(rhs), rhs->shape(),
                 Tile(rhs->shape(), {rhs_batch_dims[0], rhs_batch_dims[1]}, {0, 1}, cluster_env), cluster_env),
             }}));
         }

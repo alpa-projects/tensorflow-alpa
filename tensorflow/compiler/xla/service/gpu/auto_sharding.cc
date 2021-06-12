@@ -61,9 +61,9 @@ struct StrategyVector {
   // the index of the HLO instruction that generates this strategy vector.
   size_t instruction_id;
   // the followed strategy. Used for merging nodes.
-  StrategyVector *following;
+  const StrategyVector *following;
   // the conneced nodes used for resharding costs;
-  std::vector<StrategyVector *> in_nodes;
+  std::vector<const StrategyVector *> in_nodes;
   // Used when is_tuple == False. Leaf strategy vector.
   std::vector<ShardingStrategy> leaf_vector;
   // Used when is_tuple == True. A list of strategy vectors of child nodes.

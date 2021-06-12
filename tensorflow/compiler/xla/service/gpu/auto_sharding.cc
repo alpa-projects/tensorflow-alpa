@@ -61,7 +61,7 @@ struct StrategyVector {
   // the index of the HLO instruction that generates this strategy vector.
   size_t instruction_id;
   // the followed strategy. Used for merging nodes.
-  const StrategyVector *following;
+  const StrategyVector *following = nullptr;
   // the conneced nodes used for resharding costs;
   std::vector<const StrategyVector *> in_nodes;
   // Used when is_tuple == False. Leaf strategy vector.
@@ -379,7 +379,7 @@ InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& seque
 
 // Compute the resharding cost vector from multiple possible strategies
 // to a desired sharding spec
-std::vector<double> ReshardingCostVector(const StrategyVector * const strategies,
+std::vector<double> ReshardingCostVector(const StrategyVector *strategies,
                                          const Shape& shape,
                                          const HloSharding& required_sharding,
                                          const ClusterEnvironment& cluster_env) {
@@ -415,8 +415,15 @@ std::unique_ptr<StrategyVector> CreateTupleStrategyVector(size_t instruction_id)
   return std::move(strategies);
 }
 
+void SetInNodesWithInstruction(std::unique_ptr<StrategyVector> &strategies, 
+                               const HloInstruction* ins) {
+  for (int64 i = 0; i < ins->operand_count(); ++i) {
+    strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
+  }
+}
+
 std::unique_ptr<StrategyVector> FollowInsStrategyVector(
-    const StrategyVector * const src_strategies,
+    const StrategyVector *src_strategies,
     const Shape& shape,
     size_t instruction_id,
     bool have_memory_cost,
@@ -514,10 +521,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kBroadcast: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+        const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        strategies->in_nodes.push_back(src_strategies);
+        SetInNodesWithInstruction(strategies, ins);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -572,12 +579,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kReshape: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+        const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
-        }
+        SetInNodesWithInstruction(strategies, ins);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -603,12 +608,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kTranspose: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+        const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
-        }
+        SetInNodesWithInstruction(strategies, ins);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -633,12 +636,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kDynamicUpdateSlice: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+        const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
-        }
+        SetInNodesWithInstruction(strategies, ins);
 
         // Create follow strategies
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -728,12 +729,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           }
         }
         const HloInstruction* operand = ins->operand(follow_idx);
-        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+        const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
-        }
+        SetInNodesWithInstruction(strategies, ins);
 
         for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
           HloSharding output_spec = src_strategies->leaf_vector[sid].output_sharding;
@@ -774,12 +773,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         const HloInstruction* operand = ins->operand(0);
         const HloInstruction* unit = ins->operand(1);
         const auto& dimensions = ins->dimensions();
-        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+        const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
-        for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
-        }
+        SetInNodesWithInstruction(strategies, ins);
 
         // Map old dims to new dim
         std::vector<int64> old_dim_to_new_dim;
@@ -847,9 +844,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kDot: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         strategies->following = nullptr;
-        for (int64 i = 0; i < ins->operand_count(); ++i) {
-          strategies->in_nodes.push_back(strategy_map.at(ins->operand(i)).get());
-        }
+        SetInNodesWithInstruction(strategies, ins);
         const HloInstruction* lhs = ins->operand(0);
         const HloInstruction* rhs = ins->operand(1);
         const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
@@ -1009,7 +1004,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies->childs.reserve(ins->operand_count());
         for (size_t i = 0; i < ins->operand_count(); ++i) {
           const HloInstruction* operand = ins->operand(i);
-        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+        const StrategyVector *src_strategies = strategy_map.at(operand).get();
           strategies->childs.push_back(
               std::move(FollowInsStrategyVector(
                   src_strategies, operand->shape(), instruction_id,
@@ -1034,7 +1029,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       }
       case HloOpcode::kGetTupleElement: {
         const HloInstruction* operand = ins->operand(0);
-        const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+        const StrategyVector *src_strategies = strategy_map.at(operand).get();
         CHECK(src_strategies->is_tuple);
         strategies = FollowInsStrategyVector(
             src_strategies->childs[ins->tuple_index()].get(), ins->shape(), instruction_id,
@@ -1044,7 +1039,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kCustomCall: {
         if (ins->IsCustomCall("xla_pipeline_marker")) {
           const HloInstruction* operand = ins->operand(0);
-          const StrategyVector * const src_strategies = strategy_map.at(operand).get();
+          const StrategyVector *src_strategies = strategy_map.at(operand).get();
           CHECK(src_strategies->is_tuple);
           // TODO (zhuohan): The memory cost of the marker should eventually be 0.
           strategies = FollowInsStrategyVector(src_strategies, ins->shape(), instruction_id,
@@ -1082,16 +1077,16 @@ AliasSet BuildAliasSet(
   const HloInstruction* output_tuple = entry->root_instruction();
 
   AliasSet alias_set;
-  std::function<void(const std::unique_ptr<StrategyVector>&,
-      const std::unique_ptr<StrategyVector>&)> traverse_tuple_alias;
+  std::function<void(const StrategyVector *,
+      const StrategyVector *)> traverse_tuple_alias;
   traverse_tuple_alias = [&](
-      const std::unique_ptr<StrategyVector>& src_strategies,
-      const std::unique_ptr<StrategyVector>& dst_strategies) {
+      const StrategyVector *src_strategies,
+      const StrategyVector *dst_strategies) {
     if (src_strategies->is_tuple) {
       CHECK(dst_strategies->is_tuple);
       CHECK_EQ(src_strategies->childs.size(), dst_strategies->childs.size());
       for (size_t i = 0; i < src_strategies->childs.size(); ++i) {
-        traverse_tuple_alias(src_strategies->childs[i], dst_strategies->childs[i]);
+        traverse_tuple_alias(src_strategies->childs[i].get(), dst_strategies->childs[i].get());
       }
     } else {
       alias_set.insert(std::make_pair(src_strategies->id, dst_strategies->id));
@@ -1102,7 +1097,7 @@ AliasSet BuildAliasSet(
       const HloInstruction* src_ins = parameter_instructions[alias.parameter_number];
       const HloInstruction* dst_ins = dataflow_analysis.GetUniqueValueAt(
           output_tuple, output_index).instruction();
-      traverse_tuple_alias(strategy_map.at(src_ins), strategy_map.at(dst_ins));
+      traverse_tuple_alias(strategy_map.at(src_ins).get(), strategy_map.at(dst_ins).get());
     });
 
   return alias_set;
@@ -1443,7 +1438,7 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   // Serialize node costs
   std::vector<double> c_np, d_np, m_np;
   for (size_t i = 0; i < N; ++i) {  
-    const StrategyVector * const strategies = leaf_strategies[i];
+    const StrategyVector *strategies = leaf_strategies[i];
     if (s_follow_np[i] < 0) {
       for (size_t j = 0; j < strategies->leaf_vector.size(); ++j) {
         c_np.push_back(strategies->leaf_vector[j].compute_cost);
@@ -1466,8 +1461,8 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   std::vector<int> A_np;
   std::vector<double> v_np;
   for (const auto& pair : alias_set) {
-    const StrategyVector * const src_strategies = leaf_strategies[pair.first];
-    const StrategyVector * const dst_strategies = leaf_strategies[pair.second];
+    const StrategyVector *src_strategies = leaf_strategies[pair.first];
+    const StrategyVector *dst_strategies = leaf_strategies[pair.second];
 
     Matrix raw_cost(src_strategies->leaf_vector.size(), dst_strategies->leaf_vector.size());
     for (size_t i = 0; i < src_strategies->leaf_vector.size(); ++i) {
@@ -1528,8 +1523,8 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   for (size_t i = 0; i < N; ++i) {
     if (filter_func(leaf_strategies[i]->instruction_id)) {
       std::vector<int>& current_liveness_set_indices = liveness_set_indices[i];
-      std::function<void(const StrategyVector * const)> traverse_live_instructions;
-      traverse_live_instructions = [&](const StrategyVector * const strategies) {
+      std::function<void(const StrategyVector *)> traverse_live_instructions;
+      traverse_live_instructions = [&](const StrategyVector *strategies) {
         if (strategies->is_tuple) {
           for (const auto& child : strategies->childs) {
             traverse_live_instructions(child.get());
@@ -1797,15 +1792,14 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   for (HloInstruction* inst : entry->instructions()) {
     auto iter = strategy_map.find(inst);
     if (iter != strategy_map.end()) {
-      const StrategyVector * const strategies = iter->second.get();
+      const StrategyVector *strategies = iter->second.get();
       if (strategies->is_tuple) {
         const Shape& out_shape = inst->shape();
         ShapeTree<HloSharding> tuple_sharding(out_shape, HloSharding::Replicate());
-        std::function<void(
-            const StrategyVector * const strategies_)> get_flattened_shardings;
+        std::function<void(const StrategyVector *)> get_flattened_shardings;
         std::vector<HloSharding> flattened_shardings;
         get_flattened_shardings = [&]( 
-            const StrategyVector * const strategies_) {
+            const StrategyVector *strategies_) {
           if (strategies_->is_tuple) {
             for (const auto& child : strategies->childs) {
               get_flattened_shardings(child.get());

@@ -445,8 +445,7 @@ std::unique_ptr<StrategyVector> FollowInsStrategyVector(
       HloSharding output_spec =
           src_strategies->leaf_vector[sid].output_sharding;
       std::string name = SimpleToString(output_spec);
-      double compute_cost = 0;
-      double communication_cost = 0;
+      double compute_cost = 0, communication_cost = 0;
       double memory_cost =
           have_memory_cost ? GetBytes(shape) / output_spec.NumTiles() : 0;
       std::vector<std::vector<double>> resharding_costs = {
@@ -585,8 +584,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
                   "S" + std::to_string(i) + " @ " + std::to_string(j);
               HloSharding output_spec =
                   Tile(ins->shape(), {i}, {j}, cluster_env);
-              double compute_cost = 0;
-              double communication_cost = 0;
+              double compute_cost = 0, communication_cost = 0;
               double memory_cost =
                   GetBytes(ins->shape()) / output_spec.NumTiles();
               strategies->leaf_vector.push_back(ShardingStrategy(
@@ -636,8 +634,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           }
 
           std::string name = SimpleToString(*output_spec);
-          double compute_cost = 0;
-          double communication_cost = 0;
+          double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec->NumTiles();
           strategies->leaf_vector.push_back(ShardingStrategy(
               {name,
@@ -668,8 +665,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
               ins->dimensions());
 
           std::string name = SimpleToString(output_spec);
-          double compute_cost = 0;
-          double communication_cost = 0;
+          double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
           strategies->leaf_vector.push_back(ShardingStrategy(
               {name,
@@ -708,8 +704,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           }
 
           std::string name = SimpleToString(*output_spec);
-          double compute_cost = 0;
-          double communication_cost = 0;
+          double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec->NumTiles();
           std::vector<std::vector<double>> resharding_costs;
           resharding_costs.push_back(
@@ -800,8 +795,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
               src_strategies->leaf_vector[sid].output_sharding;
 
           std::string name = SimpleToString(output_spec);
-          double compute_cost = 0;
-          double communication_cost = 0;
+          double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
           std::vector<std::vector<double>> resharding_costs;
           for (int64 k = 0; k < ins->operand_count(); ++k) {
@@ -877,9 +871,8 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
 
           HloSharding output_spec =
               Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims, cluster_env);
-          double compute_cost = 0.0;
+          double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
-          double communication_cost = 0.0;
           for (auto mesh_dim : all_reduce_dims) {
             communication_cost +=
                 cluster_env.AllReduceCost(memory_cost, mesh_dim);

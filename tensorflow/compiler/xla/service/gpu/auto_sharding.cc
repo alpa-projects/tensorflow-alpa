@@ -1946,6 +1946,12 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     }
   }
 
+  // ----- Put the sharded HLO module back to Python -----
+  HloModuleProto module_proto = module->ToProto();
+  std::string serilaized_module_proto;
+  CHECK(module_proto.SerializeToString(serilaized_module_proto));
+  std::cerr << "serialized_module_proto: " << serilaized_module_proto << std::endl;
+
   // std::cerr << "===== Exit AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();
   // std::cerr << "=====================================" << std::endl;

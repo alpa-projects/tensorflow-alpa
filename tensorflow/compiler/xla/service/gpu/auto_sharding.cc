@@ -1725,6 +1725,7 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   return std::make_pair(std::move(s_val), std::move(e_val));
 }
 
+// Set the HloSharding for all instructions according to the ILP solution.
 void SetHloSharding(HloModule* module,
                     const StrategyMap& strategy_map,
                     const CostGraph& cost_graph,

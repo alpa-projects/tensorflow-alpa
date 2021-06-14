@@ -45,11 +45,6 @@ void HostMemoryTable::remove(int64 executable_key, int64 key) {
   lists_.erase(std::make_pair(executable_key, key));
 }
 
-int64 HostMemoryTable::getOrCreateExecutableKey(const Executable& e) {
-  // TODO(yonghao)
-  return 0;
-}
-
 HostMemoryTable::~HostMemoryTable() {}
 // deallocate memories in the destructor of SwapOutThunk instead of here
 

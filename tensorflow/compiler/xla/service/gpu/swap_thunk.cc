@@ -10,23 +10,33 @@
 namespace xla {
 namespace gpu {
 
-SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info, 
-                          std::vector<BufferAllocation::Slice> operands,
-                          BufferAllocation::Slice result,
-                          std::vector<int64> byte_sizes, 
-                          int64 key
-                          )
-    : Thunk(Thunk::kSwapOut, thunk_info),  // todo: kCopy? kSwap? 
+int64 GetExecutableKey(const GpuExecutable* executable) {
+  static absl::flat_hash_map<const GpuExecutable*, int64> map;
+  static int64 counter = 0;
+  auto iter = map.find(executable);
+  if (iter != map.end()) {
+    return iter->second;
+  } else {
+    map.emplace(executable, counter);
+    return counter++;
+  }
+}
+
+SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
+                           std::vector<BufferAllocation::Slice> operands,
+                           BufferAllocation::Slice result,
+                           std::vector<int64> byte_sizes, int64 key)
+    : Thunk(Thunk::kSwapOut, thunk_info),
       operands_(std::move(operands)),
       result_(std::move(result)),
-      byte_sizes_(std::move(byte_sizes)), 
+      byte_sizes_(std::move(byte_sizes)),
       key_(key),
       executable_key_(-1) {}
 
 Status SwapOutThunk::Initialize(const GpuExecutable& executable,
                                 se::StreamExecutor* executor) {
   // register the key of the executable
-  executable_key_ = 0;  // TODO(yonghao)
+  executable_key_ = GetExecutableKey(&executable);
   return Status::OK();
 }
 
@@ -35,7 +45,7 @@ SwapOutThunk::~SwapOutThunk() {
     // deallocate memory for this thunk
     auto list_ptr = local_host_memory_table().GetOrNull(executable_key_, key_);
     if (list_ptr != nullptr) {
-      for (auto iter = list_ptr->begin(); iter != list_ptr->end();++iter) {
+      for (auto iter = list_ptr->begin(); iter != list_ptr->end(); ++iter) {
         executor_->HostMemoryDeallocate(*iter);
       }
     }
@@ -46,34 +56,37 @@ SwapOutThunk::~SwapOutThunk() {
 Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   // gpu_stream is CUstream or e.g. the equivalent type in ROCm.
   static int64 formal_out = 0;
-  
+
   TF_ASSIGN_OR_RETURN(const GlobalDeviceId global_device_id,
                       params.GetGlobalDeviceId());
   TF_ASSIGN_OR_RETURN(const DeviceAssignment::LogicalID logical_id,
                       params.device_assn->LogicalIdForDevice(global_device_id));
   int partitionId = logical_id.computation_id;
 
-  auto host_memory_ref = local_host_memory_table().GetOrCreate(executable_key_, key_);
+  auto host_memory_ref =
+      local_host_memory_table().GetOrCreate(executable_key_, key_);
   if (host_memory_ref->empty()) {
-    // alloc memory for the first time. todo: will this influence profile? 
+    // alloc memory for the first time. todo: will this influence profile?
     executor_ = params.stream->parent();
     for (int64 byte_size : byte_sizes_) {
       host_memory_ref->push_back(executor_->HostMemoryAllocate(byte_size));
     }
-      // todo: GpuExecutor's HostMemoryAllocate is simply a new char[]. It does not consider NUMA. Allocate it manually and then uses a HostMemoryRegister instead. 
+    // todo: GpuExecutor's HostMemoryAllocate is simply a new char[]. It does
+    // not consider NUMA. Allocate it manually and then uses a
+    // HostMemoryRegister instead.
   }
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-  for (int32 i = 0;i < operands_.size();++i) {
+  for (int32 i = 0; i < operands_.size(); ++i) {
     const BufferAllocation::Slice& slice = operands_.at(i);
     if (!slice.allocation()) {
       return InternalError("custom call input missing buffer allocation");
     }
-    se::DeviceMemoryBase destination_data = 
+    se::DeviceMemoryBase destination_data =
         params.buffer_allocations->GetDeviceAddress(slice);
 
-    void *source_address_ = host_memory_ref->at(i);
-    params.stream->ThenMemcpy(source_address_, destination_data, 
+    void* source_address_ = host_memory_ref->at(i);
+    params.stream->ThenMemcpy(source_address_, destination_data,
                               byte_sizes_.at(i));
   }
 #else   //  GOOGLE_CUDA || TENSORFLOW_USE_ROCM
@@ -84,21 +97,19 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   return Status::OK();
 }
 
-SwapInThunk::SwapInThunk(ThunkInfo thunk_info, 
-                        BufferAllocation::Slice operand,
-                        std::vector<BufferAllocation::Slice> results,
-                        std::vector<int64> byte_sizes, 
-                        int64 key)
-    : Thunk(Thunk::kSwapIn, thunk_info),  // todo: kCopy? kSwap?
+SwapInThunk::SwapInThunk(ThunkInfo thunk_info, BufferAllocation::Slice operand,
+                         std::vector<BufferAllocation::Slice> results,
+                         std::vector<int64> byte_sizes, int64 key)
+    : Thunk(Thunk::kSwapIn, thunk_info),
       operand_(std::move(operand)),
       results_(std::move(results)),
-      byte_sizes_(std::move(byte_sizes)), 
+      byte_sizes_(std::move(byte_sizes)),
       key_(key),
       executable_key_(-1) {}
 
 Status SwapInThunk::Initialize(const GpuExecutable& executable,
-                                se::StreamExecutor* executor) {
-  executable_key_ = 0;  // TODO(yonghao)
+                               se::StreamExecutor* executor) {
+  executable_key_ = GetExecutableKey(&executable);
   return Status::OK();
 }
 
@@ -114,16 +125,17 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
   auto host_memory_ref = local_host_memory_table().Get(executable_key_, key_);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-  for (int32 i = 0; i < results_.size();++i) {
+  for (int32 i = 0; i < results_.size(); ++i) {
     const BufferAllocation::Slice& slice = results_.at(i);
     if (!slice.allocation()) {
       return InternalError("custom call output missing buffer allocation");
     }
-    se::DeviceMemoryBase destination_data = 
+    se::DeviceMemoryBase destination_data =
         params.buffer_allocations->GetDeviceAddress(slice);
 
-    void *source_address_ = host_memory_ref->at(i);
-    params.stream->ThenMemcpy(&destination_data, source_address_, byte_sizes_.at(i));
+    void* source_address_ = host_memory_ref->at(i);
+    params.stream->ThenMemcpy(&destination_data, source_address_,
+                              byte_sizes_.at(i));
   }
 #else   //  GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   return Unavailable(
@@ -133,5 +145,5 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
   return Status::OK();
 }
 
-} // namespace gpu
-} // namespace xla
+}  // namespace gpu
+}  // namespace xla

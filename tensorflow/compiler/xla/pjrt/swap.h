@@ -8,7 +8,6 @@
 #include "tensorflow/compiler/xla/types.h"
 
 namespace xla {
-// TODO(yonghao): A shape acquires its host copy by a key and a int64 RunId
 
 class HostMemoryTable {
  private:
@@ -24,8 +23,6 @@ class HostMemoryTable {
   const AddressList* GetOrNull(int64 executable_key, int64 key);
 
   void remove(int64 executable_key, int64 key);
-
-  int64 getOrCreateExecutableKey(const Executable& e);
 
   // given the logical executable
  private:

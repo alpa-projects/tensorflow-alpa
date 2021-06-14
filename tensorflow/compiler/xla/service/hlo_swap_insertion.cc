@@ -33,9 +33,11 @@
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/logging.h"
 
-// TODO(yonghao): has_indirect_use
+// TODO(yonghao): has_indirect_use;
 // todo: store the space for parameter specifically, instead of wasting time and
-// space for it todo: handle calls todo: reschedule the code and decouple
+// space for it;
+// todo: handle calls;
+// todo: reschedule the code and decouple;
 namespace xla {
 
 namespace {

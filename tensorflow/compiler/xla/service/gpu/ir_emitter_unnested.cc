@@ -91,6 +91,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/parallel_loop_emitter.h"
 #include "tensorflow/compiler/xla/service/gpu/replica_id_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/sequential_thunk.h"
+#include "tensorflow/compiler/xla/service/gpu/swap_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/target_util.h"
 #include "tensorflow/compiler/xla/service/gpu/thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/triangular_solve_thunk.h"
@@ -935,6 +936,10 @@ Status IrEmitterUnnested::EmitCustomCall(mlir::Operation* op) {
     if (call.call_target_name() == "SliceToDynamic") {
       return EmitSliceToDynamic(op);
     }
+    if (call.call_target_name() == kBuiltinSwapOutTarget ||
+        call.call_target_name() == kBuiltinSwapInTarget) {
+      return EmitSwapThunk(op);
+    }
     return EmitCustomCallThunk(op);
   }
 
@@ -1466,8 +1471,95 @@ Status IrEmitterUnnested::EmitCholeskyThunk(mlir::Operation* op) {
 }
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
+Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+  const std::string call_target_name = custom_call.call_target_name().str();
+
+  std::vector<BufferAllocation::Slice> operands;
+  std::vector<BufferAllocation::Slice> results;
+
+  if (custom_call.target_arg_mapping()) {
+    auto values_to_slices_with_token_holes =
+        [&](mlir::ValueRange operands, mlir::ArrayAttr op_to_target_mapping,
+            mlir::IntegerAttr num_target)
+        -> StatusOr<std::vector<BufferAllocation::Slice>> {
+      std::vector<BufferAllocation::Slice> slices(num_target.getInt());
+      for (auto index_and_value_it :
+           llvm::zip(op_to_target_mapping, operands)) {
+        mlir::Attribute index_attr = std::get<0>(index_and_value_it);
+        mlir::Value value = std::get<1>(index_and_value_it);
+        int64 index = index_attr.cast<mlir::IntegerAttr>().getInt();
+        TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
+                            GetAllocationSliceForMlir(value));
+        slices[index] = slice;
+      }
+      return slices;
+    };
+
+    mlir::lmhlo::CustomCallTargetArgMapping target_mapping =
+        *custom_call.target_arg_mapping();
+    TF_ASSIGN_OR_RETURN(
+        operands, values_to_slices_with_token_holes(
+                      custom_call.args(), target_mapping.args_to_target_args(),
+                      target_mapping.num_args()));
+    TF_ASSIGN_OR_RETURN(results, values_to_slices_with_token_holes(
+                                     custom_call.output(),
+                                     target_mapping.results_to_target_results(),
+                                     target_mapping.num_results()));
+  } else {
+    auto values_to_slices = [&](mlir::ValueRange values)
+        -> StatusOr<std::vector<BufferAllocation::Slice>> {
+      std::vector<BufferAllocation::Slice> slices;
+      for (mlir::Value value : values) {
+        TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
+                            GetAllocationSliceForMlir(value));
+        slices.push_back(slice);
+      }
+      return slices;
+    };
+
+    TF_ASSIGN_OR_RETURN(operands, values_to_slices(custom_call.args()));
+    TF_ASSIGN_OR_RETURN(results, values_to_slices(custom_call.output()));
+  }
+
+  int64 key = std::stoll(custom_call.backend_config().str());
+  std::vector<int64> byte_sizes;
+  if (call_target_name == kBuiltinSwapOutTarget) {
+    CHECK(results.size() == 1)
+        << "builtinSwapOut meets multiple results, is: " << results.size();
+    CHECK(results[0].size() == 8)
+        << "builtinSwapOut meets result size incorrect, is: "
+        << results[0].size();
+    byte_sizes.reserve(operands.size());
+    for (auto slice : operands) {
+      byte_sizes.push_back(slice.size());
+    }
+    AddThunkToThunkSequence(absl::make_unique<SwapOutThunk>(
+        input.thunk_info, std::move(operands), results[0],
+        std::move(byte_sizes), key));
+  } else {
+    CHECK(call_target_name == kBuiltinSwapInTarget)
+        << "unexpected custom call target for emit swap thunk";
+    CHECK(operands.size() == 1)
+        << "builtinSwapIn meets multiple operands, is: " << operands.size();
+    CHECK(operands[0].size() == 8)
+        << "builtinSwapIn meets result size incorrect, is: "
+        << operands[0].size();
+    byte_sizes.reserve(results.size());
+    for (auto slice : results) {
+      byte_sizes.push_back(slice.size());
+    }
+    AddThunkToThunkSequence(absl::make_unique<SwapInThunk>(
+        input.thunk_info, operands[0], std::move(results),
+        std::move(byte_sizes), key));
+  }
+
+  return Status::OK();
+}
+
 Status IrEmitterUnnested::EmitCustomCallThunk(mlir::Operation* op) {
   auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+
   const std::string call_target_name = custom_call.call_target_name().str();
 
   void* call_target = CustomCallTargetRegistry::Global()->Lookup(
@@ -5347,6 +5439,10 @@ Status IrEmitterUnnested::EmitOp(mlir::Operation* op) {
     }
     if (call.call_target_name() == "SliceToDynamic") {
       return EmitSliceToDynamic(op);
+    }
+    if (call.call_target_name() == kBuiltinSwapOutTarget ||
+        call.call_target_name() == kBuiltinSwapInTarget) {
+      return EmitSwapThunk(op);
     }
     return EmitCustomCallThunk(op);
   }

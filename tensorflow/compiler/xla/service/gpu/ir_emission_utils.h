@@ -165,6 +165,10 @@ extern const char* const kCusolverCholeskyCallTarget;
 // or cuDNN convolution.
 bool ImplementedAsLibraryCall(const HloInstruction& hlo);
 
+// Swap in or out. 
+extern const char* const kBuiltinSwapOutTarget;
+extern const char* const kBuiltinSwapInTarget;
+
 // Layout analysis for fusion. The constructor will analyze the given LMHLO
 // fusion operation and store the inferred layouts of fusion internal values.
 // The default constructor will be used when dealing with LMHLO operations, in

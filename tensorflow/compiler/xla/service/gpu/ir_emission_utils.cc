@@ -145,6 +145,14 @@ bool IsCustomCallToCusolver(const HloInstruction& hlo) {
   return target == kCusolverCholeskyCallTarget;
 }
 
+bool ImplementedAsLibraryCall(const HloInstruction& hlo) {
+  return IsCublasGemm(hlo) || IsCustomCallToDnnBatchNorm(hlo) ||
+         IsCustomCallToDnnConvolution(hlo);
+}
+
+const char* const kBuiltinSwapOutTarget = "__builtin$SwapOut";
+const char* const kBuiltinSwapInTarget = "__builtin$SwapIn";
+
 static ReductionDimensions GetReductionKindAndContiguousComponentsImpl(
     const Shape& input_shape, absl::Span<const int64_t> dims_to_reduce) {
   DimensionVector dims_to_keep;

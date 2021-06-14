@@ -654,6 +654,7 @@ cc_library(
         "outfeed_thunk.cc",
         "replica_id_thunk.cc",
         "sequential_thunk.cc",
+        "swap_thunk.cc", 
         "thunk_schedule.cc",
         "while_thunk.cc",
     ] + if_gpu_is_configured([
@@ -676,6 +677,7 @@ cc_library(
         "outfeed_thunk.h",
         "replica_id_thunk.h",
         "sequential_thunk.h",
+        "swap_thunk.h", 
         "thunk_schedule.h",
         "while_thunk.h",
     ] + if_gpu_is_configured([
@@ -722,6 +724,7 @@ cc_library(
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
+        "//tensorflow/compiler/xla/pjrt:pjrt_gpu_swap", 
         "//tensorflow/compiler/xla/service:buffer_assignment",
         "//tensorflow/compiler/xla/service:custom_call_status_internal",
         "//tensorflow/compiler/xla/service:executable",

@@ -57,6 +57,10 @@ bool IsCustomCallToCusolver(const HloInstruction& hlo);
 // is a success/failure code per batch element.
 extern const char* const kCusolverCholeskyCallTarget;
 
+// Swap in or out. 
+extern const char* const kBuiltinSwapOutTarget;
+extern const char* const kBuiltinSwapInTarget;
+
 // Returns true if either the dimensions being reduced or the dimensions being
 // kept are contiguous in the input of the reduce instruction.
 bool IsReductionFromOrToContiguousDimensions(const HloInstruction& reduce);

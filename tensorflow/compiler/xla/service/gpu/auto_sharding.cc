@@ -1724,8 +1724,35 @@ std::string PrintInstructions(const HloInstructionSequence& sequence) {
   return os.str();
 }
 
-// TODO (zhuohan): make prints work again
-/*
+、
+std::string PrintStrategyVector(const StrategyVector* strategies, 
+                                size_t indention = 0) {
+  std::ostringstream os;
+  if (strategies->is_tuple) {
+    for (size_t i = 0; i < strategies->childs.size(); ++i) {
+      os << std::string(indention, ' ') << "Tuple element #" << i << ":\n";
+      PrintStrategyVector(strategies->childs[i].get(), indention + 2);
+    }
+  }
+  else {
+    for (const auto& strategy: strategies->leaf_vector) {
+      os << std::string(indention, ' ') << "Strategy " << strategy.name << ", " 
+         << strategy.compute_cost << "," << strategy.communication_cost << ", " 
+         << strategy.memory_cost << ", {";
+
+      for (const auto& cost_vector: strategy.resharding_costs) {
+        os << "[";
+        for (double cost: cost_vector) {
+          os << cost << ", ";
+        }
+        os << "], ";
+      }
+      os << "}\n";
+    }
+  }
+  return os.str();
+}
+
 // Print strategy map for debugging
 std::string PrintStrategyMap(
   const StrategyMap& strategy_map,
@@ -1736,19 +1763,7 @@ std::string PrintStrategyMap(
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
   for (size_t i = 0; i < instructions.size(); ++i) {
     os << "Instruction " << i << ": " << instructions[i]->ToString() << "\n";
-    for (const auto& strategy: strategy_map.at(instructions[i])) {
-      os << "Strategy " << strategy.name << ", " << strategy.compute_cost << ",
-"
-         << strategy.communication_cost << ", " << strategy.memory_cost << "\n";
-
-      for (const auto& cost_vector: strategy.resharding_costs) {
-        os << "[";
-        for (double cost: cost_vector) {
-          os << cost << ", ";
-        }
-        os << "]\n";
-      }
-    }
+    PrintStrategyVector(strategy_map.at(instructions[i]));
   }
   return os.str();
 }
@@ -1758,25 +1773,24 @@ std::string PrintAutoShardingSolution(
   const HloInstructionSequence& sequence,
   const LivenessSet& liveness_set,
   const StrategyMap& strategy_map,
+  const LeafStrategies& leaf_strategies,
   const CostGraph& cost_graph,
   const std::vector<int64>& s_val,
-  const std::vector<int64>& e_val
 ) {
   std::ostringstream os;
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
-  size_t N = instructions.size();
+  size_t N = leaf_strategies.size();
 
   // Print the choosen strategy
   os << "=== Auto sharding strategy ===\n";
   for (size_t i = 0; i < N; ++i) {
-    os << i << " " <<
-instructions[i]->ToString(HloPrintOptions::ShortParsable())
+    os << i << " " << instructions[leaf_strategies[i]->instruction_id]->ToString(HloPrintOptions::ShortParsable())
        << "  ";
     int stra_idx = cost_graph.RemapIndex(i, s_val[i]);
     if (cost_graph.follow_idx[i] < 0) {
-      os << strategy_map.at(instructions[i])[stra_idx].name << "\n";
+      os << leaf_strategies[i]->leaf_vector[stra_idx].name << "\n";
     } else {
-      os << strategy_map.at(instructions[i])[stra_idx].name << " follow "
+      os << leaf_strategies[i]->leaf_vector[stra_idx].name << " follow "
          << cost_graph.follow_idx[i] << "\n";
     }
   }
@@ -1797,7 +1811,7 @@ instructions[i]->ToString(HloPrintOptions::ShortParsable())
 
   return os.str();
 }
-*/
+
 
 StatusOr<bool> AutoSharding::Run(HloModule* module) {
   if (!pass_context::GetBool("auto_sharding::enable", false)) {
@@ -1887,13 +1901,10 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     s_val = pass_context::GetIntVector("auto_sharding::strategy_vector");
   }
 
-  // TODO (zhuohan): make prints work again
-  /*
   if (pass_context::GetBool("auto_sharding::print_strategy", false)) {
     std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
                                            cost_graph, s_val, e_val);
   }
-  */
 
   // ----- Set Sharding -----
   HloComputation* entry = module->entry_computation();

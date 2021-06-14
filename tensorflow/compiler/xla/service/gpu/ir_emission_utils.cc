@@ -205,6 +205,9 @@ bool ImplementedAsLibraryCall(const HloInstruction& hlo) {
          IsCustomCallToDnnConvolution(hlo);
 }
 
+const char* const kBuiltinSwapOutTarget = "__builtin$SwapOut";
+const char* const kBuiltinSwapInTarget = "__builtin$SwapIn";
+
 static ReductionDimensions GetReductionKindAndContiguousComponentsImpl(
     const Shape& input_shape, absl::Span<const int64> dims_to_reduce) {
   DimensionVector dims_to_keep;

@@ -4245,6 +4245,55 @@ tf_cc_test(
     ],
 )
 
+cc_library(
+    name = "hlo_swap_insertion", 
+    srcs = ["hlo_swap_insertion.cc"], 
+    hdrs = ["hlo_swap_insertion.h"], 
+    deps = [
+        ":buffer_value",
+        ":call_graph",
+        ":flatten_call_graph",
+        ":hlo",
+        ":hlo_casting_utils",
+        ":hlo_dce",
+        ":hlo_memory_scheduler",
+        ":hlo_ordering",
+        ":logical_buffer",
+        ":tuple_points_to_analysis",
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla:statusor",
+        "//tensorflow/compiler/xla:types",
+        "//tensorflow/compiler/xla:util",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+    ]
+)
+tf_cc_test(
+    name = "hlo_swap_insertion_test", 
+    srcs = ["hlo_swap_insertion_test.cc"], 
+    deps = [
+        ":hlo_swap_insertion", 
+        ":flatten_call_graph",
+        ":hlo",
+        ":hlo_matchers",
+        ":hlo_ordering",
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:types",
+        "//tensorflow/compiler/xla:xla_data_proto_cc",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+        "//tensorflow/core:test",
+        "@com_google_absl//absl/flags:flag",
+    ]
+)
+
 tf_cc_test(
     name = "hlo_dce_test",
     srcs = ["hlo_dce_test.cc"],

@@ -206,6 +206,11 @@ Status ExecuteThunks(const std::string& module_name,
     // execute before the program is scheduled to start on the main stream.
     sub_streams.back()->ThenWaitFor(main_stream);
   }
+  const int sub_stream_size = sub_streams.size();
+  se::Stream* host_to_device_stream =
+      run_options->run_options().host_to_device_stream();
+  se::Stream* device_to_host_stream =
+      run_options->run_options().device_to_host_stream();
 
   uint64_t start_micros = tensorflow::Env::Default()->NowMicros();
 
@@ -222,8 +227,15 @@ Status ExecuteThunks(const std::string& module_name,
     ScopedAnnotation annotation([&] { return thunk->profile_annotation(); });
 
     int32_t stream_no = thunk_schedule.StreamNumberForThunk(thunk.get());
-    se::Stream* stream =
-        (stream_no == 0 ? main_stream : sub_streams[stream_no - 1].get());
+    se::Stream* stream;
+    if (thunk->kind() == Thunk::kSwapIn) {
+      stream = host_to_device_stream;
+    } else if (thunk->kind() == Thunk::kSwapOut) {
+      stream = device_to_host_stream;
+    } else {
+      stream =
+          (stream_no == 0 ? main_stream : sub_streams[stream_no - 1].get());
+    }
 
     for (const Thunk* dependency : thunk_schedule.DependsOn(thunk.get())) {
       stream->ThenWaitFor(FindOrDie(thunk_to_finish_event, dependency).get());

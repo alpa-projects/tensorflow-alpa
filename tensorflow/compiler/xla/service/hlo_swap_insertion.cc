@@ -744,11 +744,19 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
       module_output_size;
   VLOG(1) << "Peak memory usage of module (before): "
           << HumanReadableNumBytes(before_peak_memory);
-  // TODO: reschedule
   TF_ASSIGN_OR_RETURN(
       bool changed,
       SwapInsertionComputation(module->entry_computation(), &module->schedule(),
                                memory_limit_bytes_));
+  // reschedule. todo(yonghao): only reschedule if scheduled at the entry.
+  // Otherwise get schedule at the entry but not assign
+  HloMemoryScheduler scheduler(
+      [this](const BufferValue& buffer) {
+        return size_function_(buffer.shape());
+      },
+      ComputationSchedulerToModuleScheduler(DefaultMemoryScheduler));
+  TF_ASSIGN_OR_RETURN(changed, scheduler.Run(module));
+  return changed;
 }
 
 };  // namespace xla

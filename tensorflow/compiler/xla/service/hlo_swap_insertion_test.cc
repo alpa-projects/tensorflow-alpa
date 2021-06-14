@@ -33,7 +33,6 @@ class HloSwapInsertionTest : public HloTestBase {
     TF_EXPECT_OK(scheduler.Run(module).status());
     HloSwapInsertion swap(ByteSizeOf, memory_limit_bytes);
     auto result = swap.Run(module);
-    TF_EXPECT_OK(scheduler.Run(module).status());
     return result;
   }
 
@@ -144,15 +143,50 @@ class HloSwapInsertionTest : public HloTestBase {
   const Shape mat10_20_shape_ = ShapeUtil::MakeShape(xla::F32, {10, 20});
 };
 
-// Test rematerialization of a single computation produced by
-// MakeRematerializableComputation.
+// Test swap insertion of a single computation
 TEST_F(HloSwapInsertionTest, SingleComputation) {
   auto module = CreateNewVerifiedModule();
   HloComputation* computation =
       module->AddEntryComputation(MakeSimpleComputation());
+
+  // Find and save the original computation
+  const HloInstruction* f = computation->root_instruction();
+  ASSERT_THAT(f, op::Add(op::Add(op::Add(op::Broadcast(_), op::Broadcast(_)),
+                                 op::Broadcast(_)),
+                         op::Broadcast(op::Reshape(_))));
+  const HloInstruction* e = f->operand(0);
+  const HloInstruction* d = e->operand(0);
+  const HloInstruction* c = e->operand(1);
+  const HloInstruction* a = f->operand(1);
   // memory constraint: (1+30) * 4
-  RunHloSwapInsertion(35 * 4, module.get());
-  // TODO(yonghao): add a checker
+  TF_ASSERT_OK_AND_ASSIGN(bool changed,
+                          RunHloSwapInsertion(35 * 4, module.get()));
+
+  EXPECT_TRUE(changed);
+
+  // check swap inserted for a
+  EXPECT_EQ(a->user_count(), 2);
+  HloInstruction* out_a = a->users().at(1);
+  EXPECT_TRUE(out_a->IsCustomCall("__builtin$SwapOut"));
+
+  EXPECT_EQ(out_a->user_count(), 1);
+  HloInstruction* in_a = out_a->users().at(0);
+  EXPECT_TRUE(in_a->IsCustomCall("__builtin$SwapIn"));
+  // check there is only one operand
+  EXPECT_EQ(out_a->operand_count(), 1);
+  EXPECT_EQ(in_a->operand_count(), 1);
+  // check swap inserted for c
+  EXPECT_EQ(c->user_count(), 1);
+  HloInstruction* out_c = c->users().at(0);
+  EXPECT_TRUE(out_c->IsCustomCall("__builtin$SwapOut"));
+
+  EXPECT_EQ(out_c->user_count(), 1);
+  HloInstruction* in_c = out_c->users().at(0);
+  EXPECT_TRUE(in_c->IsCustomCall("__builtin$SwapIn"));
+  // check there is only one operand
+  EXPECT_EQ(out_c->operand_count(), 1);
+  EXPECT_EQ(in_c->operand_count(), 1);
+  // todo(yonghao): check control dependency
 }
 
 };  // namespace

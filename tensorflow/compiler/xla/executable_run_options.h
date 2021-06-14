@@ -107,6 +107,13 @@ class ExecutableRunOptions {
       stream_executor::Stream* stream);
   stream_executor::Stream* host_to_device_stream() const;
 
+  // If set, this is the stream to perform any swap_out transfers on.
+  // The platform of the stream must match the platform the executable was
+  // built for.  A value of nullptr indicates the option has not been set.
+  ExecutableRunOptions& set_device_to_host_stream(
+      stream_executor::Stream* stream);
+  stream_executor::Stream* device_to_host_stream() const;
+
   // Sets the thread pool device on which to run Eigen subcomputations.
   //
   // This field must be set for XLA:CPU models that call Eigen routines, but may
@@ -165,6 +172,7 @@ class ExecutableRunOptions {
   int rng_seed_ = 0;
   int32 launch_id_ = 0;
   stream_executor::Stream* host_to_device_stream_ = nullptr;
+  stream_executor::Stream* device_to_host_stream_ = nullptr;
   ThenExecuteFunction* then_execute_function_ = nullptr;
   RunId run_id_;
   const gpu::GpuExecutableRunOptions* gpu_executable_run_options_ = nullptr;

@@ -1724,20 +1724,19 @@ std::string PrintInstructions(const HloInstructionSequence& sequence) {
   return os.str();
 }
 
-、
 std::string PrintStrategyVector(const StrategyVector* strategies, 
                                 size_t indention = 0) {
   std::ostringstream os;
   if (strategies->is_tuple) {
     for (size_t i = 0; i < strategies->childs.size(); ++i) {
       os << std::string(indention, ' ') << "Tuple element #" << i << ":\n";
-      PrintStrategyVector(strategies->childs[i].get(), indention + 2);
+      os << PrintStrategyVector(strategies->childs[i].get(), indention + 2);
     }
   }
   else {
     for (const auto& strategy: strategies->leaf_vector) {
       os << std::string(indention, ' ') << "Strategy " << strategy.name << ", " 
-         << strategy.compute_cost << "," << strategy.communication_cost << ", " 
+         << strategy.compute_cost << ", " << strategy.communication_cost << ", " 
          << strategy.memory_cost << ", {";
 
       for (const auto& cost_vector: strategy.resharding_costs) {
@@ -1763,7 +1762,7 @@ std::string PrintStrategyMap(
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
   for (size_t i = 0; i < instructions.size(); ++i) {
     os << "Instruction " << i << ": " << instructions[i]->ToString() << "\n";
-    PrintStrategyVector(strategy_map.at(instructions[i]));
+    os << PrintStrategyVector(strategy_map.at(instructions[i]).get());
   }
   return os.str();
 }
@@ -1775,7 +1774,7 @@ std::string PrintAutoShardingSolution(
   const StrategyMap& strategy_map,
   const LeafStrategies& leaf_strategies,
   const CostGraph& cost_graph,
-  const std::vector<int64>& s_val,
+  const std::vector<int64>& s_val
 ) {
   std::ostringstream os;
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
@@ -1903,7 +1902,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   if (pass_context::GetBool("auto_sharding::print_strategy", false)) {
     std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
-                                           cost_graph, s_val, e_val);
+                                           leaf_strategies, cost_graph, s_val);
   }
 
   // ----- Set Sharding -----

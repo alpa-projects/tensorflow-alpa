@@ -66,12 +66,13 @@ void BuildOpsSubmodule(py::module* m) {
       "AllReduce",
       static_cast<XlaOp (*)(
           XlaOp, const XlaComputation&, absl::Span<const ReplicaGroup>,
-          const absl::optional<ChannelHandle>&, const absl::optional<Shape>&)>(
-          &AllReduce),
+          const absl::optional<ChannelHandle>&, const absl::optional<Shape>&,
+          const absl::optional<bool>)>(&AllReduce),
       py::arg("operand"), py::arg("computation"),
       py::arg("replica_groups") = py::list(),
       py::arg("channel_id") = absl::nullopt,
-      py::arg("shape_with_layout") = absl::nullopt);
+      py::arg("shape_with_layout") = absl::nullopt,
+      py::arg("use_global_device_ids") = absl::nullopt);
   ops.def("AllToAll", &AllToAll, py::arg("operand"), py::arg("split_dimension"),
           py::arg("concat_dimension"), py::arg("split_count"),
           py::arg("replica_groups") = py::list(),

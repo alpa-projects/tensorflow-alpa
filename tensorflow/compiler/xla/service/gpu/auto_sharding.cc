@@ -1841,7 +1841,7 @@ std::unique_ptr<HloModule> CreateStageModule(
   HloComputation::Builder builder(absl::StrCat(entry->name(), "-", suffix));
   
   auto stage_module = absl::make_unique<HloModule>(
-    absl::StrCat(full_module->name(), "-", pipeline_stages.size()), full_module->config());
+    absl::StrCat(full_module->name(), "-", full_module->config());
   return std::move(stage_module);
 }
 
@@ -1859,7 +1859,7 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
         current_stage_instructions.push_back(current_ins);
         pipeline_stages.push_back(CreateStageModule(
             module, current_stage_instructions, 
-            std::to_string(pipeline_stages.size()));
+            std::to_string(pipeline_stages.size())));
         current_stage_instructions.clear();
         in_stage = false;
       } else {

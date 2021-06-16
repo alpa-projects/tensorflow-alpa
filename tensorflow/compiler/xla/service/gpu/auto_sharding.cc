@@ -1823,8 +1823,10 @@ std::unique_ptr<HloModule> CreateStageModule(
   CHECK(stage_start_instruction->IsCustomCall("xla_pipeline_marker"));
   CHECK(stage_end_instruction->IsCustomCall("xla_pipeline_marker"));
 
-  for (size_t i = 0; i < stage_instructions.size() - 1; ++i) {
+  std::cerr << "======old instructions=====" << std::endl;
+  for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
     HloInstruction *ins = stage_instructions[i];
+    std::cerr << ins->ToString() << std::endl;
     std::unique_ptr<HloInstruction> new_ins;
     if (ins->opcode() == HloOpcode::kGetTupleElement && 
         ins->operand(0) == stage_start_instruction) {
@@ -1833,7 +1835,7 @@ std::unique_ptr<HloModule> CreateStageModule(
           param_no, ins->shape(), absl::StrCat("param_", param_no));
       // NOTE: We assume parameter_replicated_at_leaf_buffers is false for 
       // parameters and we do not set parent since 
-      ins->SetupDerivedInstruction(new_ins);
+      ins->SetupDerivedInstruction(new_ins.get());
       new_ins->set_outer_dimension_partitions(ins->outer_dimension_partitions());
       new_ins->set_raw_backend_config_string(ins->raw_backend_config_string());
       context->MapInstruction(ins, new_ins.get());
@@ -1850,7 +1852,7 @@ std::unique_ptr<HloModule> CreateStageModule(
     instructions.push_back(std::move(new_ins));
   }
   std::cerr << "======new instructions=====" << std::endl;
-  for (auto ins : instructions) {
+  for (const auto &ins : instructions) {
     std::cerr << ins->ToString() << std::endl;
   }
   exit(-1);

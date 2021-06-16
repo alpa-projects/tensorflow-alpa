@@ -1808,7 +1808,41 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
   return os.str();
 }
 
-std::vector<std::unique_ptr<HloModule>> slice_auto_sharded_stages(HloModule* module) {
+std::unique_ptr<HloModule> CreateStageModule(
+    HloModule* full_module, 
+    const std::vector<HloInstruction*> &stage_instructions) {
+  std::unique_ptr<HloCloneContext> context_ptr = absl::make_unique<HloCloneContext>(parent(), suffix);
+  HloCloneContext *context = context_ptr.get();
+
+  std::vector<std::unique_ptr<HloInstruction>> instructions;
+  absl::flat_hash_map<const HloInstruction*, std::unique_ptr<HloInstruction>> replacements;
+  auto replace = [&](const HloInstruction* instr) {
+    auto it = replacements.find(instr);
+    return it != replacements.end() ? it->second.get() : instr;
+  };
+
+  HloInstruction *stage_start_instruction = stage_instructions.front();
+  HloInstruction *stage_end_instruction = stage_instructions.back();
+  CHECK(stage_start_instruction->IsCustomCall("xla_pipeline_marker"));
+  CHECK(stage_end_instruction->IsCustomCall("xla_pipeline_marker"));
+
+  std::cerr << "======create new parameters=====" << std::endl;
+  for (size_t i = 0; i < stage_instructions.size() - 1; ++i) {
+    HloInstruction *ins = stage_instructions[i];
+    if (ins->opcode == HloOpcode::kGetTupleElement && ins->operand(0) == stage_start_instruction) {
+      std::cerr << ins->ToString() << std::endl;
+    }
+  }
+  exit(-1);
+  HloComputation* entry = full_module->entry_computation();
+  HloComputation::Builder builder(absl::StrCat(entry->name(), "-", pipeline_stages.size()));
+  
+  auto stage_module = absl::make_unique<HloModule>(
+    absl::StrCat(full_module->name(), "-", pipeline_stages.size()), full_module->config());
+  return std::move(stage_module);
+}
+
+std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module) {
   // ----- Slice the hlo module according to the pipeline marker -----
   // TODO (zhuohan): Move this into a seperate pass
   HloComputation* entry = module->entry_computation();
@@ -1819,16 +1853,8 @@ std::vector<std::unique_ptr<HloModule>> slice_auto_sharded_stages(HloModule* mod
   for (HloInstruction* current_ins : entry->instructions()) {
     if (current_ins->IsCustomCall("xla_pipeline_marker")) {
       if (in_stage) {
-        HloComputation::Builder builder(absl::StrCat(entry->name(), "-", pipeline_stages.size()));
-        std::cerr << "current_stage_instructions" << std::endl;
-        for (auto ins : current_stage_instructions) {
-          std::cerr << ins->ToString() << std::endl;
-        }
-        exit(-1);
-
-        auto stage_module = absl::make_unique<HloModule>(
-          absl::StrCat(module->name(), "-", pipeline_stages.size()), module->config());
-
+        current_stage_instructions.push_back(current_ins);
+        pipeline_stages.push_back(CreateStageModule(module, current_stage_instructions));
         current_stage_instructions.clear();
         in_stage = false;
       } else {
@@ -1980,7 +2006,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     }
   }
 
-  slice_auto_sharded_stages(module);
+  SliceAutoShardedStages(module);
 
   // ----- Put the sharded HLO module back to Python -----
   HloModuleProto module_proto = module->ToProto();

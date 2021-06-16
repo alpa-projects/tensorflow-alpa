@@ -1874,10 +1874,16 @@ std::unique_ptr<HloModule> CreateStageModule(
 
   std::cerr << "======new computation=====" << std::endl;
   std::cerr << result->ToString() << std::endl;
-  exit(-1);
-  auto stage_module = absl::make_unique<HloModule>(
+
+  std::cerr << "has_entry_computation_layout " << full_module->config().has_entry_computation_layout() << std::endl;
+  std::cerr << "launch_id " << full_module->config().launch_id() << std::endl;
+
+  auto module = absl::make_unique<HloModule>(
     absl::StrCat(full_module->name(), "-", suffix), full_module->config());
-  return std::move(stage_module);
+
+
+
+  return std::move(module);
 }
 
 std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module) {

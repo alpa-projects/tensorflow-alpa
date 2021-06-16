@@ -1817,24 +1817,41 @@ std::unique_ptr<HloModule> CreateStageModule(
   HloCloneContext *context = context_ptr.get();
 
   std::vector<std::unique_ptr<HloInstruction>> instructions;
-  absl::flat_hash_map<const HloInstruction*, std::unique_ptr<HloInstruction>> replacements;
-  auto replace = [&](const HloInstruction* instr) {
-    auto it = replacements.find(instr);
-    return it != replacements.end() ? it->second.get() : instr;
-  };
 
   HloInstruction *stage_start_instruction = stage_instructions.front();
   HloInstruction *stage_end_instruction = stage_instructions.back();
   CHECK(stage_start_instruction->IsCustomCall("xla_pipeline_marker"));
   CHECK(stage_end_instruction->IsCustomCall("xla_pipeline_marker"));
 
-  std::cerr << "======create new parameters=====" << std::endl;
   for (size_t i = 0; i < stage_instructions.size() - 1; ++i) {
     HloInstruction *ins = stage_instructions[i];
+    std::unique_ptr<HloInstruction> new_ins;
     if (ins->opcode() == HloOpcode::kGetTupleElement && 
         ins->operand(0) == stage_start_instruction) {
-      std::cerr << ins->ToString() << std::endl;
+      int64 param_no = ins->tuple_index();
+      new_ins = HloInstruction::CreateParameter(
+          param_no, ins->shape(), absl::StrCat("param_", param_no));
+      // NOTE: We assume parameter_replicated_at_leaf_buffers is false for 
+      // parameters and we do not set parent since 
+      ins->SetupDerivedInstruction(new_ins);
+      new_ins->set_outer_dimension_partitions(ins->outer_dimension_partitions());
+      new_ins->set_raw_backend_config_string(ins->raw_backend_config_string());
+      context->MapInstruction(ins, new_ins.get());
+    } else {
+      CHECK_NE(ins->opcode(), HloOpcode::kParameter)
+          << "instructions in a stage should not be parameter" 
+          << ins->ToString();
+      std::vector<HloInstruction*> new_operands;
+      for (auto operand : ins->operands()) {
+        new_operands.push_back(context->GetInstruction(operand));
+      }
+      new_ins = ins->CloneWithNewOperands(ins->shape(), new_operands, context);
     }
+    instructions.push_back(std::move(new_ins));
+  }
+  std::cerr << "======new instructions=====" << std::endl;
+  for (auto ins : instructions) {
+    std::cerr << ins->ToString() << std::endl;
   }
   exit(-1);
   HloComputation* entry = full_module->entry_computation();

@@ -1841,7 +1841,7 @@ std::unique_ptr<HloModule> CreateStageModule(
   HloComputation::Builder builder(absl::StrCat(entry->name(), "-", suffix));
   
   auto stage_module = absl::make_unique<HloModule>(
-    absl::StrCat(full_module->name(), "-", full_module->config());
+    absl::StrCat(full_module->name(), "-", suffix);
   return std::move(stage_module);
 }
 

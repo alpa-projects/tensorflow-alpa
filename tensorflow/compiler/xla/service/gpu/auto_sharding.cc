@@ -1863,13 +1863,15 @@ std::unique_ptr<HloModule> CreateStageModule(
       /*root_instruction=*/context->GetInstruction(
           stage_end_instruction->operand(0)));
   
-  for (auto ins : instructions) {
-    HloInstruction* new_ins = context->GetInstruction(ins);
+  for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
+    HloInstruction *ins = stage_instructions[i];
+    HloInstruction *new_ins = context->GetInstruction(ins);
     for (auto successor : ins->control_successors()) {
       TF_CHECK_OK(new_ins->AddControlDependencyTo(
           context->GetInstruction(successor)));
     }
   }
+
   std::cerr << "======new computation=====" << std::endl;
   std::cerr << result->ToString() << std::endl;
   exit(-1);

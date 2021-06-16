@@ -1855,10 +1855,24 @@ std::unique_ptr<HloModule> CreateStageModule(
   for (const auto &ins : instructions) {
     std::cerr << ins->ToString() << std::endl;
   }
-  exit(-1);
-  HloComputation* entry = full_module->entry_computation();
-  HloComputation::Builder builder(absl::StrCat(entry->name(), "-", suffix));
+  HloComputation::Builder builder(absl::StrCat(full_module->entry_computation()->name(), "-", suffix));
+  for (auto& ins : instructions) {
+    builder.AddInstruction(std::move(ins));
+  }
+  std::unique_ptr<HloComputation> result = builder.Build(
+      /*root_instruction=*/context->GetInstruction(
+          stage_end_instruction->operand(0)));
   
+  for (auto ins : instructions) {
+    HloInstruction* new_ins = context->GetInstruction(ins);
+    for (auto successor : ins->control_successors()) {
+      TF_CHECK_OK(new_ins->AddControlDependencyTo(
+          context->GetInstruction(successor)));
+    }
+  }
+  std::cerr << "======new computation=====" << std::endl;
+  std::cerr << result->ToString() << std::endl;
+  exit(-1);
   auto stage_module = absl::make_unique<HloModule>(
     absl::StrCat(full_module->name(), "-", suffix), full_module->config());
   return std::move(stage_module);

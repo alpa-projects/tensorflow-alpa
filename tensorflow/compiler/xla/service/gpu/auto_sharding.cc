@@ -1881,7 +1881,8 @@ std::unique_ptr<HloModule> CreateStageModule(
   auto module = absl::make_unique<HloModule>(
     absl::StrCat(full_module->name(), "-", suffix), full_module->config());
 
-
+  // TODO (zhuohan): Finish building the HloModule
+  // TODO (zhuohan): Add an option to diable CSE
 
   return std::move(module);
 }
@@ -1893,8 +1894,9 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
 
   std::vector<std::unique_ptr<HloModule>> pipeline_stages;
   std::vector<HloInstruction*> current_stage_instructions;
+  std::vector<HloInstruction*> post_order = entry->MakeInstructionPostOrder()
   bool in_stage = false;
-  for (HloInstruction* current_ins : entry->instructions()) {
+  for (HloInstruction* current_ins : post_order) {
     if (current_ins->IsCustomCall("xla_pipeline_marker")) {
       if (in_stage) {
         current_stage_instructions.push_back(current_ins);

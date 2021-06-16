@@ -1810,8 +1810,10 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
 
 std::unique_ptr<HloModule> CreateStageModule(
     HloModule* full_module, 
-    const std::vector<HloInstruction*> &stage_instructions) {
-  std::unique_ptr<HloCloneContext> context_ptr = absl::make_unique<HloCloneContext>(parent(), suffix);
+    const std::vector<HloInstruction*> &stage_instructions,
+    std::string suffix) {
+  std::unique_ptr<HloCloneContext> context_ptr = 
+      absl::make_unique<HloCloneContext>(full_module, suffix);
   HloCloneContext *context = context_ptr.get();
 
   std::vector<std::unique_ptr<HloInstruction>> instructions;
@@ -1829,13 +1831,14 @@ std::unique_ptr<HloModule> CreateStageModule(
   std::cerr << "======create new parameters=====" << std::endl;
   for (size_t i = 0; i < stage_instructions.size() - 1; ++i) {
     HloInstruction *ins = stage_instructions[i];
-    if (ins->opcode == HloOpcode::kGetTupleElement && ins->operand(0) == stage_start_instruction) {
+    if (ins->opcode() == HloOpcode::kGetTupleElement && 
+        ins->operand(0) == stage_start_instruction) {
       std::cerr << ins->ToString() << std::endl;
     }
   }
   exit(-1);
   HloComputation* entry = full_module->entry_computation();
-  HloComputation::Builder builder(absl::StrCat(entry->name(), "-", pipeline_stages.size()));
+  HloComputation::Builder builder(absl::StrCat(entry->name(), "-", suffix));
   
   auto stage_module = absl::make_unique<HloModule>(
     absl::StrCat(full_module->name(), "-", pipeline_stages.size()), full_module->config());
@@ -1854,7 +1857,9 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
     if (current_ins->IsCustomCall("xla_pipeline_marker")) {
       if (in_stage) {
         current_stage_instructions.push_back(current_ins);
-        pipeline_stages.push_back(CreateStageModule(module, current_stage_instructions));
+        pipeline_stages.push_back(CreateStageModule(
+            module, current_stage_instructions, 
+            std::to_string(pipeline_stages.size()));
         current_stage_instructions.clear();
         in_stage = false;
       } else {

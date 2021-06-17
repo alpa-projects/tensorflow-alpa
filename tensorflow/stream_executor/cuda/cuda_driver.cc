@@ -32,6 +32,7 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "absl/synchronization/notification.h"
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
+#include "tensorflow/core/util/env_var.h"
 #include "tensorflow/stream_executor/cuda/cuda_diagnostics.h"
 #include "tensorflow/stream_executor/lib/env.h"
 #include "tensorflow/stream_executor/lib/error.h"
@@ -289,7 +290,14 @@ static port::Status InternalInit() {
 
 /* static */ port::Status GpuDriver::GetDevice(int device_ordinal,
                                                CUdevice* device) {
-  RETURN_IF_CUDA_RES_ERROR(cuDeviceGet(device, device_ordinal),
+  // Remap device indices for p3.8xlarge instances,
+  // due to its non-symetric GPU connection topology.
+  bool remap_device_id = true;
+  tensorflow::ReadBoolFromEnvVar("TF_CUDA_REMAP_DEVICE_ID",
+                                  /*default_val=*/true,
+                                  &remap_device_id);
+  int delta = remap_device_id ? 1 : 0;
+  RETURN_IF_CUDA_RES_ERROR(cuDeviceGet(device, (device_ordinal + delta) % GetDeviceCount()),
                            "Failed call to cuDeviceGet");
   return port::Status::OK();
 }

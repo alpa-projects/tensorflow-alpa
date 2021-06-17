@@ -26,6 +26,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/core/platform/env.h"
+#include "tensorflow/core/platform/errors.h"
+#include "tensorflow/core/util/env_var.h"
+#include "tensorflow/stream_executor/gpu/gpu_types.h"
 
 namespace xla {
 namespace gpu {

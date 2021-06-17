@@ -2380,6 +2380,9 @@ Status SpmdPartitioningVisitor::HandleAllReduce(HloInstruction* hlo) {
   if (hlo->IsCrossReplicaAllReduce() && hlo->operand_count() == 1) {
     return HandleElementwise(hlo);
   }
+  if (Cast<HloAllReduceInstruction>(hlo)->use_global_device_ids()) {
+    return HandleElementwise(hlo);
+  }
   return DefaultAction(hlo);
 }
 

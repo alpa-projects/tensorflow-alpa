@@ -1834,10 +1834,10 @@ std::unique_ptr<HloModule> CreateStageModule(
   CHECK(stage_start_instruction->IsCustomCall("xla_pipeline_marker"));
   CHECK(stage_end_instruction->IsCustomCall("xla_pipeline_marker"));
 
-  std::cerr << "======old instructions=====" << std::endl;
+  // std::cerr << "======old instructions=====" << std::endl;
   for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
     HloInstruction *ins = stage_instructions[i];
-    std::cerr << ins->ToString() << std::endl;
+    // std::cerr << ins->ToString() << std::endl;
     std::unique_ptr<HloInstruction> new_ins;
     if (ins->opcode() == HloOpcode::kGetTupleElement &&
         ins->operand(0) == stage_start_instruction) {
@@ -1862,10 +1862,10 @@ std::unique_ptr<HloModule> CreateStageModule(
     }
     instructions.push_back(std::move(new_ins));
   }
-  std::cerr << "======new instructions=====" << std::endl;
-  for (const auto &ins : instructions) {
-    std::cerr << ins->ToString() << std::endl;
-  }
+  // std::cerr << "======new instructions=====" << std::endl;
+  // for (const auto &ins : instructions) {
+  //   std::cerr << ins->ToString() << std::endl;
+  // }
   HloComputation::Builder builder(absl::StrCat(full_module->entry_computation()->name(), "-", suffix));
   for (auto& ins : instructions) {
     builder.AddInstruction(std::move(ins));
@@ -1883,8 +1883,8 @@ std::unique_ptr<HloModule> CreateStageModule(
     }
   }
 
-  std::cerr << "======new computation=====" << std::endl;
-  std::cerr << new_computation->ToString() << std::endl;
+  // std::cerr << "======new computation=====" << std::endl;
+  // std::cerr << new_computation->ToString() << std::endl;
 
   // NOTE: We assume the HLO graph only has one computation.
   module->AddEntryComputationWithLayouts(std::move(new_computation));
@@ -1935,10 +1935,9 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
       py::bytes serilaized_module_proto_bytes(serilaized_module_proto);
       stage_modules.append(serilaized_module_proto_bytes);
     }
-    py::object set_last_auto_sharded_hlo_module =
-        submodule.attr("set_last_auto_sharded_hlo_module");
-    py::object ret = set_last_auto_sharded_hlo_module(
-        stage_modules);
+    py::object set_auto_sharded_hlo_stages =
+        submodule.attr("set_auto_sharded_hlo_stages");
+    py::object ret = set_auto_sharded_hlo_stages(stage_modules);
     if (!ret.is_none()) {
       PyGILState_Release(gstate);
       exit(-1);

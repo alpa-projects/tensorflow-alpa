@@ -1900,7 +1900,7 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
 
   std::vector<std::unique_ptr<HloModule>> pipeline_stages;
   std::vector<HloInstruction*> current_stage_instructions;
-  std::vector<HloInstruction*> post_order = entry->MakeInstructionPostOrder()
+  std::vector<HloInstruction*> post_order = entry->MakeInstructionPostOrder();
   bool in_stage = false;
   for (HloInstruction* current_ins : post_order) {
     if (current_ins->IsCustomCall("xla_pipeline_marker")) {

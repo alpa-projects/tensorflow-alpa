@@ -112,6 +112,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/logistic_expander.h"
 #include "tensorflow/compiler/xla/service/loop_schedule_linearizer.h"
 #include "tensorflow/compiler/xla/service/operand_upcaster.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/qr_expander.h"
 #include "tensorflow/compiler/xla/service/real_imag_expander.h"
 #include "tensorflow/compiler/xla/service/reshape_mover.h"
@@ -279,7 +280,9 @@ Status GpuCompiler::OptimizeHloModule(
                      ? candidate_operands
                      : TransposeFolding::OperandIndices{};
         });
-    pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
+    if (!pass_context::GetBool("auto_sharding::diable_cse", false)) {
+      pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
+    }
     pipeline.AddPass<HloDCE>();
 
     // Run WhileLoopTripCountAnnotator at the end of the simplification

@@ -1873,17 +1873,14 @@ std::unique_ptr<HloModule> CreateStageModule(
   }
 
   std::cerr << "======new computation=====" << std::endl;
-  std::cerr << result->ToString() << std::endl;
-
-  std::cerr << "has_entry_computation_layout " << full_module->config().has_entry_computation_layout() << std::endl;
-  std::cerr << "launch_id " << full_module->config().launch_id() << std::endl;
+  std::cerr << new_computation->ToString() << std::endl;
 
   HloModuleConfig config = full_module->config();
   // TODO (zhuohan): Support input/output alias
-  new_config.set_shardable_value_update_pairs({});
-  new_config.mutable_fusion_config().clear();
-  new_config.mutable_dot_config().clear();
-  new_config.mutable_layout_config().clear();
+  config.set_shardable_value_update_pairs({});
+  config.mutable_fusion_config()->clear();
+  config.mutable_dot_config()->clear();
+  config.mutable_layout_config()->clear();
 
   auto module = absl::make_unique<HloModule>(
     absl::StrCat(full_module->name(), "-", suffix), config);
@@ -1932,7 +1929,7 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
     for (const auto& stage_module : pipeline_stages) {
       HloModuleProto module_proto = stage_module->ToProto();
       std::string serilaized_module_proto;
-      CHECK(module_proto->SerializeToString(&serilaized_module_proto));
+      CHECK(module_proto.SerializeToString(&serilaized_module_proto));
       py::bytes serilaized_module_proto_bytes(serilaized_module_proto);
       stage_modules.append(serilaized_module_proto_bytes);
     }

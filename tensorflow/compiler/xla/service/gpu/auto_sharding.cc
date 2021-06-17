@@ -1859,7 +1859,7 @@ std::unique_ptr<HloModule> CreateStageModule(
   for (auto& ins : instructions) {
     builder.AddInstruction(std::move(ins));
   }
-  std::unique_ptr<HloComputation> result = builder.Build(
+  std::unique_ptr<HloComputation> new_computation = builder.Build(
       /*root_instruction=*/context->GetInstruction(
           stage_end_instruction->operand(0)));
   
@@ -1878,11 +1878,17 @@ std::unique_ptr<HloModule> CreateStageModule(
   std::cerr << "has_entry_computation_layout " << full_module->config().has_entry_computation_layout() << std::endl;
   std::cerr << "launch_id " << full_module->config().launch_id() << std::endl;
 
-  auto module = absl::make_unique<HloModule>(
-    absl::StrCat(full_module->name(), "-", suffix), full_module->config());
+  HloModuleConfig config = full_module->config();
+  // TODO (zhuohan): Support input/output alias
+  new_config.set_shardable_value_update_pairs({});
+  new_config.mutable_fusion_config().clear();
+  new_config.mutable_dot_config().clear();
+  new_config.mutable_layout_config().clear();
 
-  // TODO (zhuohan): Finish building the HloModule
-  // TODO (zhuohan): Add an option to diable CSE
+  auto module = absl::make_unique<HloModule>(
+    absl::StrCat(full_module->name(), "-", suffix), config);
+  // NOTE: We assume the HLO graph only has one computation.
+  module->AddEntryComputation(std::move(new_computation));
 
   return std::move(module);
 }
@@ -1913,6 +1919,34 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
       current_stage_instructions.push_back(current_ins);
     }
   }
+
+    // ----- Put the sharded HLO module back to Python -----
+  HloModuleProto module_proto = module->ToProto();
+  std::string serilaized_module_proto;
+  CHECK(module_proto.SerializeToString(&serilaized_module_proto));
+
+  PyGILState_STATE gstate = PyGILState_Ensure();
+  {
+    py::object submodule = py::module_::import("parax.auto_sharding");
+    py::list stage_modules;
+    for (const auto& stage_module : pipeline_stages) {
+      HloModuleProto module_proto = stage_module->ToProto();
+      std::string serilaized_module_proto;
+      CHECK(module_proto->SerializeToString(&serilaized_module_proto));
+      py::bytes serilaized_module_proto_bytes(serilaized_module_proto);
+      stage_modules.append(serilaized_module_proto_bytes);
+    }
+    py::object set_last_auto_sharded_hlo_module =
+        submodule.attr("set_last_auto_sharded_hlo_module");
+    py::object ret = set_last_auto_sharded_hlo_module(
+        stage_modules);
+    if (!ret.is_none()) {
+      PyGILState_Release(gstate);
+      exit(-1);
+    }
+  }
+  PyGILState_Release(gstate);
+
   return pipeline_stages;
 }
 
@@ -2056,25 +2090,6 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   SliceAutoShardedStages(module);
 
-  // ----- Put the sharded HLO module back to Python -----
-  HloModuleProto module_proto = module->ToProto();
-  std::string serilaized_module_proto;
-  CHECK(module_proto.SerializeToString(&serilaized_module_proto));
-
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  {
-    py::object submodule = py::module_::import("parax.auto_sharding");
-    py::bytes serilaized_module_proto_bytes(serilaized_module_proto);
-    py::object set_last_auto_sharded_hlo_module =
-        submodule.attr("set_last_auto_sharded_hlo_module");
-    py::object ret = set_last_auto_sharded_hlo_module(
-        serilaized_module_proto_bytes);
-    if (!ret.is_none()) {
-      PyGILState_Release(gstate);
-      exit(-1);
-    }
-  }
-  PyGILState_Release(gstate);
   // std::cerr << "===== Exit AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();
   // std::cerr << "=====================================" << std::endl;

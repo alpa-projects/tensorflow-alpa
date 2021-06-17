@@ -280,7 +280,7 @@ Status GpuCompiler::OptimizeHloModule(
                      ? candidate_operands
                      : TransposeFolding::OperandIndices{};
         });
-    if (!pass_context::GetBool("auto_sharding::diable_cse", false)) {
+    if (!pass_context::GetBool("auto_sharding::multi_stage_compilation", false)) {
       pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
     }
     pipeline.AddPass<HloDCE>();

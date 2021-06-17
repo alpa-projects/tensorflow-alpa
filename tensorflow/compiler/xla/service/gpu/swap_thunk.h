@@ -39,6 +39,8 @@ class SwapOutThunk : public Thunk {
 
   ~SwapOutThunk() override;
 
+  se::Event* SwapFinishEvent() { return swap_finish_event_.get(); }
+
  private:
   const std::vector<BufferAllocation::Slice> operands_;
   const BufferAllocation::Slice result_;
@@ -46,6 +48,9 @@ class SwapOutThunk : public Thunk {
   const int64 key_;
   int64 executable_key_;
   se::StreamExecutor* executor_ = nullptr;
+  std::unique_ptr<se::Event> swap_finish_event_;
+
+  friend class SwapDoneThunk;
 };
 
 // Thunk to run a GPU swap in
@@ -60,14 +65,29 @@ class SwapInThunk : public Thunk {
 
   Status ExecuteOnStream(const ExecuteParams& params) override;
 
+  se::Event* SwapFinishEvent() { return swap_finish_event_.get(); }
+
  private:
   const BufferAllocation::Slice operand_;
   const std::vector<BufferAllocation::Slice> results_;
   const std::vector<int64> byte_sizes_;
   const int64 key_;
   int64 executable_key_;
+  std::unique_ptr<se::Event> swap_finish_event_;
 };
 
+class SwapDoneThunk : public Thunk {
+ public:
+  SwapDoneThunk(ThunkInfo thunk_info);
+
+  Status Initialize(const GpuExecutable& executable,
+                    se::StreamExecutor* executor) override;
+
+  Status ExecuteOnStream(const ExecuteParams& params) override;
+
+ private:
+  se::Event* swap_finish_event_;
+};
 }  // namespace gpu
 }  // namespace xla
 

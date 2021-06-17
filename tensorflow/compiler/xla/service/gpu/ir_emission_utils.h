@@ -167,6 +167,7 @@ bool ImplementedAsLibraryCall(const HloInstruction& hlo);
 // Swap in or out. 
 extern const char* const kBuiltinSwapOutTarget;
 extern const char* const kBuiltinSwapInTarget;
+extern const char* const kBuiltinSwapDoneTarget;
 
 // Layout analysis for fusion. The constructor will analyze the given LMHLO
 // fusion operation and store the inferred layouts of fusion internal values.

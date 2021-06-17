@@ -37,6 +37,8 @@ Status SwapOutThunk::Initialize(const GpuExecutable& executable,
                                 se::StreamExecutor* executor) {
   // register the key of the executable
   executable_key_ = GetExecutableKey(&executable);
+  swap_finish_event_ = absl::make_unique<se::Event>(executor);
+  swap_finish_event_->Init();
   return Status::OK();
 }
 
@@ -89,6 +91,7 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
     params.stream->ThenMemcpy(source_address_, destination_data,
                               byte_sizes_.at(i));
   }
+  params.stream->ThenRecordEvent(swap_finish_event_.get());
 #else   //  GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   return Unavailable(
       "Swap on GPU are not supported in this configuration. Please "
@@ -110,6 +113,8 @@ SwapInThunk::SwapInThunk(ThunkInfo thunk_info, BufferAllocation::Slice operand,
 Status SwapInThunk::Initialize(const GpuExecutable& executable,
                                se::StreamExecutor* executor) {
   executable_key_ = GetExecutableKey(&executable);
+  swap_finish_event_ = absl::make_unique<se::Event>(executor);
+  swap_finish_event_->Init();
   return Status::OK();
 }
 
@@ -137,11 +142,26 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
     params.stream->ThenMemcpy(&destination_data, source_address_,
                               byte_sizes_.at(i));
   }
+  params.stream->ThenRecordEvent(swap_finish_event_.get());
 #else   //  GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   return Unavailable(
       "Swap on GPU are not supported in this configuration. Please "
       "build with --config=cuda");
 #endif  //   GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+  return Status::OK();
+}
+
+SwapDoneThunk::SwapDoneThunk(ThunkInfo thunk_info)
+    : Thunk(Thunk::kSwapDone, thunk_info) {}
+
+Status SwapDoneThunk::Initialize(const GpuExecutable& executable,
+                                 se::StreamExecutor* executor) {
+  swap_finish_event_ = nullptr; // TODO(yonghao)
+  return Status::OK();
+}
+
+Status SwapDoneThunk::ExecuteOnStream(const ExecuteParams& params) {
+  params.stream->ThenWaitFor(swap_finish_event_);
   return Status::OK();
 }
 

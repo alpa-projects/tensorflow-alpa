@@ -36,6 +36,7 @@ TEST(GpuSwap, Basic) {
                              /*opaque=*/std::to_string(key));
   auto swap_in = CustomCall(&builder, "__builtin$SwapIn", {swap_out}, shape,
                             std::to_string(key));
+  auto add = Add(swap_in, p0);
   TF_ASSERT_OK_AND_ASSIGN(XlaComputation computation, builder.Build());
 
   CompileOptions compile_options;
@@ -54,7 +55,7 @@ TEST(GpuSwap, Basic) {
   std::vector<int32> expected_outputs(n);
   for (int i = 0; i < n; ++i) {
     inputs[i] = tensorflow::random::New64();
-    expected_outputs[i] = inputs[i];
+    expected_outputs[i] = inputs[i] * 2;
   }
 
   std::vector<float> computation_input(computationN);

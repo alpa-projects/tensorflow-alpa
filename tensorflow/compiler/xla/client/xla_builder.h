@@ -726,7 +726,8 @@ class XlaBuilder {
       XlaOp operand, const XlaComputation& computation,
       absl::Span<const ReplicaGroup> replica_groups = {},
       const absl::optional<ChannelHandle>& channel_id = absl::nullopt,
-      const absl::optional<Shape>& shape_with_layout = absl::nullopt);
+      const absl::optional<Shape>& shape_with_layout = absl::nullopt,
+      const absl::optional<bool> use_global_device_ids = absl::nullopt);
 
   XlaOp ReduceScatter(
       XlaOp operand, const XlaComputation& computation, int64 scatter_dimension,
@@ -1322,6 +1323,7 @@ class XlaBuilder {
   friend XlaOp AllReduce(XlaOp operand, const XlaComputation& computation,
                          absl::Span<const ReplicaGroup> replica_groups,
                          const absl::optional<ChannelHandle>& channel_id,
+<<<<<<< HEAD
                          const absl::optional<Shape>& shape_with_layout);
   friend XlaOp ReduceScatter(XlaOp operand, const XlaComputation& computation,
                              int64 scatter_dimension, int64 shard_count,
@@ -1330,6 +1332,16 @@ class XlaBuilder {
                              const absl::optional<Layout>& layout,
                              const absl::optional<bool> use_global_device_ids);
 
+=======
+                         const absl::optional<Shape>& shape_with_layout,
+                         const absl::optional<bool> use_global_device_ids);
+  friend XlaOp AllReduceScatter(
+      XlaOp operand, const XlaComputation& computation, int64 scatter_dimension,
+      int64 shard_count, absl::Span<const ReplicaGroup> replica_groups,
+      const absl::optional<ChannelHandle>& channel_id,
+      const absl::optional<Layout>& layout,
+      const absl::optional<bool> use_global_device_ids);
+>>>>>>> Export more arguments of AllReduce's constructor to python & Remap gpu id for p3.8 (#14)
   friend XlaOp AllToAll(XlaOp operand, int64 split_dimension,
                         int64 concat_dimension, int64 split_count,
                         absl::Span<const ReplicaGroup> replica_groups,
@@ -2277,7 +2289,8 @@ XlaOp AllGather(
 XlaOp AllReduce(XlaOp operand, const XlaComputation& computation,
                 absl::Span<const ReplicaGroup> replica_groups = {},
                 const absl::optional<ChannelHandle>& channel_id = absl::nullopt,
-                const absl::optional<Shape>& shape_with_layout = absl::nullopt);
+                const absl::optional<Shape>& shape_with_layout = absl::nullopt,
+                const absl::optional<bool> use_global_device_ids = absl::nullopt);
 
 XlaOp ReduceScatter(
     XlaOp operand, const XlaComputation& computation, int64 scatter_dimension,

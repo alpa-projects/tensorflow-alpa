@@ -1824,7 +1824,7 @@ std::unique_ptr<HloModule> CreateStageModule(
     absl::StrCat(full_module->name(), "-", suffix), config);
 
   std::unique_ptr<HloCloneContext> context_ptr =
-      absl::make_unique<HloCloneContext>(module, suffix);
+      absl::make_unique<HloCloneContext>(module.get(), suffix);
   HloCloneContext *context = context_ptr.get();
 
   std::vector<std::unique_ptr<HloInstruction>> instructions;

@@ -2380,6 +2380,12 @@ Status SpmdPartitioningVisitor::HandleAllReduce(HloInstruction* hlo) {
   if (hlo->IsCrossReplicaAllReduce() && hlo->operand_count() == 1) {
     return HandleElementwise(hlo);
   }
+
+  // Alpa-specific change for profiling
+  if (Cast<HloAllReduceInstruction>(hlo)->use_global_device_ids()) {
+    return HandleElementwise(hlo);
+  }
+
   if (hlo->channel_id()) {
     TF_RET_CHECK(hlo->operand_count() == 1)
         << "SPMD partitioner supports only single-operand allreduce in manual "
@@ -2420,7 +2426,6 @@ Status SpmdPartitioningVisitor::HandleAllReduce(HloInstruction* hlo) {
         }
       }
     }
-    return HandleElementwise(hlo);
   }
   return DefaultAction(hlo);
 }

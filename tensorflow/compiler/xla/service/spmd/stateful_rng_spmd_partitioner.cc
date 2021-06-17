@@ -17,7 +17,9 @@ limitations under the License.
 
 #include <memory>
 
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
+#include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 
 namespace xla {
@@ -73,6 +75,8 @@ Status StatefulRngSpmdPartitioner::PreprocessSharding(HloModule* module) {
 bool StatefulRngSpmdPartitioner::CanSideEffectingHaveReplicatedSharding(
     const HloInstruction* hlo) {
   if (hlo->opcode() == HloOpcode::kRngGetAndUpdateState) return true;
+  if (hlo->opcode() == HloOpcode::kAllReduce &&
+      Cast<HloAllReduceInstruction>(hlo)->use_global_device_ids()) return true;
   return spmd::SpmdPartitioner::CanSideEffectingHaveReplicatedSharding(hlo);
 }
 

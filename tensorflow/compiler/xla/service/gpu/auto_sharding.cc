@@ -1809,11 +1809,22 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
 }
 
 std::unique_ptr<HloModule> CreateStageModule(
-    HloModule* full_module, 
+    HloModule* full_module,
     const std::vector<HloInstruction*> &stage_instructions,
     std::string suffix) {
-  std::unique_ptr<HloCloneContext> context_ptr = 
-      absl::make_unique<HloCloneContext>(full_module, suffix);
+
+  HloModuleConfig config = full_module->config();
+  // TODO (zhuohan): Support input/output alias
+  config.set_shardable_value_update_pairs({});
+  config.mutable_fusion_config()->clear();
+  config.mutable_dot_config()->clear();
+  config.mutable_layout_config()->clear();
+
+  auto module = absl::make_unique<HloModule>(
+    absl::StrCat(full_module->name(), "-", suffix), config);
+
+  std::unique_ptr<HloCloneContext> context_ptr =
+      absl::make_unique<HloCloneContext>(module, suffix);
   HloCloneContext *context = context_ptr.get();
 
   std::vector<std::unique_ptr<HloInstruction>> instructions;
@@ -1828,20 +1839,20 @@ std::unique_ptr<HloModule> CreateStageModule(
     HloInstruction *ins = stage_instructions[i];
     std::cerr << ins->ToString() << std::endl;
     std::unique_ptr<HloInstruction> new_ins;
-    if (ins->opcode() == HloOpcode::kGetTupleElement && 
+    if (ins->opcode() == HloOpcode::kGetTupleElement &&
         ins->operand(0) == stage_start_instruction) {
       int64 param_no = ins->tuple_index();
       new_ins = HloInstruction::CreateParameter(
           param_no, ins->shape(), absl::StrCat("param_", param_no));
-      // NOTE: We assume parameter_replicated_at_leaf_buffers is false for 
-      // parameters and we do not set parent since 
+      // NOTE: We assume parameter_replicated_at_leaf_buffers is false for
+      // parameters and we do not set parent since
       ins->SetupDerivedInstruction(new_ins.get());
       new_ins->set_outer_dimension_partitions(ins->outer_dimension_partitions());
       new_ins->set_raw_backend_config_string(ins->raw_backend_config_string());
       context->MapInstruction(ins, new_ins.get());
     } else {
       CHECK_NE(ins->opcode(), HloOpcode::kParameter)
-          << "instructions in a stage should not be parameter" 
+          << "instructions in a stage should not be parameter"
           << ins->ToString();
       std::vector<HloInstruction*> new_operands;
       for (auto operand : ins->operands()) {
@@ -1862,7 +1873,7 @@ std::unique_ptr<HloModule> CreateStageModule(
   std::unique_ptr<HloComputation> new_computation = builder.Build(
       /*root_instruction=*/context->GetInstruction(
           stage_end_instruction->operand(0)));
-  
+
   for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
     HloInstruction *ins = stage_instructions[i];
     HloInstruction *new_ins = context->GetInstruction(ins);
@@ -1875,17 +1886,8 @@ std::unique_ptr<HloModule> CreateStageModule(
   std::cerr << "======new computation=====" << std::endl;
   std::cerr << new_computation->ToString() << std::endl;
 
-  HloModuleConfig config = full_module->config();
-  // TODO (zhuohan): Support input/output alias
-  config.set_shardable_value_update_pairs({});
-  config.mutable_fusion_config()->clear();
-  config.mutable_dot_config()->clear();
-  config.mutable_layout_config()->clear();
-
-  auto module = absl::make_unique<HloModule>(
-    absl::StrCat(full_module->name(), "-", suffix), config);
   // NOTE: We assume the HLO graph only has one computation.
-  module->AddEntryComputation(std::move(new_computation));
+  module->AddEntryComputationWithLayouts(std::move(new_computation));
 
   return std::move(module);
 }
@@ -1904,7 +1906,7 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
       if (in_stage) {
         current_stage_instructions.push_back(current_ins);
         pipeline_stages.push_back(CreateStageModule(
-            module, current_stage_instructions, 
+            module, current_stage_instructions,
             std::to_string(pipeline_stages.size())));
         current_stage_instructions.clear();
         in_stage = false;

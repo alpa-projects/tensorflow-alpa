@@ -444,6 +444,7 @@ class MemoryRecorder {
   Item* preparing_for = nullptr;
   int64 memory_bound_;
   int64 free_memory, memory_usage_;
+  absl::flat_hash_map<Item*, Item*> swap_done_map_;
   std::vector<std::pair<Item*, int64>> released_after;
 
   std::vector<std::pair<BufferId, Item*>> alloced;
@@ -571,6 +572,7 @@ Status MemoryRecorder::PrepareForInstruction(Item* item) {
     auto& buffer = buffers_.at(bid);
     if (buffer.inGPU()) {
       if (buffer.isSwappedIn()) {
+        instruction_list.addEdge(swap_done_map_[buffer.latest_alloc], item);
         buffer.defining_instruction->instruction->ReplaceUseWith(
             item->instruction, buffer.latest_alloc->instruction);
       }
@@ -596,11 +598,11 @@ Status MemoryRecorder::PrepareForInstruction(Item* item) {
     swapDone->isSwap = true;
     HloCustomCallInstruction* swapDoneInst = Cast<HloCustomCallInstruction>(
         computation_->AddInstruction(HloInstruction::CreateCustomCall(
-            buffer.shape, {}, "__builtin$SwapDone",
+            keyShape, {swapInInst}, "__builtin$SwapDone",
             /*opaque=*/std::to_string(swapInEventKey++))));
     swapDone->instruction = swapDoneInst;
     swapDoneInst->set_custom_call_has_side_effect(true);
-    swapInInst->AddControlDependencyTo(swapDoneInst);
+    // TODO(yonghao): swap done
 
     VLOG(3) << "\tcreate swap in for buffer: " << bid;
     // if already discarded, swap in after discarded
@@ -610,6 +612,7 @@ Status MemoryRecorder::PrepareForInstruction(Item* item) {
     }
 
     buffer.setInGPU(swapIn);
+    swap_done_map_[swapIn] = swapDone;
     getSpaceFor(AllocatedSize(buffer), swapIn);
     // add swap in to GPU instruction
     registerAlloc(swapIn, bid, buffer.size);
@@ -617,6 +620,7 @@ Status MemoryRecorder::PrepareForInstruction(Item* item) {
     instruction_list.addEdge(swapIn, item);
     buffer.defining_instruction->instruction->ReplaceUseWith(
         item->instruction, swapIn->instruction);
+    instruction_list.addEdge(swapDone, item);
     last_use_inst.at(bid) = item;
   }
   SelfCHECK();

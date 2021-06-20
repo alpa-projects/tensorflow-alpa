@@ -157,13 +157,17 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
       gpu::GpuExecutable* executable, se::Stream* stream,
       absl::Span<const se::DeviceMemoryBase> arguments) {
     ExecutableRunOptions executable_run_options;
-    DeviceAssignment device_assignment(1, 1);
+    auto stream_d2h = std::make_unique<se::Stream>(stream->parent());
+    auto stream_h2d = std::make_unique<se::Stream>(stream->parent());
+    stream_d2h->Init();
+    stream_h2d->Init();
 
+    DeviceAssignment device_assignment(1, 1);
     device_assignment(0, 0) = backend().default_device_ordinal();
     executable_run_options.set_stream(stream);
     executable_run_options.set_allocator(backend().memory_allocator());
-    executable_run_options.set_host_to_device_stream(stream); // todo(yonghao)
-    executable_run_options.set_device_to_host_stream(stream); // todo(yonghao)
+    executable_run_options.set_host_to_device_stream(stream_d2h.get());
+    executable_run_options.set_device_to_host_stream(stream_h2d.get());
     executable_run_options.set_device_assignment(&device_assignment);
     ServiceExecutableRunOptions run_options(executable_run_options);
     std::vector<ExecutionInput> execution_inputs;
@@ -286,7 +290,8 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
     b_value.push_back(i);
     c_value.push_back(i);
   }
-  RunModuleWithHostBuffers(gExec, {ToF32Span(&a_value), ToF32Span(&b_value), ToF32Span(&c_value)});
+  RunModuleWithHostBuffers(
+      gExec, {ToF32Span(&a_value), ToF32Span(&b_value), ToF32Span(&c_value)});
 }
 
 };  // namespace

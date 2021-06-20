@@ -33,9 +33,12 @@ TEST(GpuSwap, Basic) {
   auto p1 = Parameter(&builder, 1, computationShape, "param");
   int64 key = 10;
   auto swap_out = CustomCall(&builder, "__builtin$SwapOut", {p0}, keyShape,
-                             /*opaque=*/std::to_string(key));
+                             /*opaque=*/key_str);
   auto swap_in = CustomCall(&builder, "__builtin$SwapIn", {swap_out}, shape,
-                            std::to_string(key));
+                            key_str.append(";" + event_key_str));
+  auto swap_done = CustomCall(&builder, "__builtin$SwapDone", {swap_in},
+                              keyShape, event_key_str, true);
+
   auto add = Add(swap_in, p0);
   TF_ASSERT_OK_AND_ASSIGN(XlaComputation computation, builder.Build());
 
@@ -98,11 +101,15 @@ TEST(GpuSwap, SwapWithCompute) {
   XlaBuilder builder("acomputation");
   auto p0 = Parameter(&builder, 0, swapShape, "param");
   auto p1 = Parameter(&builder, 1, computationShape, "param");
-  int64 key = 10;
+  int64 key = 10, event_key = 24;
+  std::string key_str = std::to_string(key);
+  std::string event_key_str = std::to_string(event_key);
   auto swap_out = CustomCall(&builder, "__builtin$SwapOut", {p0}, keyShape,
-                             /*opaque=*/std::to_string(key));
+                             /*opaque=*/key_str);
   auto swap_in = CustomCall(&builder, "__builtin$SwapIn", {swap_out}, swapShape,
-                            std::to_string(key));
+                            key_str.append(";" + event_key_str));
+  auto swap_done = CustomCall(&builder, "__builtin$SwapDone", {swap_in},
+                              keyShape, event_key_str);
 
   auto n1 = Neg(p1);
   auto s1 = Sin(n1);

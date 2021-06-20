@@ -10,7 +10,7 @@
 namespace xla {
 namespace gpu {
 
-int64 GetExecutableKey(const GpuExecutable* executable) {
+int64 SwapThunk::GetExecutableKey(const GpuExecutable* executable) {
   static absl::flat_hash_map<const GpuExecutable*, int64> map;
   static int64 counter = 0;
   auto iter = map.find(executable);
@@ -22,11 +22,21 @@ int64 GetExecutableKey(const GpuExecutable* executable) {
   }
 }
 
+absl::flat_hash_map<int64, se::Event*> SwapThunk::swap_finish_events_;
+
+se::Event* SwapThunk::getEvent(int64 key) {
+  CHECK(swap_finish_events_.count(key)) << "no such key: " << key;
+  return swap_finish_events_.at(key);
+}
+
+SwapThunk::SwapThunk(Kind kind, ThunkInfo thunk_info)
+    : Thunk(kind, thunk_info) {}
+
 SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
                            std::vector<BufferAllocation::Slice> operands,
                            BufferAllocation::Slice result,
                            std::vector<int64> byte_sizes, int64 key)
-    : Thunk(Thunk::kSwapOut, thunk_info),
+    : SwapThunk(Thunk::kSwapOut, thunk_info),
       operands_(std::move(operands)),
       result_(std::move(result)),
       byte_sizes_(std::move(byte_sizes)),
@@ -45,9 +55,12 @@ Status SwapOutThunk::Initialize(const GpuExecutable& executable,
 SwapOutThunk::~SwapOutThunk() {
   if (executable_key_ != -1) {
     // deallocate memory for this thunk
-    auto list_ptr = local_host_memory_table().GetOrNull(executable_key_, key_);
-    if (list_ptr != nullptr) {
-      for (auto iter = list_ptr->begin(); iter != list_ptr->end(); ++iter) {
+    auto host_memory_ref =
+        local_host_memory_table().GetOrNull(executable_key_, key_);
+    const std::vector<void*>& address_list = host_memory_ref->address_list_;
+    if (host_memory_ref != nullptr) {
+      for (auto iter = address_list.begin(); iter != address_list.end();
+           ++iter) {
         executor_->HostMemoryDeallocate(*iter);
       }
     }
@@ -67,11 +80,12 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
 
   auto host_memory_ref =
       local_host_memory_table().GetOrCreate(executable_key_, key_);
-  if (host_memory_ref->empty()) {
+  std::vector<void*>& address_list = host_memory_ref->address_list_;
+  if (address_list.empty()) {
     // alloc memory for the first time. todo: will this influence profile?
     executor_ = params.stream->parent();
     for (int64 byte_size : byte_sizes_) {
-      host_memory_ref->push_back(executor_->HostMemoryAllocate(byte_size));
+      address_list.push_back(executor_->HostMemoryAllocate(byte_size));
     }
     // todo: GpuExecutor's HostMemoryAllocate is simply a new char[]. It does
     // not consider NUMA. Allocate it manually and then uses a
@@ -87,11 +101,12 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
     se::DeviceMemoryBase destination_data =
         params.buffer_allocations->GetDeviceAddress(slice);
 
-    void* source_address_ = host_memory_ref->at(i);
+    void* source_address_ = address_list.at(i);
     params.stream->ThenMemcpy(source_address_, destination_data,
                               byte_sizes_.at(i));
   }
   params.stream->ThenRecordEvent(swap_finish_event_.get());
+  host_memory_ref->swap_out_event_ = swap_finish_event_.get();
 #else   //  GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   return Unavailable(
       "Swap on GPU are not supported in this configuration. Please "
@@ -102,12 +117,14 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
 
 SwapInThunk::SwapInThunk(ThunkInfo thunk_info, BufferAllocation::Slice operand,
                          std::vector<BufferAllocation::Slice> results,
-                         std::vector<int64> byte_sizes, int64 key)
-    : Thunk(Thunk::kSwapIn, thunk_info),
+                         std::vector<int64> byte_sizes, int64 key,
+                         int64 event_key)
+    : SwapThunk(Thunk::kSwapIn, thunk_info),
       operand_(std::move(operand)),
       results_(std::move(results)),
       byte_sizes_(std::move(byte_sizes)),
       key_(key),
+      event_key_(event_key),
       executable_key_(-1) {}
 
 Status SwapInThunk::Initialize(const GpuExecutable& executable,
@@ -115,6 +132,7 @@ Status SwapInThunk::Initialize(const GpuExecutable& executable,
   executable_key_ = GetExecutableKey(&executable);
   swap_finish_event_ = absl::make_unique<se::Event>(executor);
   swap_finish_event_->Init();
+  swap_finish_events_[event_key_] = swap_finish_event_.get();
   return Status::OK();
 }
 
@@ -129,6 +147,7 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
 
   auto host_memory_ref = local_host_memory_table().Get(executable_key_, key_);
 
+  params.stream->ThenWaitFor(host_memory_ref->swap_out_event_);
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   for (int32 i = 0; i < results_.size(); ++i) {
     const BufferAllocation::Slice& slice = results_.at(i);
@@ -138,7 +157,7 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
     se::DeviceMemoryBase destination_data =
         params.buffer_allocations->GetDeviceAddress(slice);
 
-    void* source_address_ = host_memory_ref->at(i);
+    void* source_address_ = host_memory_ref->address_list_.at(i);
     params.stream->ThenMemcpy(&destination_data, source_address_,
                               byte_sizes_.at(i));
   }
@@ -151,17 +170,11 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
   return Status::OK();
 }
 
-SwapDoneThunk::SwapDoneThunk(ThunkInfo thunk_info)
-    : Thunk(Thunk::kSwapDone, thunk_info) {}
-
-Status SwapDoneThunk::Initialize(const GpuExecutable& executable,
-                                 se::StreamExecutor* executor) {
-  swap_finish_event_ = nullptr; // TODO(yonghao)
-  return Status::OK();
-}
+SwapDoneThunk::SwapDoneThunk(ThunkInfo thunk_info, int64 event_key)
+    : Thunk(Thunk::kSwapDone, thunk_info), event_key_(event_key) {}
 
 Status SwapDoneThunk::ExecuteOnStream(const ExecuteParams& params) {
-  params.stream->ThenWaitFor(swap_finish_event_);
+  params.stream->ThenWaitFor(SwapThunk::getEvent(event_key_));
   return Status::OK();
 }
 

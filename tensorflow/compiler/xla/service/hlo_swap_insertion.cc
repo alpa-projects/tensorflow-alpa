@@ -48,7 +48,9 @@ using BufferId = int64;
 using BufferIdList = absl::InlinedVector<BufferId, 3>;
 
 static const Shape keyShape = ShapeUtil::MakeShape(S64, {});
-
+static int64 swapInEventKey = 0;
+// this key is for SwapDone, since currently control flow dependency is lost in
+// MLIR and thunk_schedule.
 class Item {
  private:
   Item* next = nullptr;
@@ -580,13 +582,26 @@ Status MemoryRecorder::PrepareForInstruction(Item* item) {
     CHECK(swapOut != nullptr) << "Not in GPU but not swapped out";
     Item* swapIn = new Item;
     swapIn->isSwap = true;
-    swapIn->instruction =
+    std::string opaque =
+        Cast<HloCustomCallInstruction>(swapOut->instruction)->opaque();
+    opaque.append(";" + std::to_string(swapInEventKey));
+    HloCustomCallInstruction* swapInInst = Cast<HloCustomCallInstruction>(
         computation_->AddInstruction(HloInstruction::CreateCustomCall(
             buffer.shape, {swapOut->instruction}, "__builtin$SwapIn",
-            /*opaque=*/
-            Cast<HloCustomCallInstruction>(swapOut->instruction)->opaque()));
-    Cast<HloCustomCallInstruction>(swapIn->instruction)
-        ->set_custom_call_has_side_effect(true);
+            /*opaque=*/opaque)));
+    swapIn->instruction = swapInInst;
+    swapInInst->set_custom_call_has_side_effect(true);
+
+    Item* swapDone = new Item;
+    swapDone->isSwap = true;
+    HloCustomCallInstruction* swapDoneInst = Cast<HloCustomCallInstruction>(
+        computation_->AddInstruction(HloInstruction::CreateCustomCall(
+            buffer.shape, {}, "__builtin$SwapDone",
+            /*opaque=*/std::to_string(swapInEventKey++))));
+    swapDone->instruction = swapDoneInst;
+    swapDoneInst->set_custom_call_has_side_effect(true);
+    swapInInst->AddControlDependencyTo(swapDoneInst);
+
     VLOG(3) << "\tcreate swap in for buffer: " << bid;
     // if already discarded, swap in after discarded
     Item* lastUse = last_use_inst.at(bid);
@@ -750,8 +765,7 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
       bool changed,
       SwapInsertionComputation(module->entry_computation(), &module->schedule(),
                                memory_limit_bytes_));
-  // reschedule. todo(yonghao): only reschedule if scheduled at the entry.
-  // Otherwise get schedule at the entry but not assign
+  // reschedule because new instructions are inserted.
   HloMemoryScheduler scheduler(
       [this](const BufferValue& buffer) {
         return size_function_(buffer.shape());

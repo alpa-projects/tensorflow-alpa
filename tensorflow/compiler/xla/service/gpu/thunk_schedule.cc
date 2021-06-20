@@ -179,5 +179,9 @@ string ThunkSchedule::ToString() const {
   return result;
 }
 
+void ThunkSchedule::RescheduleForSwapDone() {
+  // TODO(yonghao)
+}
+
 }  // namespace gpu
 }  // namespace xla

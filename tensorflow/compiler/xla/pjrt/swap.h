@@ -10,23 +10,26 @@
 namespace xla {
 
 class HostMemoryTable {
- private:
  public:
-  using AddressList = std::vector<void*>;
+  struct MemoryInfo {
+    std::vector<void*> address_list_;
+    se::Event* swap_out_event_ = nullptr;
+  };
+
   explicit HostMemoryTable();
   ~HostMemoryTable();
 
-  AddressList* GetOrCreate(int64 executable_key, int64 key);
+  MemoryInfo* GetOrCreate(int64 executable_key, int64 key);
 
-  const AddressList* Get(int64 executable_key, int64 key);
+  const MemoryInfo* Get(int64 executable_key, int64 key);
 
-  const AddressList* GetOrNull(int64 executable_key, int64 key);
+  const MemoryInfo* GetOrNull(int64 executable_key, int64 key);
 
   void remove(int64 executable_key, int64 key);
 
   // given the logical executable
  private:
-  absl::flat_hash_map<std::pair<int64, int64>, std::unique_ptr<AddressList>>
+  absl::flat_hash_map<std::pair<int64, int64>, std::unique_ptr<MemoryInfo>>
       lists_;
 };
 

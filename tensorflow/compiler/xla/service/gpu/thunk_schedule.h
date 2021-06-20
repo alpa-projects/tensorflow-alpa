@@ -84,6 +84,8 @@ class ThunkSchedule {
 
   string ToString() const;
 
+  void RescheduleForSwapDone();
+
  private:
   void RemoveRedundantDependencyEdges();
 

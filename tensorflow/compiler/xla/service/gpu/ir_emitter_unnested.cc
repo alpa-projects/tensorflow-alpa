@@ -1621,7 +1621,6 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
     TF_ASSIGN_OR_RETURN(results, values_to_slices(custom_call.output()));
   }
 
-  int64 key = std::stoll(custom_call.backend_config().str());
   std::vector<int64> byte_sizes;
   if (call_target_name == kBuiltinSwapOutTarget) {
     CHECK(results.size() == 1)
@@ -1629,6 +1628,7 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
     CHECK(results[0].size() == 8)
         << "builtinSwapOut meets result size incorrect, is: "
         << results[0].size();
+    int64 key = std::stoll(custom_call.backend_config().str());
     byte_sizes.reserve(operands.size());
     for (auto slice : operands) {
       byte_sizes.push_back(slice.size());
@@ -1644,6 +1644,12 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
     CHECK(operands[0].size() == 8)
         << "builtinSwapIn meets result size incorrect, is: "
         << operands[0].size();
+    std::vector<std::string> keys =
+        absl::StrSplit(custom_call.backend_config().str(), ";");
+    CHECK(keys.size() == 2)
+        << "opaque num is: " << keys.size() << " instead of 2";
+    int64 key = std::stoll(keys[0]);
+    int64 event_key = std::stoll(keys[1]);
     byte_sizes.reserve(results.size());
     for (auto slice : results) {
       byte_sizes.push_back(slice.size());

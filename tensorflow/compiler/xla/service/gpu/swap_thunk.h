@@ -24,8 +24,23 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
+class SwapThunk : public Thunk {
+ public:
+  SwapThunk(Kind kind, ThunkInfo thunk_info);
+
+  se::Event* SwapFinishEvent() { return swap_finish_event_.get(); }
+
+  static int64 GetExecutableKey(const GpuExecutable* executable);
+
+  static se::Event* getEvent(int64 key);
+ protected:
+  std::unique_ptr<se::Event> swap_finish_event_ = nullptr;
+
+  static absl::flat_hash_map<int64, se::Event*> swap_finish_events_;
+};
+
 // Thunk to run a GPU swap out
-class SwapOutThunk : public Thunk {
+class SwapOutThunk : public SwapThunk {
  public:
   SwapOutThunk(ThunkInfo thunk_info,
                std::vector<BufferAllocation::Slice> operands,
@@ -39,8 +54,6 @@ class SwapOutThunk : public Thunk {
 
   ~SwapOutThunk() override;
 
-  se::Event* SwapFinishEvent() { return swap_finish_event_.get(); }
-
  private:
   const std::vector<BufferAllocation::Slice> operands_;
   const BufferAllocation::Slice result_;
@@ -48,45 +61,38 @@ class SwapOutThunk : public Thunk {
   const int64 key_;
   int64 executable_key_;
   se::StreamExecutor* executor_ = nullptr;
-  std::unique_ptr<se::Event> swap_finish_event_;
-
-  friend class SwapDoneThunk;
 };
 
 // Thunk to run a GPU swap in
-class SwapInThunk : public Thunk {
+class SwapInThunk : public SwapThunk {
  public:
   SwapInThunk(ThunkInfo thunk_info, BufferAllocation::Slice operands,
               std::vector<BufferAllocation::Slice> results,
-              std::vector<int64> byte_sizes, int64 key);
+              std::vector<int64> byte_sizes, int64 key, int64 event_key);
 
   Status Initialize(const GpuExecutable& executable,
                     se::StreamExecutor* executor) override;
 
   Status ExecuteOnStream(const ExecuteParams& params) override;
-
-  se::Event* SwapFinishEvent() { return swap_finish_event_.get(); }
 
  private:
   const BufferAllocation::Slice operand_;
   const std::vector<BufferAllocation::Slice> results_;
   const std::vector<int64> byte_sizes_;
   const int64 key_;
+  const int64 event_key_;
   int64 executable_key_;
-  std::unique_ptr<se::Event> swap_finish_event_;
 };
 
+// Thunk to sync a swap(in)
 class SwapDoneThunk : public Thunk {
  public:
-  SwapDoneThunk(ThunkInfo thunk_info);
-
-  Status Initialize(const GpuExecutable& executable,
-                    se::StreamExecutor* executor) override;
+  SwapDoneThunk(ThunkInfo thunk_info, int64 event_key);
 
   Status ExecuteOnStream(const ExecuteParams& params) override;
 
  private:
-  se::Event* swap_finish_event_;
+  int64 event_key_;
 };
 }  // namespace gpu
 }  // namespace xla

@@ -10,21 +10,21 @@ HostMemoryTable& local_host_memory_table() {
 
 HostMemoryTable::HostMemoryTable() {}
 
-HostMemoryTable::AddressList* HostMemoryTable::GetOrCreate(int64 executable_key,
+HostMemoryTable::MemoryInfo* HostMemoryTable::GetOrCreate(int64 executable_key,
                                                            int64 key) {
   CHECK(executable_key != -1) << "The executable is unregistered";
   auto iter = lists_.find(std::make_pair(executable_key, key));
   if (iter != lists_.end()) {
     return iter->second.get();
   }
-  std::unique_ptr<AddressList> new_list =
-      std::make_unique<AddressList>(std::move(AddressList()));
-  AddressList* ptr = new_list.get();
+  std::unique_ptr<MemoryInfo> new_list =
+      std::make_unique<MemoryInfo>(std::move(MemoryInfo{}));
+  MemoryInfo* ptr = new_list.get();
   lists_.emplace(std::make_pair(executable_key, key), std::move(new_list));
   return ptr;
 }
 
-const HostMemoryTable::AddressList* HostMemoryTable::Get(int64 executable_key,
+const HostMemoryTable::MemoryInfo* HostMemoryTable::Get(int64 executable_key,
                                                          int64 key) {
   CHECK(executable_key != -1) << "The executable is unregistered";
   auto iter = lists_.find(std::make_pair(executable_key, key));
@@ -32,7 +32,7 @@ const HostMemoryTable::AddressList* HostMemoryTable::Get(int64 executable_key,
   return iter->second.get();
 }
 
-const HostMemoryTable::AddressList* HostMemoryTable::GetOrNull(
+const HostMemoryTable::MemoryInfo* HostMemoryTable::GetOrNull(
     int64 executable_key, int64 key) {
   auto iter = lists_.find(std::make_pair(executable_key, key));
   if (iter == lists_.end()) {

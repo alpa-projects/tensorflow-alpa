@@ -68,7 +68,7 @@ T GetWithDefaultValue(const std::string& name, const T& default_value) {
     try {
       return absl::any_cast<T>(iter->second);
     } catch(const absl::bad_any_cast& e) {
-      LOG(FATAL) << "Bad cast of '" << name << "': " << e.what();
+      LOG(FATAL) << "Bad cast of '" << name;
     }
   }
 }
@@ -82,11 +82,10 @@ T GetWithoutDefaultValue(const std::string& name) {
     try {
       return absl::any_cast<T>(iter->second);
     } catch(const absl::bad_any_cast& e) {
-      LOG(FATAL) << "Bad cast of '" << name << "': " << e.what();
+      LOG(FATAL) << "Bad cast of '" << name;
     }
   }
 }
-
 
 int64 GetInt(const std::string& name, int64 default_value) {
   return GetWithDefaultValue<int64>(name, default_value);
@@ -116,8 +115,5 @@ py::object GetPyObject(const std::string& name) {
   return GetWithoutDefaultValue<py::object>(name);
 }
 
-
-
 }  // namespace pass_context
 }  // namespace xla
-

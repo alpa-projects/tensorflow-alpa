@@ -85,15 +85,16 @@ class ProfilingResult {
   // parax/profile_communication.py::ProfilingResult .
   ProfilingResult(py::object prof_result) {
     if (!prof_result.is_none()) {
+
       PyGILState_STATE gstate = PyGILState_Ensure();
-
-      PyDictToCppDict(py::cast<py::dict>(prof_result.attr("all_reduce_cost_dict")),
-                      all_reduce_cost_dict_);
-      PyDictToCppDict(py::cast<py::dict>(prof_result.attr("all_gather_cost_dict")),
-                      all_gather_cost_dict_);
-      PyDictToCppDict(py::cast<py::dict>(prof_result.attr("reduce_scatter_cost_dict")),
-                      reduce_scatter_cost_dict_);
-
+      {
+        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("all_reduce_cost_dict")),
+                        all_reduce_cost_dict_);
+        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("all_gather_cost_dict")),
+                        all_gather_cost_dict_);
+        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("reduce_scatter_cost_dict")),
+                        reduce_scatter_cost_dict_);
+      }
       PyGILState_Release(gstate);
     }
 
@@ -413,10 +414,10 @@ class ClusterEnvironment {
   }
 
   // Shape and bandwidth of the device mesh
-  const Array<int64>& device_mesh;
+  const Array<int64> device_mesh;
   const int total_devices;
-  const std::vector<double>& mesh_alpha;
-  const std::vector<double>& mesh_beta;
+  const std::vector<double> mesh_alpha;
+  const std::vector<double> mesh_beta;
   const ProfilingResult& prof_result;
 
   // Disencourage the apperance of partial reduction
@@ -1886,8 +1887,8 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
   size_t num_edges = E_np.size() / 2;
   std::vector<int64> s_val, e_val;
 
+  PyGILState_STATE gstate = PyGILState_Ensure();
   {
-    PyGILState_STATE gstate = PyGILState_Ensure();
     py::object submodule = py::module_::import("parax.auto_sharding");
     py::object call_solver_serialized_args =
         submodule.attr("call_solver_serialized_args");
@@ -1919,8 +1920,8 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
     for (size_t i = 0; i < num_edges; ++i) {
       e_val.push_back(e_val_unckecked(i));
     }
-    PyGILState_Release(gstate);
   }
+  PyGILState_Release(gstate);
 
   return std::make_pair(std::move(s_val), std::move(e_val));
 }

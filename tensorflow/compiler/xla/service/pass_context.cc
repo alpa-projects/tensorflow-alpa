@@ -45,11 +45,10 @@ void SetPassContext(py::dict dict) {
         }
         obj = absl::any(std::move(double_vector));
       } else {
-        LOG(FATAL) << "Invalid value in a tuple/list: "
-                   << py::str(item.second);
+        obj = absl::any(py::cast<py::object>(item.second));
       }
     } else {
-      LOG(FATAL) << "Invalid value: " << py::str(item.second);
+      obj = absl::any(py::cast<py::object>(item.second));
     }
 
     current_context[name] = std::move(obj);
@@ -112,6 +111,12 @@ std::vector<int64> GetIntVector(const std::string& name) {
 std::vector<double> GetDoubleVector(const std::string& name) {
   return GetWithoutDefaultValue<std::vector<double>>(name);
 }
+
+py::object GetPyObject(const std::string& name) {
+  return GetWithoutDefaultValue<py::object>(name);
+}
+
+
 
 }  // namespace pass_context
 }  // namespace xla

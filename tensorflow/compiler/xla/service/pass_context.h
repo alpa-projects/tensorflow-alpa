@@ -31,6 +31,8 @@ std::vector<int64> GetIntVector(const std::string& name);
 
 std::vector<double> GetDoubleVector(const std::string& name);
 
+pybind11::object GetPyObject(const std::string& name);
+
 }  // namespace pass_context
 }  // namespace xla
 

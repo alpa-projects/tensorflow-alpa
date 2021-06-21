@@ -33,10 +33,10 @@
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/logging.h"
 
-// TODO(yonghao): has_indirect_use;
-// todo: store the space for parameter specifically, instead of wasting time and
-// space for it;
-// todo: handle calls;
+// TODO(yonghao): has_indirect_use: this leads to redundant Buffers,
+// e.g. Tuple and elements inside are different buffers sharing the same memory.
+// todo: store the space for parameter specifically, instead of
+// wasting time and space for it;
 // todo: reschedule the code and decouple;
 namespace xla {
 
@@ -170,7 +170,8 @@ UsesList GetUsers(const InstructionList& instruction_list,
       if (buffer_alias.instruction() != logical_buffer->instruction() /*&&
           !IsSupportedIndirectUser(buffer_alias.instruction())*/) {
         // has_indirect_user
-        LOG(WARNING) << "has indirect users, may lead to incorrect result";
+        LOG(WARNING) << user->ToString()
+                     << " has indirect uses, may lead to incorrect result";
         *has_indirect_users = true;
       }
       // A buffer may be used by the instruction via more than one alias. For
@@ -205,7 +206,7 @@ class MemoryRecorder {
   // if success, the second is the last occurance: a swap out or discard
   std::pair<bool, std::vector<Item*>> allocReleasedMemory(int64 size);
 
-  Status PrepareForInstruction(Item* item);
+  Status PrepareForInstruction(Item* item, int64 callee_usage);
 
   Status RecycleAfterInstruction(Item* item);
 
@@ -232,7 +233,8 @@ class MemoryRecorder {
 
     // Whether this buffer has indirect uses. Ie, an instruction which is not a
     // user of defining_instruction uses this buffer. This can occur due to
-    // buffer aliasing (eg, tuples).
+    // buffer aliasing (eg, tuples). We only consider get-tuple-element and
+    // bitcast, and do not swap out other indirect uses
     bool has_indirect_uses;
 
     // Position in the tuple this buffer definition lives in.
@@ -565,7 +567,7 @@ std::pair<bool, std::vector<Item*>> MemoryRecorder::allocReleasedMemory(
   }
 }
 
-Status MemoryRecorder::PrepareForInstruction(Item* item) {
+Status MemoryRecorder::PrepareForInstruction(Item* item, int64 callee_usage) {
   // cannot release buffers used by the preparing_for item.
   preparing_for = item;
   for (auto bid : item->buffers_used) {
@@ -602,7 +604,6 @@ Status MemoryRecorder::PrepareForInstruction(Item* item) {
             /*opaque=*/std::to_string(swapInEventKey++))));
     swapDone->instruction = swapDoneInst;
     swapDoneInst->set_custom_call_has_side_effect(true);
-    // TODO(yonghao): swap done
 
     VLOG(3) << "\tcreate swap in for buffer: " << bid;
     // if already discarded, swap in after discarded
@@ -632,6 +633,7 @@ Status MemoryRecorder::PrepareForInstruction(Item* item) {
     getSpaceFor(AllocatedSize(buffer), item);
     registerAlloc(item, bid, AllocatedSize(buffer));
   }
+  getSpaceFor(callee_usage, item);
   return Status::OK();
 }
 
@@ -671,9 +673,9 @@ StatusOr<int64> HloSwapInsertion::ComputePeakMemory(
   for (auto item = instruction_list.first(); item != nullptr;
        item = instruction_list.next(item)) {
     const HloInstruction* instruction = item->instruction;
-    TF_RETURN_IF_ERROR(tracker.PrepareForInstruction(item));
     TF_ASSIGN_OR_RETURN(int64 callee_usage,
                         CalledComputationsMemoryUsage(instruction));
+    TF_RETURN_IF_ERROR(tracker.PrepareForInstruction(item, 0));
     peak_memory =
         std::max<int64>(peak_memory, tracker.memory_usage() + callee_usage);
     TF_RETURN_IF_ERROR(tracker.RecycleAfterInstruction(item));
@@ -704,34 +706,54 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
   InstructionList instruction_list(schedule->sequence(computation));
   MemoryRecorder tracker(computation, instruction_list, *points_to_analysis_,
                          memory_limit_bytes_, size_function_);
+
+  const CallGraphNode& call_graph_node = call_graph_->GetNode(computation);
+
   VLOG(1) << "memory limit is: " << memory_limit_bytes_;
+
   int64 peak_memory = tracker.memory_usage();
+  bool changed = false;
+
   for (auto* item = instruction_list.first(); item != nullptr;
        item = instruction_list.next(item)) {
     const HloInstruction* instruction = item->instruction;
-    VLOG(1) << "start instruction " << instruction->ToString();
+
     TF_ASSIGN_OR_RETURN(int64 callee_usage,
                         CalledComputationsMemoryUsage(instruction));
-    // TODO: pass it to PrepareForInstruction
-    TF_RETURN_IF_ERROR(tracker.PrepareForInstruction(item));
-    peak_memory =
-        std::max<int64>(peak_memory, tracker.memory_usage() + callee_usage);
+    // todo: only when callee usage is too large do we try to swap the callee.
+    const CallSite* callsite = call_graph_node.GetCallSite(instruction);
+    if (callsite != nullptr &&
+        callsite->context() == CallContext::kSequential) {
+      for (HloComputation* called_computation :
+           callsite->called_computations()) {
+        int64 subcomputation_memory_limit_bytes =
+            std::max<int64>(0, memory_limit_bytes_ - tracker.memory_usage());
+        TF_ASSIGN_OR_RETURN(
+            bool subcomputation_changed,
+            SwapInsertionComputation(called_computation, schedule,
+                                     subcomputation_memory_limit_bytes));
+        changed |= subcomputation_changed;
+      }
+    }
+
+    TF_RETURN_IF_ERROR(tracker.PrepareForInstruction(item, callee_usage));
+    peak_memory = std::max<int64>(peak_memory, tracker.memory_usage());
     VLOG(1) << "memory usage after computation is: " << tracker.memory_usage();
     TF_RETURN_IF_ERROR(tracker.RecycleAfterInstruction(item));
     VLOG(1) << "memory usage after recycle is: " << tracker.memory_usage();
-    // TODO: subcomputations by:
-    // CallSite *callsite = call_graph_node.GetCallSite(instruction);
-    // if (callsite != nullptr && callsite->context() ==
-    // CallContext::kSequential) {
-    //   for (HloComputation *called_computation :
-    //   callsite->called_computations())
-    // }
   }
-  return true;  // TODO
+  return true;  // todo
 }
 
 StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
-  // TODO: get schedule
+  HloMemoryScheduler scheduler(
+      [this](const BufferValue& buffer) {
+        return size_function_(buffer.shape());
+      },
+      ComputationSchedulerToModuleScheduler(DefaultMemoryScheduler));
+  if (!module->has_schedule()) {
+    scheduler.Run(module);
+  }
   TF_RET_CHECK(module->has_schedule());
   TF_ASSIGN_OR_RETURN(points_to_analysis_, TuplePointsToAnalysis::Run(module));
 
@@ -770,11 +792,6 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
       SwapInsertionComputation(module->entry_computation(), &module->schedule(),
                                memory_limit_bytes_));
   // reschedule because new instructions are inserted.
-  HloMemoryScheduler scheduler(
-      [this](const BufferValue& buffer) {
-        return size_function_(buffer.shape());
-      },
-      ComputationSchedulerToModuleScheduler(DefaultMemoryScheduler));
   TF_ASSIGN_OR_RETURN(changed, scheduler.Run(module));
   return changed;
 }

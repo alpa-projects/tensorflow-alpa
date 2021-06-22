@@ -109,6 +109,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_proto_util.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding_metadata.h"
 #include "tensorflow/compiler/xla/service/hlo_subcomputation_unification.h"
+#include "tensorflow/compiler/xla/service/hlo_swap_insertion.h"
 #include "tensorflow/compiler/xla/service/hlo_verifier.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
 #include "tensorflow/compiler/xla/service/logistic_expander.h"
@@ -462,6 +463,15 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
 
+  {
+    HloPassPipeline pipeline("swap inserter");
+    pipeline.AddPass<HloSwapInsertion>(
+        [](const Shape& shape) {
+          return ShapeUtil::ByteSizeOf(shape, sizeof(void*));
+        },
+        1024 * 1024 * 260);
+    TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+  }
   return Status::OK();
 }
 

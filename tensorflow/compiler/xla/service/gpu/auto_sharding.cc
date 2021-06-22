@@ -131,7 +131,8 @@ class ProfilingResult {
       return EstimateAllReduceCost(replica_groups, size, dtype) / 2;
     }
 
-    return EstimateAllReduceCost(replica_groups, size, dtype) / 2;
+    return EstimateInternal(replica_groups, size, dtype, reduce_scatter_cost_dict_) -
+           EstimateInternal(replica_groups, 0, dtype, reduce_scatter_cost_dict_);
   }
 
   std::string ToString() {
@@ -256,22 +257,22 @@ class ClusterEnvironment {
     // Build replica group for each dimension.
     CHECK_EQ(device_mesh.num_dimensions(), 2);
 
-    // dim 0
+    // Replica groups when communicating across dim 0
     std::vector<std::vector<int>> replica_groups;
-    for (size_t i = 0; i < device_mesh.dim(0); ++i) {
+    for (size_t j = 0; j < device_mesh.dim(1); ++j) {
       std::vector<int> group;
-      for (size_t j = 0; j < device_mesh.dim(1); ++j) {
+      for (size_t i = 0; i < device_mesh.dim(0); ++i) {
         group.push_back(device_mesh(i, j));
       }
       replica_groups.push_back(std::move(group));
     }
     cached_replica_groups.push_back(replica_groups);
 
-    // dim 1
+    // Replica groups when communicating across dim 1
     replica_groups.clear();
-    for (size_t j = 0; j < device_mesh.dim(1); ++j) {
+    for (size_t i = 0; i < device_mesh.dim(0); ++i) {
       std::vector<int> group;
-      for (size_t i = 0; i < device_mesh.dim(0); ++i) {
+      for (size_t j = 0; j < device_mesh.dim(1); ++j) {
         group.push_back(device_mesh(i, j));
       }
       replica_groups.push_back(std::move(group));

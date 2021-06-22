@@ -1966,6 +1966,7 @@ void SetHloSharding(HloModule* module,
       } else {
         int ins_idx = strategies->id;
         int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
+        CHECK_LT(stra_idx, strategies->leaf_vector.size());
         const HloSharding& sharding_spec =
             strategies->leaf_vector[stra_idx].output_sharding;
         if (IsUndefined(sharding_spec)) {

@@ -170,8 +170,13 @@ UsesList GetUsers(const InstructionList& instruction_list,
       if (buffer_alias.instruction() != logical_buffer->instruction() /*&&
           !IsSupportedIndirectUser(buffer_alias.instruction())*/) {
         // has_indirect_user
-        LOG(WARNING) << user->ToString()
-                     << " has indirect uses, may lead to incorrect result";
+        LOG(WARNING) << user->ToShortString()
+                     << " has indirect uses, may lead to inaccurate result";
+        // LOG(WARNING) << "buffer alias inst is: "
+        //              << buffer_alias.instruction()->ToShortString()
+        //              << "; logical buffer inst is: "
+        //              << logical_buffer->instruction()->ToShortString()
+        //              << "; buffer is: " << logical_buffer->ToString();
         *has_indirect_users = true;
       }
       // A buffer may be used by the instruction via more than one alias. For
@@ -720,10 +725,11 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
 
     TF_ASSIGN_OR_RETURN(int64 callee_usage,
                         CalledComputationsMemoryUsage(instruction));
-    // todo: only when callee usage is too large do we try to swap the callee.
+    // callee usage is too large, try to swap the callee.
     const CallSite* callsite = call_graph_node.GetCallSite(instruction);
     if (callsite != nullptr &&
-        callsite->context() == CallContext::kSequential) {
+        callsite->context() == CallContext::kSequential &&
+        callee_usage + tracker.memory_usage() > memory_limit_bytes_) {
       for (HloComputation* called_computation :
            callsite->called_computations()) {
         int64 subcomputation_memory_limit_bytes =

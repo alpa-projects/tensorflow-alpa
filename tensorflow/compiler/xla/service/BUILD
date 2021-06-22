@@ -5957,6 +5957,7 @@ cc_library(
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/types:any",
         "@pybind11",
     ],
 )

@@ -625,6 +625,8 @@ void BuildXlaCompilerSubmodule(py::module& m) {
                        : absl::nullopt;
           },
           &ExecutableBuildOptions::set_result_layout)
+      .def_property("seed", &ExecutableBuildOptions::seed,
+                    &ExecutableBuildOptions::set_seed)
       .def_property("num_replicas", &ExecutableBuildOptions::num_replicas,
                     &ExecutableBuildOptions::set_num_replicas)
       .def_property("num_partitions", &ExecutableBuildOptions::num_partitions,

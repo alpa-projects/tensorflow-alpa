@@ -76,31 +76,218 @@ using StrategyMap =
 using LeafStrategies = std::vector<StrategyVector*>;
 using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64>;
 using AliasSet = absl::flat_hash_set<std::pair<int64, int64>>;
-class ClusterEnvironment;
 
-// Create a tiled HloSharding. Map tensor dims to mesh dims.
-HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
-                 const std::vector<int64> mesh_dims,
-                 const ClusterEnvironment& cluster_env);
+
+// Store the profiling results of communication and computation.
+class ProfilingResult {
+ public:
+  // Construct the class from the corresponding python object
+  // parax/profile_communication.py::ProfilingResult .
+  ProfilingResult(py::object prof_result) {
+    if (!prof_result.is_none()) {
+
+      PyGILState_STATE gstate = PyGILState_Ensure();
+      {
+        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("all_reduce_cost_dict")),
+                        all_reduce_cost_dict_);
+        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("all_gather_cost_dict")),
+                        all_gather_cost_dict_);
+        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("reduce_scatter_cost_dict")),
+                        reduce_scatter_cost_dict_);
+      }
+      PyGILState_Release(gstate);
+    }
+
+    if (all_reduce_cost_dict_.empty()) {
+      enabled_ = false;
+    } else {
+      enabled_ = true;
+    }
+  }
+
+  bool Enabled() const { return enabled_; }
+
+  double EstimateAllGatherCost(const std::vector<std::vector<int>>& replica_groups,
+                               int64 size, std::string dtype) const {
+    if (all_gather_cost_dict_.empty()) {
+      // Use all-reduce to approximate all-gather.
+      return EstimateAllReduceCost(replica_groups, size, dtype) / 2;
+    }
+
+    return EstimateInternal(replica_groups, size, dtype, all_gather_cost_dict_) -
+           EstimateInternal(replica_groups, 0, dtype, all_gather_cost_dict_);
+  }
+
+  double EstimateAllReduceCost(const std::vector<std::vector<int>>& replica_groups,
+                               int64 size, std::string dtype) const {
+    return EstimateInternal(replica_groups, size, dtype, all_reduce_cost_dict_) -
+           EstimateInternal(replica_groups, 0, dtype, all_reduce_cost_dict_);
+  }
+
+  double EstimateReduceScatterCost(const std::vector<std::vector<int>>& replica_groups,
+                                   int64 size, std::string dtype) const {
+    if (reduce_scatter_cost_dict_.empty()) {
+      // Use all-reduce to approximate all-gather.
+      return EstimateAllReduceCost(replica_groups, size, dtype) / 2;
+    }
+
+    return EstimateInternal(replica_groups, size, dtype, reduce_scatter_cost_dict_) -
+           EstimateInternal(replica_groups, 0, dtype, reduce_scatter_cost_dict_);
+  }
+
+  std::string ToString() {
+    std::ostringstream os;
+    for (const auto& item : all_reduce_cost_dict_) {
+      os << item.first.first << " " << item.first.second << "\n";
+    }
+    return os.str();
+  }
+
+ private:
+  // pair<group, dtype>
+  using Key = std::pair<std::string, std::string>;
+  // vector<pair<size, time>>
+  using Value = std::vector<std::pair<int64, double>>;
+
+  // Estimate the cost by linear interpolation bewteen the two closest points.
+  double EstimateInternal(const std::vector<std::vector<int>>& replica_groups,
+                          int64 size,
+                          const std::string& dtype,
+                          const absl::flat_hash_map<Key, Value>& cost_dict) const {
+    Key key(Group2Str(replica_groups), dtype);
+    Value cost_list = cost_dict.at(key);
+
+    CHECK(!cost_list.empty());
+
+    size_t i;
+    if (size > cost_list.back().first) {
+      i = cost_list.size() - 2;
+    } else if (size < cost_list.front().first) {
+      i = 0;
+    } else {
+      for (i = 0; i < cost_list.size() - 1; ++i) {
+        if (cost_list[i].first <= size && size <= cost_list[i+1].first) {
+          break;
+        }
+      }
+    }
+
+    int64 left_size = cost_list[i].first;
+    double left_cost = cost_list[i].second;
+    int64 right_size = cost_list[i+1].first;
+    double right_cost = cost_list[i+1].second;
+
+    return 1.0 * (size - left_size) / (right_size - left_size) * (right_cost - left_cost) + left_cost;
+  }
+
+  // Convert a python dict to c++ dict.
+  void PyDictToCppDict(py::dict py_dict, absl::flat_hash_map<Key, Value>& cpp_dict) {
+    // the type of py_dict: Dict[Tuple(group, dtype) -> List[Tuple(size, time)]]
+    for (auto item : py_dict) {
+      py::tuple tuple_key = py::cast<py::tuple>(item.first);
+      Key key(Group2Str(py::cast<py::tuple>(tuple_key[0])),
+              py::cast<std::string>(tuple_key[1]));
+
+      py::list list_val = py::cast<py::list>(item.second);
+      for (const auto x : list_val) {
+        py::tuple tuple_val = py::cast<py::tuple>(x);
+        cpp_dict[key].push_back(std::make_pair(
+          py::cast<int64>(tuple_val[0]), py::cast<double>(tuple_val[1])));
+      }
+    }
+  }
+
+  // Make a string key of a replica_groups.
+  std::string Group2Str(const py::tuple& replica_groups) const {
+    std::ostringstream os;
+    os << "(";
+    for (const auto& group : replica_groups) {
+      os << "(";
+      for (const auto& id : py::cast<py::tuple>(group)) {
+        os << py::cast<int64>(id) << ",";
+      }
+      os << "),";
+    }
+    os << ")";
+
+    return os.str();
+  }
+
+  // Make a string key of a replica_groups.
+  std::string Group2Str(const std::vector<std::vector<int>>& replica_groups) const {
+    std::ostringstream os;
+
+    os << "(";
+    for (const auto& group : replica_groups) {
+      os << "(";
+      for (const auto& id : group) {
+        os << id << ",";
+      }
+      os << "),";
+    }
+    os << ")";
+
+    return os.str();
+  }
+
+  bool enabled_;
+  absl::flat_hash_map<Key, Value> all_reduce_cost_dict_;
+  absl::flat_hash_map<Key, Value> all_gather_cost_dict_;
+  absl::flat_hash_map<Key, Value> reduce_scatter_cost_dict_;
+};
 
 // The cluster has a multi-dimensional device mesh topology.
 // Each mesh dimension has its own latency and bandwidth.
 // We use alpha-beta model to model the communication cost.
+// If profiling result is provided, we always prefer to use
+// the real profiling result.
 class ClusterEnvironment {
  public:
   ClusterEnvironment(const Array<int64>& device_mesh,
                      const std::vector<double>& mesh_alpha,
                      const std::vector<double>& mesh_beta,
+                     const ProfilingResult& prof_result,
                      const AutoShardingSolverOption& solver_option)
       : device_mesh(device_mesh),
         total_devices(device_mesh.num_elements()),
         mesh_alpha(mesh_alpha),
         mesh_beta(mesh_beta),
-        solver_option(solver_option) {}
+        prof_result(prof_result),
+        solver_option(solver_option) {
+    // Build replica group for each dimension.
+    CHECK_EQ(device_mesh.num_dimensions(), 2);
+
+    // Replica groups when communicating across dim 0
+    std::vector<std::vector<int>> replica_groups;
+    for (size_t j = 0; j < device_mesh.dim(1); ++j) {
+      std::vector<int> group;
+      for (size_t i = 0; i < device_mesh.dim(0); ++i) {
+        group.push_back(device_mesh(i, j));
+      }
+      replica_groups.push_back(std::move(group));
+    }
+    cached_replica_groups.push_back(replica_groups);
+
+    // Replica groups when communicating across dim 1
+    replica_groups.clear();
+    for (size_t i = 0; i < device_mesh.dim(0); ++i) {
+      std::vector<int> group;
+      for (size_t j = 0; j < device_mesh.dim(1); ++j) {
+        group.push_back(device_mesh(i, j));
+      }
+      replica_groups.push_back(std::move(group));
+    }
+    cached_replica_groups.push_back(replica_groups);
+  }
 
   double AllGatherCost(double num_bytes, int mesh_dim) const {
     if (solver_option.override_all_gather_cost) {
       return solver_option.all_gather_cost;
+    }
+
+    if (prof_result.Enabled()) {
+      return prof_result.EstimateAllGatherCost(cached_replica_groups[mesh_dim],
+        num_bytes / 4, "float32");
     }
 
     int64 num_devices = device_mesh.dim(mesh_dim);
@@ -109,9 +296,15 @@ class ClusterEnvironment {
             0.1);
   }
 
+  // TODO(lmzheng): distinguish dtype and reduce_op.
   double AllReduceCost(double num_bytes, int mesh_dim) const {
     if (solver_option.override_all_reduce_cost) {
       return solver_option.all_reduce_cost;
+    }
+
+    if (prof_result.Enabled()) {
+      return prof_result.EstimateAllReduceCost(cached_replica_groups[mesh_dim],
+        num_bytes / 4, "float32");
     }
 
     int64 num_devices = device_mesh.dim(mesh_dim);
@@ -124,6 +317,11 @@ class ClusterEnvironment {
   double ReduceScatterCost(double num_bytes, int mesh_dim) const {
     if (solver_option.override_reduce_scatter_cost) {
       return solver_option.reduce_scatter_cost;
+    }
+
+    if (prof_result.Enabled()) {
+      return prof_result.EstimateReduceScatterCost(cached_replica_groups[mesh_dim],
+        num_bytes / 4, "float32");
     }
 
     int64 num_devices = device_mesh.dim(mesh_dim);
@@ -221,12 +419,16 @@ class ClusterEnvironment {
   const int total_devices;
   const std::vector<double> mesh_alpha;
   const std::vector<double> mesh_beta;
+  const ProfilingResult& prof_result;
 
   // Disencourage the apperance of partial reduction
   const double partial_reduction_penalty = 10;
 
   // The solver option may override the cost of communication primitives
   const AutoShardingSolverOption& solver_option;
+
+  // Cached replica groups. Shape: [mesh_dim, group_id, ids in this group].
+  std::vector<std::vector<std::vector<int>>> cached_replica_groups;
 };
 
 // Create a HloSharding that tiles some tensor dims on some device mesh dims.
@@ -1764,6 +1966,7 @@ void SetHloSharding(HloModule* module,
       } else {
         int ins_idx = strategies->id;
         int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
+        CHECK_LT(stra_idx, strategies->leaf_vector.size());
         const HloSharding& sharding_spec =
             strategies->leaf_vector[stra_idx].output_sharding;
         if (IsUndefined(sharding_spec)) {
@@ -1951,10 +2154,13 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   device_mesh.SetValues(
       pass_context::GetIntVector("auto_sharding::device_mesh_ids"));
 
+  ProfilingResult prof_result(pass_context::GetPyObject(
+      "auto_sharding::device_mesh_prof_result"));
   ClusterEnvironment cluster_env(
       device_mesh,
       pass_context::GetDoubleVector("auto_sharding::device_mesh_alpha"),
       pass_context::GetDoubleVector("auto_sharding::device_mesh_beta"),
+      prof_result,
       solver_option);
 
   // ----- Build strategies and costs -----

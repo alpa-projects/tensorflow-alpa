@@ -15,9 +15,12 @@
 #include "tensorflow/compiler/xla/service/hlo_swap_insertion.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/tests/hlo_test_base.h"
+#include "tensorflow/compiler/xla/tests/test_utils.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
+#include "tensorflow/core/lib/io/path.h"
+#include "tensorflow/core/platform/resource_loader.h"
 
 namespace xla {
 namespace {
@@ -170,14 +173,6 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
     executable_run_options.set_device_to_host_stream(stream_h2d.get());
     executable_run_options.set_device_assignment(&device_assignment);
     ServiceExecutableRunOptions run_options(executable_run_options);
-    std::vector<ExecutionInput> execution_inputs;
-
-    for (auto arg : arguments) {
-      Shape shape =
-          ShapeUtil::MakeShape(xla::F32, {static_cast<int64>(arg.size())});
-      execution_inputs.emplace_back(shape);
-      execution_inputs.back().SetBuffer({}, MaybeOwningDeviceMemory(arg));
-    }
 
     TF_ASSIGN_OR_RETURN(auto output,
                         executable->ExecuteAsyncOnStream(
@@ -291,7 +286,44 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
     c_value.push_back(i);
   }
   RunModuleWithHostBuffers(
-      gExec, {ToF32Span(&a_value), ToF32Span(&b_value), ToF32Span(&c_value)});
+      gExec, {ToF32Span(&a_value), ToF32Span(&b_value),
+      ToF32Span(&c_value)});
+}
+
+TEST_F(HloSwapInsertionTest, GetTupleElement) {
+  const char* hasIndirectUse = R"(
+HloModule module
+
+reducer {
+  parameter.1 = f32[] parameter(0)
+  parameter.3 = f32[] parameter(2)
+  add.2 = f32[] add(parameter.1, parameter.3)
+  parameter.0 = f32[] parameter(1)
+  parameter.2 = f32[] parameter(3)
+  add.3 = f32[] add(parameter.0, parameter.2)
+  ROOT tuple.4 = (f32[], f32[]) tuple(add.2, add.3)
+}
+
+ENTRY entry {
+  parameter.6 = (f32[], f32[], f32[10]) parameter(0)
+  get-tuple-element.10 = f32[] get-tuple-element(parameter.6), index=0
+  get-tuple-element.11 = f32[] get-tuple-element(parameter.6), index=1
+  get-tuple-element.12 = f32[10] get-tuple-element(parameter.6), index=2
+  bitcast = f32[5,2]{1,0} bitcast(f32[10] get-tuple-element.12)
+  constant = f32[] constant(0)
+  ROOT reduce = (f32[], f32[]) reduce(get-tuple-element.10,
+  get-tuple-element.11, constant, constant), dimensions={}, to_apply=reducer
+}
+)";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hasIndirectUse));
+
+  // memory constraint: (1+30) * 4
+  TF_ASSERT_OK_AND_ASSIGN(
+      bool changed,
+      RunHloSwapInsertion(5 * 4, module.get()));
+
+  EXPECT_TRUE(changed);
 }
 
 };  // namespace

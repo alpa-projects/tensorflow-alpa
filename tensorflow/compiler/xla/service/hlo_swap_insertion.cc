@@ -778,7 +778,7 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
     TF_RETURN_IF_ERROR(tracker.RecycleAfterInstruction(item));
     VLOG(1) << "memory usage after recycle is: " << tracker.memory_usage();
   }
-  std::cerr << peak_memory;
+  std::cerr << peak_memory << "\n";
   return true;  // todo
 }
 

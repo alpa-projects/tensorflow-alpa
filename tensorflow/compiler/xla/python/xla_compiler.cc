@@ -421,7 +421,15 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           py::arg("options") = HloPrintOptions())
       .def("as_serialized_hlo_module_proto", &GetHloModuleSerializedProto)
       .def("spmd_output_sharding", &HloModule::spmd_output_sharding)
-      .def("spmd_parameters_shardings", &HloModule::spmd_parameters_shardings);
+      .def("spmd_parameters_shardings", &HloModule::spmd_parameters_shardings)
+      .def("parameter_shapes", [](const HloModule& hlo_module) -> std::vector<Shape>{
+            const auto params = hlo_module.entry_computation()->parameter_instructions();
+            std::vector<Shape> ret(params.size());
+            for (size_t i = 0; i < params.size(); ++i) {
+              ret[i] = params[i]->shape();
+            }
+            return ret;
+          });
 
   m.def("hlo_module_to_dot_graph",
         [](const HloModule& hlo_module) -> StatusOr<std::string> {

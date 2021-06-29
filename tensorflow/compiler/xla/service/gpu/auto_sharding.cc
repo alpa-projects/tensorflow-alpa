@@ -14,6 +14,7 @@
 #include "tensorflow/compiler/xla/service/hlo_sharding.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding_util.h"
 #include "tensorflow/compiler/xla/service/pass_context.h"
+#include "tensorflow/compiler/xla/service/dfs_hlo_visitor_with_default.h"
 
 namespace xla {
 namespace gpu {
@@ -1886,16 +1887,16 @@ std::unique_ptr<HloModule> CreateStageModule(
       for (auto operand : ins->operands()) {
         HloInstruction *new_operand = context->FindInstruction(operand);
         if (new_operand == nullptr) {
-          std::vector<HloInstruction *> ancestors = GetAncestorInstructions(opreand);
+          std::vector<HloInstruction *> ancestors = GetAncestorInstructions(operand);
           for (auto ancestor : ancestors) {
             // Make sure the ancestor is a constant
             // TODO (zhuohan): Might also check that the opcode is not kRngGetAndUpdateState
             CHECK_NE(ancestor->opcode(), HloOpcode::kParameter);
-            std::vector<HloInstruction *> new_ancestor_opreands;
+            std::vector<HloInstruction *> new_ancestor_operands;
             for (auto ancestor_operand : ancestor->operands()) {
-              new_ancestor_opreands.push_back(context->GetInstruction(ancestor_operand));
+              new_ancestor_operands.push_back(context->GetInstruction(ancestor_operand));
             }
-            instructions.push_back(ancestor->CloneWithNewOperands(ancestor->shape(), new_ancestor_opreands, context));
+            instructions.push_back(ancestor->CloneWithNewOperands(ancestor->shape(), new_ancestor_operands, context));
           }
         }
         new_operands.push_back(new_operand);

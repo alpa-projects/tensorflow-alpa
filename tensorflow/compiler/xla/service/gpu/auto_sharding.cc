@@ -1899,6 +1899,7 @@ std::unique_ptr<HloModule> CreateStageModule(
             }
             instructions.push_back(ancestor->CloneWithNewOperands(ancestor->shape(), new_ancestor_operands, context));
           }
+          new_operand = context->GetInstruction(operand);
         }
         new_operands.push_back(new_operand);
       }

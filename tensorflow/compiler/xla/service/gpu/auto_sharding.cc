@@ -1808,6 +1808,34 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
   return os.str();
 }
 
+std::vector<HloInstruction *> AncestorInstructions(HloInstruction *start_ins) {
+  std::vector<HloInstruction *> postorder;
+  absl::flat_hash_map<HloInstruction *, VisitState> visited;
+  std::stack<HloInstruction *> dfs_stack;
+  dfs_stack.push_back(start_ins);
+
+  while (!dfs_stack.empty()) {
+    auto* cur = dfs_stack.back();
+    auto it = visited.find(cur);
+    if (it != visited.end()) {
+      dfs_stack.pop_back();
+      if (it->second == kVisited) {
+        continue;
+      }
+      CHECK_EQ(it->second, kVisiting);
+      postorder.push_back(cur);
+      it->second = kVisited;
+      continue;
+    }
+
+    visited.insert({cur, kVisiting});
+    for (HloInstruction* operand : cur->operands()) {
+      dfs_stack.push_back(operand);
+    }
+  }
+  return postorder;
+}
+
 std::unique_ptr<HloModule> CreateStageModule(
     HloModule* full_module,
     const std::vector<HloInstruction*> &stage_instructions,
@@ -1856,7 +1884,21 @@ std::unique_ptr<HloModule> CreateStageModule(
           << ins->ToString();
       std::vector<HloInstruction*> new_operands;
       for (auto operand : ins->operands()) {
-        new_operands.push_back(context->GetInstruction(operand));
+        HloInstruction *new_operand = context->FindInstruction(operand);
+        if (new_operand == nullptr) {
+          std::vector<HloInstruction *> ancestors = GetAncestorInstructions(opreand);
+          for (auto ancestor : ancestors) {
+            // Make sure the ancestor is a constant
+            // TODO (zhuohan): Might also check that the opcode is not kRngGetAndUpdateState
+            CHECK_NE(ancestor->opcode(), HloOpcode::kParameter);
+            std::vector<HloInstruction *> new_ancestor_opreands;
+            for (auto ancestor_operand : ancestor->operands()) {
+              new_ancestor_opreands.push_back(context->GetInstruction(ancestor_operand));
+            }
+            instructions.push_back(ancestor->CloneWithNewOperands(ancestor->shape(), new_ancestor_opreands, context));
+          }
+        }
+        new_operands.push_back(new_operand);
       }
       new_ins = ins->CloneWithNewOperands(ins->shape(), new_operands, context);
     }

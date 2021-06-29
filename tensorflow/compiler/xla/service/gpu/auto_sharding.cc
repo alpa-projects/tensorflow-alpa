@@ -14,7 +14,6 @@
 #include "tensorflow/compiler/xla/service/hlo_sharding.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding_util.h"
 #include "tensorflow/compiler/xla/service/pass_context.h"
-#include "tensorflow/compiler/xla/service/dfs_hlo_visitor_with_default.h"
 
 namespace xla {
 namespace gpu {
@@ -1809,7 +1808,9 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
   return os.str();
 }
 
-std::vector<HloInstruction *> AncestorInstructions(HloInstruction *start_ins) {
+enum VisitState { kVisiting, kVisited };
+
+std::vector<HloInstruction *> GetAncestorInstructions(HloInstruction *start_ins) {
   std::vector<HloInstruction *> postorder;
   absl::flat_hash_map<HloInstruction *, VisitState> visited;
   std::stack<HloInstruction *> dfs_stack;

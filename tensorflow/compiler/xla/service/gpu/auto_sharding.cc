@@ -1813,7 +1813,7 @@ enum VisitState { kVisiting, kVisited };
 std::vector<HloInstruction *> GetAncestorInstructions(HloInstruction *start_ins) {
   std::vector<HloInstruction *> postorder;
   absl::flat_hash_map<HloInstruction *, VisitState> visited;
-  std::stack<HloInstruction *> dfs_stack;
+  std::vector<HloInstruction *> dfs_stack;
   dfs_stack.push_back(start_ins);
 
   while (!dfs_stack.empty()) {

@@ -1885,7 +1885,6 @@ std::unique_ptr<HloModule> CreateStageModule(
   for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
     HloInstruction *ins = stage_instructions[i];
     // std::cerr << ins->ToString() << std::endl;
-    std::unique_ptr<HloInstruction> new_ins;
     if (ins->opcode() == HloOpcode::kGetTupleElement &&
         ins->operand(0) == stage_start_instruction) {
       int64 param_no = ins->tuple_index();
@@ -1913,9 +1912,8 @@ std::unique_ptr<HloModule> CreateStageModule(
         }
         new_operands.push_back(new_operand);
       }
-      new_ins = ins->CloneWithNewOperands(ins->shape(), new_operands, context);
+      instructions.push_back(ins->CloneWithNewOperands(ins->shape(), new_operands, context));
     }
-    instructions.push_back(std::move(new_ins));
   }
   // std::cerr << "======new instructions=====" << std::endl;
   // for (const auto &ins : instructions) {

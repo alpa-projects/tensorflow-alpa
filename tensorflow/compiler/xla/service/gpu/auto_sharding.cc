@@ -1865,18 +1865,18 @@ std::unique_ptr<HloModule> CreateStageModule(
   CHECK(stage_end_instruction->IsCustomCall("xla_pipeline_marker"));
 
   CHECK(stage_start_instruction->shape().IsTuple());
-  size_t n_parameters = stage_start_instruction->tuple_shapes_size();
+  size_t n_parameters = stage_start_instruction->shape().tuple_shapes_size();
   std::vector<HloInstruction *> parameters(n_parameters);
   for (size_t i = 0; i < n_parameters; ++i) {
     auto new_param = HloInstruction::CreateParameter(
-        i, stage_start_instruction->shape()->tuple_shapes(i),
+        i, stage_start_instruction->shape().tuple_shapes(i),
         absl::StrCat("param_", i));
     if (stage_start_instruction->has_sharding()) {
       CHECK(stage_start_instruction->sharding().IsTuple());
       new_param->set_sharding(stage_start_instruction->sharding()
-          .GetSubSharding(stage_start_instruction->shape(), {i})));
+          .GetSubSharding(stage_start_instruction->shape(), {i}));
     }
-    new_param.set_metadata(stage_start_instruction.metadata());
+    new_param->set_metadata(stage_start_instruction->metadata());
     parameters[i] = new_param.get();
     instructions.push_back(std::move(new_param));
   }

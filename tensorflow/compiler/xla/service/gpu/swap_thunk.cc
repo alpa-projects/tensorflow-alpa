@@ -34,11 +34,9 @@ SwapThunk::SwapThunk(Kind kind, ThunkInfo thunk_info)
 
 SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
                            std::vector<BufferAllocation::Slice> operands,
-                           BufferAllocation::Slice result,
                            std::vector<int64> byte_sizes, int64 key)
     : SwapThunk(Thunk::kSwapOut, thunk_info),
       operands_(std::move(operands)),
-      result_(std::move(result)),
       byte_sizes_(std::move(byte_sizes)),
       key_(key),
       executable_key_(-1) {}
@@ -115,12 +113,11 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   return Status::OK();
 }
 
-SwapInThunk::SwapInThunk(ThunkInfo thunk_info, BufferAllocation::Slice operand,
+SwapInThunk::SwapInThunk(ThunkInfo thunk_info,
                          std::vector<BufferAllocation::Slice> results,
                          std::vector<int64> byte_sizes, int64 key,
                          int64 event_key)
     : SwapThunk(Thunk::kSwapIn, thunk_info),
-      operand_(std::move(operand)),
       results_(std::move(results)),
       byte_sizes_(std::move(byte_sizes)),
       key_(key),

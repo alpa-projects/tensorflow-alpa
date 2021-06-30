@@ -1623,27 +1623,21 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
 
   std::vector<int64> byte_sizes;
   if (call_target_name == kBuiltinSwapOutTarget) {
-    CHECK(results.size() == 1)
-        << "builtinSwapOut meets multiple results, is: " << results.size();
-    CHECK(results[0].size() == 8)
-        << "builtinSwapOut meets result size incorrect, is: "
-        << results[0].size();
+    CHECK(results.size() == 0)
+        << "builtinSwapOut meets " << results.size() << " result(s)";
     int64 key = std::stoll(custom_call.backend_config().str());
     byte_sizes.reserve(operands.size());
     for (auto slice : operands) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapOutThunk>(
-        GetThunkInfo(op), std::move(operands), results[0],
+        input.thunk_info, std::move(operands), 
         std::move(byte_sizes), key));
   } else {
     CHECK(call_target_name == kBuiltinSwapInTarget)
         << "unexpected custom call target for emit swap thunk";
-    CHECK(operands.size() == 1)
-        << "builtinSwapIn meets multiple operands, is: " << operands.size();
-    CHECK(operands[0].size() == 8)
-        << "builtinSwapIn meets result size incorrect, is: "
-        << operands[0].size();
+    CHECK(operands.size() == 0)
+        << "builtinSwapIn meets " << operands.size() << "operand(s)";
     std::vector<std::string> keys =
         absl::StrSplit(custom_call.backend_config().str(), ";");
     CHECK(keys.size() == 2)
@@ -1655,8 +1649,8 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapInThunk>(
-        GetThunkInfo(op), operands[0], std::move(results),
-        std::move(byte_sizes), key));
+        input.thunk_info, std::move(results),
+        std::move(byte_sizes), key, event_key));
   }
 
   return Status::OK();

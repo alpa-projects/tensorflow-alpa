@@ -33,6 +33,7 @@ class SwapThunk : public Thunk {
   static int64 GetExecutableKey(const GpuExecutable* executable);
 
   static se::Event* getEvent(int64 key);
+
  protected:
   std::unique_ptr<se::Event> swap_finish_event_ = nullptr;
 
@@ -44,8 +45,7 @@ class SwapOutThunk : public SwapThunk {
  public:
   SwapOutThunk(ThunkInfo thunk_info,
                std::vector<BufferAllocation::Slice> operands,
-               BufferAllocation::Slice result, std::vector<int64> byte_sizes,
-               int64 key);
+               std::vector<int64> byte_sizes, int64 key);
 
   Status Initialize(const GpuExecutable& executable,
                     se::StreamExecutor* executor) override;
@@ -56,7 +56,6 @@ class SwapOutThunk : public SwapThunk {
 
  private:
   const std::vector<BufferAllocation::Slice> operands_;
-  const BufferAllocation::Slice result_;
   const std::vector<int64> byte_sizes_;
   const int64 key_;
   int64 executable_key_;
@@ -66,7 +65,7 @@ class SwapOutThunk : public SwapThunk {
 // Thunk to run a GPU swap in
 class SwapInThunk : public SwapThunk {
  public:
-  SwapInThunk(ThunkInfo thunk_info, BufferAllocation::Slice operands,
+  SwapInThunk(ThunkInfo thunk_info,
               std::vector<BufferAllocation::Slice> results,
               std::vector<int64> byte_sizes, int64 key, int64 event_key);
 
@@ -76,7 +75,6 @@ class SwapInThunk : public SwapThunk {
   Status ExecuteOnStream(const ExecuteParams& params) override;
 
  private:
-  const BufferAllocation::Slice operand_;
   const std::vector<BufferAllocation::Slice> results_;
   const std::vector<int64> byte_sizes_;
   const int64 key_;

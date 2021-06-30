@@ -35,6 +35,7 @@
 
 // TODO(yonghao): has_indirect_use: this leads to redundant Buffers,
 // e.g. Tuple and elements inside are different buffers sharing the same memory.
+// TODO: add SwapDone for SwapOut: its input is the same as SwapOut's input
 // todo: store the space for parameter specifically, instead of
 // wasting time and space for it;
 // todo: reschedule the code and decouple;
@@ -49,7 +50,7 @@ using ::tensorflow::strings::HumanReadableNumBytes;
 using BufferId = int64;
 using BufferIdList = absl::InlinedVector<BufferId, 3>;
 
-static const Shape keyShape = ShapeUtil::MakeShape(S64, {});
+static const Shape keyShape = ShapeUtil::MakeNil();
 static int64 swapInEventKey = 0;
 // this key is for SwapDone, since currently control flow dependency is lost in
 // MLIR and thunk_schedule.
@@ -139,6 +140,8 @@ class InstructionList {
   }
 
   Item* next(Item* item) const { return item->next; }
+
+  // TODO: HloInstructionSequence sequence() {}
 
  private:
   Item* first_;
@@ -362,8 +365,8 @@ class MemoryRecorder {
                     /*opaque=*/std::to_string(swap_key_++)));
             Cast<HloCustomCallInstruction>(swapOut->instruction)
                 ->set_custom_call_has_side_effect(true);
-            std::cerr << "\tcreate swap out for buffer: " << toReleaseBid
-                      << "\n";
+            // std::cerr << "\tcreate swap out for buffer: " << toReleaseBid
+            //           << "\n";
             registerRelease(swapOut, toReleaseBid,
                             rest_size > 0 ? 0 : -rest_size);
             // add control flow edge from its producer to the swap instruction
@@ -413,7 +416,7 @@ class MemoryRecorder {
         size_function_(shape), live_out, has_indirect_uses, index, uses,
         get_num_of_unique_users(uses),
         defining_instruction->instruction->opcode() == HloOpcode::kParameter,
-        logical_buffer});  // TODO: improve this to help with indirect use
+        logical_buffer}); 
     swap_out_inst.push_back(nullptr);
     last_use_inst.push_back(nullptr);
     return buffers_.back();
@@ -586,6 +589,7 @@ std::vector<Item*> MemoryRecorder::allocReleasedMemory(int64& size) {
 Status MemoryRecorder::PrepareForInstruction(Item* item, int64 callee_usage) {
   // cannot release buffers used by the preparing_for item.
   preparing_for = item;
+  // std::cerr << "prepare for: " << item->instruction->ToShortString() << "\n";
   for (auto bid : item->buffers_used) {
     auto& buffer = buffers_.at(bid);
     if (buffer.inGPU()) {
@@ -598,6 +602,10 @@ Status MemoryRecorder::PrepareForInstruction(Item* item, int64 callee_usage) {
       continue;
     }
     // not in GPU, need a swap in
+    // std::cerr << "buffer needs to be swapped in. From: "
+    //           << buffer.logical_buffer->instruction()->ToShortString()
+    //           << ", idx: " << buffer.index.ToString()
+    //           << ", shape: " << buffer.shape.ToString() << "\n";
     Item* swapOut = swap_out_inst.at(bid);
     CHECK(swapOut != nullptr) << "Not in GPU but not swapped out";
 
@@ -607,7 +615,7 @@ Status MemoryRecorder::PrepareForInstruction(Item* item, int64 callee_usage) {
         if (user == item->instruction &&
             !points_to_analysis_.DoesNotUseOperandBuffer(
                 buffer_alias.instruction(), buffer_alias.index(), user)) {
-          // todo: fix bitcast in another way
+          // todo: for each item, record the correct buffer_alias of its operands instead of analysis here
           Item* swapIn = new Item;
           swapIn->isSwap = true;
           std::string opaque =
@@ -615,8 +623,13 @@ Status MemoryRecorder::PrepareForInstruction(Item* item, int64 callee_usage) {
           opaque.append(";" + std::to_string(swapInEventKey));
           HloCustomCallInstruction* swapInInst = Cast<HloCustomCallInstruction>(
               computation_->AddInstruction(HloInstruction::CreateCustomCall(
-                  buffer_alias.instruction()->shape(), {swapOut->instruction}, "__builtin$SwapIn",
-                  /*opaque=*/opaque)));
+                  buffer_alias.instruction()->shape(), {},
+                  "__builtin$SwapIn", /*opaque=*/opaque)));
+
+          // std::cerr << "buffer alias inst is: "
+          //           << buffer_alias.instruction()->ToShortString()
+          //           << ", shape is: "
+          //           << buffer_alias.instruction()->shape().ToString() << "\n";
           swapIn->instruction = swapInInst;
           swapInInst->set_custom_call_has_side_effect(true);
 
@@ -835,6 +848,7 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
                                memory_limit_bytes_));
   // reschedule because new instructions are inserted.
   TF_ASSIGN_OR_RETURN(changed, scheduler.Run(module));
+  // TODO: replace by a special scheduler instead
   return changed;
 }
 

@@ -1864,6 +1864,23 @@ std::unique_ptr<HloModule> CreateStageModule(
   CHECK(stage_start_instruction->IsCustomCall("xla_pipeline_marker"));
   CHECK(stage_end_instruction->IsCustomCall("xla_pipeline_marker"));
 
+  CHECK(stage_start_instruction->shape().IsTuple());
+  size_t n_parameters = stage_start_instruction->tuple_shapes_size();
+  std::vector<HloInstruction *> parameters(n_parameters);
+  for (size_t i = 0; i < n_parameters; ++i) {
+    auto new_param = HloInstruction::CreateParameter(
+        i, stage_start_instruction->shape()->tuple_shapes(i),
+        absl::StrCat("param_", i));
+    if (stage_start_instruction->has_sharding()) {
+      CHECK(stage_start_instruction->sharding().IsTuple());
+      new_param->set_sharding(stage_start_instruction->sharding()
+          .GetSubSharding(stage_start_instruction->shape(), {i})));
+    }
+    new_param.set_metadata(stage_start_instruction.metadata());
+    parameters[i] = new_param.get();
+    instructions.push_back(std::move(new_param));
+  }
+
   // std::cerr << "======old instructions=====" << std::endl;
   for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
     HloInstruction *ins = stage_instructions[i];
@@ -1872,14 +1889,7 @@ std::unique_ptr<HloModule> CreateStageModule(
     if (ins->opcode() == HloOpcode::kGetTupleElement &&
         ins->operand(0) == stage_start_instruction) {
       int64 param_no = ins->tuple_index();
-      new_ins = HloInstruction::CreateParameter(
-          param_no, ins->shape(), absl::StrCat("param_", param_no));
-      // NOTE: We assume parameter_replicated_at_leaf_buffers is false for
-      // parameters and we do not set parent since
-      ins->SetupDerivedInstruction(new_ins.get());
-      new_ins->set_outer_dimension_partitions(ins->outer_dimension_partitions());
-      new_ins->set_raw_backend_config_string(ins->raw_backend_config_string());
-      context->MapInstruction(ins, new_ins.get());
+      context->MapInstruction(ins, parameters[param_no]);
     } else {
       CHECK_NE(ins->opcode(), HloOpcode::kParameter)
           << "instructions in a stage should not be parameter"

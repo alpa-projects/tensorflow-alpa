@@ -389,10 +389,6 @@ class Rendezvous {
           key_.num_local_participants)};
 };
 
-// Get all communication groups in a hlo module.
-std::vector<std::vector<GlobalDeviceId>> GetCommunicationGroups(
-  const HloModule* hlo_module);
-
 }  // end namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_COLLECTIVE_OPS_UTILS_H_

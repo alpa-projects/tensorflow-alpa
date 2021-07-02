@@ -1490,7 +1490,7 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
         mlir::Value value = std::get<1>(index_and_value_it);
         int64 index = index_attr.cast<mlir::IntegerAttr>().getInt();
         TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
-                            GetAllocationSliceForMlir(value));
+                            GetAllocationSlice(value));
         slices[index] = slice;
       }
       return slices;
@@ -1512,7 +1512,7 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
       std::vector<BufferAllocation::Slice> slices;
       for (mlir::Value value : values) {
         TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
-                            GetAllocationSliceForMlir(value));
+                            GetAllocationSlice(value));
         slices.push_back(slice);
       }
       return slices;
@@ -1535,7 +1535,7 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapOutThunk>(
-        input.thunk_info, std::move(operands), results[0],
+        GetThunkInfo(op), std::move(operands), results[0],
         std::move(byte_sizes), key));
   } else {
     CHECK(call_target_name == kBuiltinSwapInTarget)
@@ -1550,7 +1550,7 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapInThunk>(
-        input.thunk_info, operands[0], std::move(results),
+        GetThunkInfo(op), operands[0], std::move(results),
         std::move(byte_sizes), key));
   }
 

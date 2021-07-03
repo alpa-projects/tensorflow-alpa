@@ -21,17 +21,15 @@ TEST(GpuSwap, Basic) {
 
   PjRtDevice* device = client->addressable_devices().at(0);
 
-  const int n = 1024;
-  int computationN = n * n * 20;
-  int swapN = n * n;
-  Shape swapShape = ShapeUtil::MakeShape(S32, {swapN});
-  Shape computationShape = ShapeUtil::MakeShape(F32, {computationN});
+  int n = 1024 * 1024;
+  Shape shape = ShapeUtil::MakeShape(S32, {n});
   Shape keyShape = ShapeUtil::MakeShape(S64, {});
 
   XlaBuilder builder("acomputation");
-  auto p0 = Parameter(&builder, 0, swapShape, "param");
-  auto p1 = Parameter(&builder, 1, computationShape, "param");
-  int64 key = 10;
+  auto p0 = Parameter(&builder, 0, shape, "param");
+  int64 key = 10, event_key = 24;
+  std::string key_str = std::to_string(key);
+  std::string event_key_str = std::to_string(event_key);
   auto swap_out = CustomCall(&builder, "__builtin$SwapOut", {p0}, keyShape,
                              /*opaque=*/key_str);
   auto swap_in = CustomCall(&builder, "__builtin$SwapIn", {swap_out}, shape,
@@ -60,14 +58,6 @@ TEST(GpuSwap, Basic) {
     inputs[i] = tensorflow::random::New64();
     expected_outputs[i] = inputs[i] * 2;
   }
-
-  std::vector<float> computation_input(computationN);
-  std::uniform_real_distribution<float> dist(-1, 1);
-  static std::mt19937 engine;
-  for (int i = 0;i < computationN;++i) {
-    computation_input[i] = dist(engine);
-  }
-
   TF_ASSERT_OK_AND_ASSIGN(
       auto in_buffer0,
       client->BufferFromHostBuffer(

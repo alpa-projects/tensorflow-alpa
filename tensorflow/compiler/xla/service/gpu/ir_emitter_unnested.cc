@@ -1037,6 +1037,9 @@ Status IrEmitterUnnested::EmitCustomCall(mlir::Operation* op) {
         call.call_target_name() == kBuiltinSwapInTarget) {
       return EmitSwapThunk(op);
     }
+    if (call.call_target_name() == kBuiltinSwapDoneTarget) {
+      return EmitSwapDoneThunk(op);
+    }
     return EmitCustomCallThunk(op);
   }
 
@@ -1631,7 +1634,7 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapOutThunk>(
-        input.thunk_info, std::move(operands), 
+        GetThunkInfo(op), std::move(operands), 
         std::move(byte_sizes), key));
   } else {
     CHECK(call_target_name == kBuiltinSwapInTarget)
@@ -1649,9 +1652,20 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapInThunk>(
-        input.thunk_info, std::move(results),
+        GetThunkInfo(op), std::move(results),
         std::move(byte_sizes), key, event_key));
   }
+
+  return Status::OK();
+}
+
+Status IrEmitterUnnested::EmitSwapDoneThunk(mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+  const std::string call_target_name = custom_call.call_target_name().str();
+
+  int64 event_key = std::stoll(custom_call.backend_config().str());
+  AddThunkToThunkSequence(
+      absl::make_unique<SwapDoneThunk>(GetThunkInfo(op), event_key));
 
   return Status::OK();
 }
@@ -5639,6 +5653,9 @@ Status IrEmitterUnnested::EmitOp(mlir::Operation* op) {
     if (call.call_target_name() == kBuiltinSwapOutTarget ||
         call.call_target_name() == kBuiltinSwapInTarget) {
       return EmitSwapThunk(op);
+    }
+    if (call.call_target_name() == kBuiltinSwapDoneTarget) {
+      return EmitSwapDoneThunk(op);
     }
     return EmitCustomCallThunk(op);
   }

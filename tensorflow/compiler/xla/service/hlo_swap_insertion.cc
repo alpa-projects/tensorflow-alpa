@@ -35,12 +35,8 @@
 
 // TODO(yonghao): has_indirect_use: this leads to redundant Buffers,
 // e.g. Tuple and elements inside are different buffers sharing the same memory.
-// TODO: add SwapDone for SwapOut: its input is the same as SwapOut's input
 // todo: store the space for parameter specifically, instead of
 // wasting time and space for it;
-// todo: reschedule the code and decouple;
-// TODO: compute peak has different result with swap insertion as the later's
-// peak is lower
 namespace xla {
 
 namespace {
@@ -284,6 +280,7 @@ class MemoryRecorder {
     for (auto& p : alloced) {
       // cannot release a will used buffer
       if (absl::c_linear_search(item->buffers_used, p.first)) continue;
+      if (absl::c_linear_search(preparing_for->buffers_used, p.first)) continue;
       int64 bufferSize = AllocatedSize(buffers_.at(p.first));
       if (bufferSize == 0 || !buffers_.at(p.first).index.empty()) continue;
       result.push_back(p);
@@ -348,7 +345,6 @@ class MemoryRecorder {
           toReleaseBuffer.setInGPU(nullptr);
           if (swap_out_inst.at(toReleaseBid) != nullptr) {
             // is already swapped out, only need to discard
-            toReleaseBuffer.setInGPU(nullptr);
             Item* lastUseInst = last_use_inst.at(toReleaseBid);
             registerRelease(lastUseInst, toReleaseBid,
                             rest_size > 0 ? 0 : -rest_size);
@@ -416,7 +412,7 @@ class MemoryRecorder {
         size_function_(shape), live_out, has_indirect_uses, index, uses,
         get_num_of_unique_users(uses),
         defining_instruction->instruction->opcode() == HloOpcode::kParameter,
-        logical_buffer}); 
+        logical_buffer});
     swap_out_inst.push_back(nullptr);
     last_use_inst.push_back(nullptr);
     return buffers_.back();
@@ -499,38 +495,35 @@ MemoryRecorder::MemoryRecorder(
       // TODO: work on the while later
       if (instruction->opcode() == HloOpcode::kWhile) {
         CHECK(false) << "while is ignored as not implemented now";
-        //   // The while instruction defines no new buffers. Instead it reuses
-        //   the
-        //   // buffers of its operand. Find the Buffer of its operand at the
-        //   // proper ShapeIndex.
-        //   const PointsToSet& operand_points_to =
-        //       points_to_analysis.GetPointsToSet(instruction->operand(0));
-        //   CHECK_EQ(operand_points_to.element(logical_buffer->index()).size(),
-        //   1); const LogicalBuffer* source_logical_buffer =
-        //       operand_points_to.element(logical_buffer->index())[0];
-        //   buffer =
-        //       &buffers_.at(logical_buffer_to_buffer_id.at(source_logical_buffer));
+        // The while instruction defines no new buffers. Instead it reuses the
+        // buffers of its operand. Find the Buffer of its operand at the
+        // proper ShapeIndex.
+        const PointsToSet& operand_points_to =
+            points_to_analysis.GetPointsToSet(instruction->operand(0));
+        CHECK_EQ(operand_points_to.element(logical_buffer->index()).size(), 1);
+        const LogicalBuffer* source_logical_buffer =
+            operand_points_to.element(logical_buffer->index())[0];
+        buffer =
+            &buffers_.at(logical_buffer_to_id.at(source_logical_buffer));
 
-        //   // Mark buffer as has indirect use and live out.
-        //   buffer->has_indirect_uses = true;
-        //   buffer->live_out =
-        //       buffer->live_out || ContainsKey(live_out_set, logical_buffer);
+        // Mark buffer as has indirect use and live out.
+        buffer->has_indirect_uses = true;
+        buffer->live_out =
+            buffer->live_out || ContainsKey(live_out_set, logical_buffer);
 
-        //   // Add users of while to Buffer users.
-        //   bool unused;
-        //   for (ItemUse& user_item : GetUsers(instruction_list,
-        //   logical_buffer,
-        //                                      points_to_analysis, &unused)) {
-        //     auto existing_user_it = absl::c_find_if(
-        //         buffer->users,
-        //         [&](const ItemUse& use) { return user_item.user == use.user;
-        //         });
-        //     if (existing_user_it == buffer->users.end()) {
-        //       buffer->unfinished_user_count++;
-        //       user_item.user->buffers_used.push_back(buffer->id);
-        //       buffer->users.push_back(user_item);
-        //     }
-        //   }
+        // Add users of while to Buffer users.
+        bool unused;
+        for (ItemUse& user_item : GetUsers(instruction_list, logical_buffer,
+                                           points_to_analysis, &unused)) {
+          auto existing_user_it = absl::c_find_if(
+              buffer->users,
+              [&](const ItemUse& use) { return user_item.user == use.user; });
+          if (existing_user_it == buffer->users.end()) {
+            buffer->unfinished_user_count++;
+            user_item.user->buffers_used.push_back(buffer->id);
+            buffer->users.push_back(user_item);
+          }
+        }
 
       } else {
         buffer = &CreateBufferFromLogicalBuffer(
@@ -563,7 +556,6 @@ bool MemoryRecorder::allocFreeMemory(int64 size) {
 }
 
 std::vector<Item*> MemoryRecorder::allocReleasedMemory(int64& size) {
-  // todo: faster
   // alloc as much as possible
   std::vector<Item*> result;
   Item* tail = nullptr;
@@ -615,7 +607,6 @@ Status MemoryRecorder::PrepareForInstruction(Item* item, int64 callee_usage) {
         if (user == item->instruction &&
             !points_to_analysis_.DoesNotUseOperandBuffer(
                 buffer_alias.instruction(), buffer_alias.index(), user)) {
-          // todo: for each item, record the correct buffer_alias of its operands instead of analysis here
           Item* swapIn = new Item;
           swapIn->isSwap = true;
           std::string opaque =
@@ -623,15 +614,17 @@ Status MemoryRecorder::PrepareForInstruction(Item* item, int64 callee_usage) {
           opaque.append(";" + std::to_string(swapInEventKey));
           HloCustomCallInstruction* swapInInst = Cast<HloCustomCallInstruction>(
               computation_->AddInstruction(HloInstruction::CreateCustomCall(
-                  buffer_alias.instruction()->shape(), {},
-                  "__builtin$SwapIn", /*opaque=*/opaque)));
+                  buffer_alias.instruction()->shape(), {}, "__builtin$SwapIn",
+                  /*opaque=*/opaque)));
 
           // std::cerr << "buffer alias inst is: "
           //           << buffer_alias.instruction()->ToShortString()
           //           << ", shape is: "
-          //           << buffer_alias.instruction()->shape().ToString() << "\n";
+          //           << buffer_alias.instruction()->shape().ToString() <<
+          //           "\n";
           swapIn->instruction = swapInInst;
           swapInInst->set_custom_call_has_side_effect(true);
+          instruction_list.addEdge(swapOut, swapIn);
 
           Item* swapDone = new Item;
           swapDone->isSwap = true;

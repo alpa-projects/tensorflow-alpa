@@ -4278,7 +4278,6 @@ cc_library(
 tf_cc_test(
     name = "hlo_swap_insertion_test",
     srcs = ["hlo_swap_insertion_test.cc"],
-    data = ["bert_layer.hlo"],
     deps = [
         ":hlo_swap_insertion",
         ":flatten_call_graph",

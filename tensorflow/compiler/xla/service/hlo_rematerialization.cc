@@ -2081,8 +2081,8 @@ StatusOr<bool> HloRematerialization::Run(HloModule* module) {
   const int64 before_peak_memory =
       computation_peak_memory_.at(module->entry_computation()) +
       module_output_size;
-  std::cerr << "Peak memory usage of module (before, remat): "
-            << HumanReadableNumBytes(before_peak_memory) << "\n";
+  VLOG(1) << "Peak memory usage of module (before): "
+          << HumanReadableNumBytes(before_peak_memory);
   // Subcomputations called by the entry computation will also be
   // rematerialized.
   TF_ASSIGN_OR_RETURN(

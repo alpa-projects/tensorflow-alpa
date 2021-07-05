@@ -1625,35 +1625,33 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
   }
 
   std::vector<int64> byte_sizes;
+  std::vector<std::string> keys =
+      absl::StrSplit(custom_call.backend_config().str(), ";");
+  CHECK(keys.size() == 2) << "opaque num is: " 
+                          << keys.size() << " instead of 2";
+  int64 key = std::stoll(keys[0]);
+  int64 event_key = std::stoll(keys[1]);
   if (call_target_name == kBuiltinSwapOutTarget) {
-    CHECK(results.size() == 0)
-        << "builtinSwapOut meets " << results.size() << " result(s)";
-    int64 key = std::stoll(custom_call.backend_config().str());
+    // CHECK(results.size() == 0)
+    //     << "builtinSwapOut meets " << results.size() << " result(s)";
     byte_sizes.reserve(operands.size());
     for (auto slice : operands) {
       byte_sizes.push_back(slice.size());
     }
     AddThunkToThunkSequence(absl::make_unique<SwapOutThunk>(
-        GetThunkInfo(op), std::move(operands), 
-        std::move(byte_sizes), key));
+        GetThunkInfo(op), std::move(operands), std::move(byte_sizes), key, event_key));
   } else {
     CHECK(call_target_name == kBuiltinSwapInTarget)
         << "unexpected custom call target for emit swap thunk";
-    CHECK(operands.size() == 0)
-        << "builtinSwapIn meets " << operands.size() << "operand(s)";
-    std::vector<std::string> keys =
-        absl::StrSplit(custom_call.backend_config().str(), ";");
-    CHECK(keys.size() == 2)
-        << "opaque num is: " << keys.size() << " instead of 2";
-    int64 key = std::stoll(keys[0]);
-    int64 event_key = std::stoll(keys[1]);
+    // CHECK(operands.size() == 0)
+    //     << "builtinSwapIn meets " << operands.size() << "operand(s)";
     byte_sizes.reserve(results.size());
     for (auto slice : results) {
       byte_sizes.push_back(slice.size());
     }
-    AddThunkToThunkSequence(absl::make_unique<SwapInThunk>(
-        GetThunkInfo(op), std::move(results),
-        std::move(byte_sizes), key, event_key));
+    AddThunkToThunkSequence(
+        absl::make_unique<SwapInThunk>(GetThunkInfo(op), std::move(results),
+                                       std::move(byte_sizes), key, event_key));
   }
 
   return Status::OK();

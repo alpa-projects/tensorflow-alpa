@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-#include "tensorflow/compiler/xla/service/gpu/gpu_compiler.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_executable.h"
 #include "tensorflow/compiler/xla/service/gpu/tests/gpu_codegen_test.h"
 #include "tensorflow/compiler/xla/service/hlo_computation.h"
@@ -174,6 +173,15 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
     executable_run_options.set_device_assignment(&device_assignment);
     ServiceExecutableRunOptions run_options(executable_run_options);
 
+    std::vector<ExecutionInput> execution_inputs;
+
+    for (auto arg : arguments) {
+      Shape shape =
+          ShapeUtil::MakeShape(xla::U8, {static_cast<int64>(arg.size())});
+      execution_inputs.emplace_back(shape);
+      execution_inputs.back().SetBuffer({}, MaybeOwningDeviceMemory(arg));
+    }
+
     TF_ASSIGN_OR_RETURN(auto output,
                         executable->ExecuteAsyncOnStream(
                             &run_options, std::move(execution_inputs),
@@ -220,6 +228,40 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
     return host_outputs;
   }
 
+  std::pair<const HloInstruction*, const HloInstruction*> HasOneSwapOutAndDone(const HloInstruction* x) {
+    EXPECT_GE(x->user_count(), 2);
+    const HloInstruction* swap_out;
+    const HloInstruction* swap_done;
+    swap_out = swap_done = nullptr;
+    for (auto inst : x->users()) {
+      if (inst->IsCustomCall("__builtin$SwapOut")) {
+        EXPECT_EQ(swap_out, nullptr);
+        swap_out = inst;
+        continue;
+      }
+      if (inst->IsCustomCall("__builtin$SwapDone")) {
+        EXPECT_EQ(swap_done, nullptr);
+        swap_done = inst;
+        continue;
+      }
+    }
+    EXPECT_NE(swap_out, nullptr);
+    EXPECT_NE(swap_done, nullptr);
+    EXPECT_TRUE(absl::c_linear_search(swap_out->control_successors(), swap_done));
+    return std::make_pair(swap_out, swap_done);
+  }
+
+  std::vector<const HloInstruction*> HasSwapIn(const HloInstruction* x) {
+    std::vector<const HloInstruction*> results;
+    for (auto inst : x->control_successors()) {
+      if (inst->IsCustomCall("__builtin$SwapIn")) {
+        results.push_back(inst);
+      }
+    }
+    EXPECT_GE(results.size(), 1);
+    return results;
+  }
+
   const Shape scalar_shape_ = ShapeUtil::MakeShape(xla::F32, {});
   const Shape vec1_shape_ = ShapeUtil::MakeShape(xla::F32, {1});
   const Shape vec10_shape_ = ShapeUtil::MakeShape(xla::F32, {10});
@@ -250,29 +292,48 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
   EXPECT_TRUE(changed);
 
   // check swap inserted for a
-  EXPECT_EQ(a->user_count(), 2);
-  HloInstruction* out_a = a->users().at(1);
-  EXPECT_TRUE(out_a->IsCustomCall("__builtin$SwapOut"));
+  EXPECT_EQ(a->user_count(), 3);
+  const HloInstruction* out_a;
+  const HloInstruction* done_out_a;
+  {
+    auto result = HasOneSwapOutAndDone(a);
+    out_a = result.first;
+    done_out_a = result.second;
+  }
 
-  EXPECT_EQ(out_a->user_count(), 1);
-  HloInstruction* in_a = out_a->users().at(0);
+  EXPECT_EQ(done_out_a->control_successors().size(), 2);
+  auto all_in_a = HasSwapIn(done_out_a);
+  EXPECT_EQ(all_in_a.size(), 1);
+  const HloInstruction* in_a = all_in_a.at(0);
   EXPECT_TRUE(in_a->IsCustomCall("__builtin$SwapIn"));
   // check there is only one operand
   EXPECT_EQ(out_a->operand_count(), 1);
-  EXPECT_EQ(in_a->operand_count(), 1);
-  // check swap inserted for c
-  EXPECT_EQ(c->user_count(), 1);
-  HloInstruction* out_c = c->users().at(0);
-  EXPECT_TRUE(out_c->IsCustomCall("__builtin$SwapOut"));
+  EXPECT_EQ(done_out_a->operand_count(), 1);
+  EXPECT_EQ(in_a->operand_count(), 0);
+  // check the return value
+  EXPECT_EQ(in_a->shape(), a->shape());
 
-  EXPECT_EQ(out_c->user_count(), 1);
-  HloInstruction* in_c = out_c->users().at(0);
+  // check swap inserted for c
+  EXPECT_EQ(c->user_count(), 2);
+  const HloInstruction* out_c;
+  const HloInstruction* done_out_c;
+  {
+    auto result = HasOneSwapOutAndDone(c);
+    out_c = result.first;
+    done_out_c = result.second;
+  }
+  EXPECT_EQ(done_out_c->control_successors().size(), 2);
+  auto all_in_c = HasSwapIn(done_out_c);
+  EXPECT_EQ(all_in_c.size(), 1);
+  const HloInstruction* in_c = all_in_c.at(0);
   EXPECT_TRUE(in_c->IsCustomCall("__builtin$SwapIn"));
   // check there is only one operand
   EXPECT_EQ(out_c->operand_count(), 1);
-  EXPECT_EQ(in_c->operand_count(), 1);
-  // todo(yonghao): check control dependency
-  // todo(yonghao): check insertion of SwapDone
+  EXPECT_EQ(done_out_c->operand_count(), 1);
+  EXPECT_EQ(in_c->operand_count(), 0);
+  // check the return value
+  EXPECT_EQ(in_c->shape(), c->shape());
+  // todo(yonghao): check swap in done
 
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<Executable> executable,
                           CompileModule(std::move(module)));
@@ -286,8 +347,7 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
     c_value.push_back(i);
   }
   RunModuleWithHostBuffers(
-      gExec, {ToF32Span(&a_value), ToF32Span(&b_value),
-      ToF32Span(&c_value)});
+      gExec, {ToF32Span(&a_value), ToF32Span(&b_value), ToF32Span(&c_value)});
 }
 
 TEST_F(HloSwapInsertionTest, GetTupleElement) {
@@ -319,9 +379,8 @@ ENTRY entry {
                           ParseAndReturnVerifiedModule(hasIndirectUse));
 
   // memory constraint: (1+30) * 4
-  TF_ASSERT_OK_AND_ASSIGN(
-      bool changed,
-      RunHloSwapInsertion(5 * 4, module.get()));
+  TF_ASSERT_OK_AND_ASSIGN(bool changed,
+                          RunHloSwapInsertion(5 * 4, module.get()));
 
   EXPECT_TRUE(changed);
 }

@@ -45,7 +45,7 @@ class SwapOutThunk : public SwapThunk {
  public:
   SwapOutThunk(ThunkInfo thunk_info,
                std::vector<BufferAllocation::Slice> operands,
-               std::vector<int64> byte_sizes, int64 key);
+               std::vector<int64> byte_sizes, int64 key, int64 event_key);
 
   Status Initialize(const GpuExecutable& executable,
                     se::StreamExecutor* executor) override;
@@ -58,6 +58,7 @@ class SwapOutThunk : public SwapThunk {
   const std::vector<BufferAllocation::Slice> operands_;
   const std::vector<int64> byte_sizes_;
   const int64 key_;
+  const int64 event_key_;
   int64 executable_key_;
   se::StreamExecutor* executor_ = nullptr;
 };

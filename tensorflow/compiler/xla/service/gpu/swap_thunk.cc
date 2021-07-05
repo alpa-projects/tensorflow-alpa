@@ -34,11 +34,13 @@ SwapThunk::SwapThunk(Kind kind, ThunkInfo thunk_info)
 
 SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
                            std::vector<BufferAllocation::Slice> operands,
-                           std::vector<int64> byte_sizes, int64 key)
+                           std::vector<int64> byte_sizes, int64 key,
+                           int64 event_key)
     : SwapThunk(Thunk::kSwapOut, thunk_info),
       operands_(std::move(operands)),
       byte_sizes_(std::move(byte_sizes)),
       key_(key),
+      event_key_(event_key),
       executable_key_(-1) {}
 
 Status SwapOutThunk::Initialize(const GpuExecutable& executable,
@@ -47,6 +49,7 @@ Status SwapOutThunk::Initialize(const GpuExecutable& executable,
   executable_key_ = GetExecutableKey(&executable);
   swap_finish_event_ = absl::make_unique<se::Event>(executor);
   swap_finish_event_->Init();
+  swap_finish_events_[event_key_] = swap_finish_event_.get();
   return Status::OK();
 }
 

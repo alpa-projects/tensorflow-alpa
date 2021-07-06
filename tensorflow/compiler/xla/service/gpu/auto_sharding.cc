@@ -21,7 +21,7 @@ namespace gpu {
 namespace py = pybind11;
 
 // A constant to represent infinity cost.
-constexpr double INFINITY_COST = 1e10;
+constexpr double INFINITY_COST = 1e11;
 
 // Options for the auto-sharding solver.
 struct AutoShardingSolverOption {
@@ -402,6 +402,7 @@ class ClusterEnvironment {
       // TODO(lmzheng): this can be more accurate
       if (dst_tensor_dim_to_mesh_dim[i] == -1) {
         cost += AllGatherCost(GetBytes(shape), src_mesh_dim);
+        continue;
       }
       // do not allow other re-sharding strategies (e.g., collective-permute)
       return INFINITY_COST;
@@ -560,6 +561,15 @@ InstructionDepthMap BuildInstructionDepthMap(
         case HloOpcode::kDot:
         case HloOpcode::kConvolution:
           delta = 1000;
+          break;
+        // A temporary hack here: reduce ops will generate replicated sharding.
+        // We do not want the later broadcast and elementwise ops to follow it.
+        // So we give reduce ops some penalty and let the elementwise ops to
+        // follow other operands.
+        // TODO(lmzheng): remove this hack by correctly registering strategies
+        // for broadcast.
+        case HloOpcode::kReduce:
+          delta = -10;
           break;
         default:
           delta = 1;
@@ -1402,10 +1412,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         LOG(FATAL) << "Unhandled instruction: " + ins->name();
     }
 
+    // For instructions without any registered strategies,
+    // set its strategy as "undefined".
+    // Its sharding spec will be annotaed later by the ShardingPropagation pass.
     if (!strategies->is_tuple && strategies->leaf_vector.empty()) {
-      // Set the strategy as "undefined".
-      // Its sharding spec will be annotaed by the ShardingPropagation pass
-      // later.
       std::vector<std::vector<double>> resharding_costs;
       for (size_t i = 0; i < ins->operand_count(); ++i) {
         const HloInstruction* operand = ins->operand(i);
@@ -1419,7 +1429,32 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       undefined_set.insert(ins);
     }
 
-    CHECK(strategies->is_tuple || !strategies->leaf_vector.empty());
+    // Debug options: forcely set the the strategy of some instructions.
+    if (pass_context::GetBool("auto_sharding::force_strategy", false)) {;
+      std::vector<int64> inst_indices =
+          pass_context::GetIntVector("auto_sharding::force_strategy_inst_indices");
+      std::vector<std::string> stra_names =
+          pass_context::GetStringVector("auto_sharding::force_strategy_stra_names");
+      CHECK_EQ(inst_indices.size(), stra_names.size());
+      auto it = absl::c_find(inst_indices, strategies->id);
+
+      if (it != inst_indices.end()) {
+        CHECK(!strategies->is_tuple);
+        std::vector<ShardingStrategy> new_leaf_vector;
+        int64 idx = it - inst_indices.begin();
+
+        for (const auto stra : strategies->leaf_vector) {
+          if (stra.name == stra_names[idx]) {
+            new_leaf_vector.push_back(stra);
+          }
+        }
+
+        strategies->leaf_vector = new_leaf_vector;
+      }
+    }
+
+    CHECK(strategies->is_tuple || !strategies->leaf_vector.empty())
+        << ins->ToString() << " does not have any valid strategies.";
     strategy_map[ins] = std::move(strategies);
   }
 

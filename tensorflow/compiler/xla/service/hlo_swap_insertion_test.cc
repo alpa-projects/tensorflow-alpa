@@ -43,8 +43,6 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
   }
 
   /*
-  This computation is more close to a good test environment, as MLP has too many
-  parameters and too few variables without swap:
   // a, b, c alive
   d = a + b // a, b, c, d alive
   e = c + d // a, c, d, e alive
@@ -72,66 +70,6 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
         HloInstruction::CreateBinary(vec10_shape_, HloOpcode::kAdd, d, c));
     builder.AddInstruction(
         HloInstruction::CreateBinary(vec10_shape_, HloOpcode::kAdd, e, a));
-    return builder.Build();
-  }
-  /*
-  creates and returns a forward MLP computation as:
-  F32[20, 10] w_1 = {...}
-  F32[20] b_1 = {...}
-  F32[10, 20] w_2 = {...}
-  // F32[10] b_2 = {...}
-
-  F32[1] init = {...}
-  F32[] reshape = reshape()
-
-  F32[20] matmul_1 = dot(w_1, x)
-  F32[20] lp_1 = binary(add, b_1, matmul_1)
-  F32[10] matmul_2 = dot(w_2, lp_1)
-  // ignore lp_2
-  F32[10] resnet = binary(add, matmul_2, x)
-
-  bias in the second layer(b_2) is ignored to simplify the test
-
-  In this test, if the space is sizeof(F32) * (421(parameter)+20), x should be
-  offloaded to make space for `lp_1 = binary(add, b_1, matmul_1)'
-
-  TODO: in place operations
-  */
-  std::unique_ptr<HloComputation> MakeMLPComputation(
-      const string& suffix = "") {
-    auto builder = HloComputation::Builder(TestName() + suffix);
-    auto param_1 = builder.AddInstruction(
-        HloInstruction::CreateParameter(0, mat20_10_shape_, "w1"));
-    auto param_2 = builder.AddInstruction(
-        HloInstruction::CreateParameter(1, mat10_20_shape_, "w2"));
-    auto param_3 = builder.AddInstruction(
-        HloInstruction::CreateParameter(2, vec20_shape_, "b1"));
-    // auto param_4 = builder.AddInstruction(
-    //   HloInstruction::CreateParameter(0, vec10_shape_, "b2")
-    // );
-
-    auto input = builder.AddInstruction(
-        HloInstruction::CreateParameter(3, vec1_shape_, "init"));
-    auto reshape = builder.AddInstruction(
-        HloInstruction::CreateReshape(scalar_shape_, input));
-    auto x = builder.AddInstruction(
-        HloInstruction::CreateBroadcast(vec10_shape_, reshape, {}));
-
-    DotDimensionNumbers dot_dnums;
-    dot_dnums.add_lhs_contracting_dimensions(1);
-    dot_dnums.add_rhs_contracting_dimensions(0);
-    auto matmul_1 = builder.AddInstruction(HloInstruction::CreateDot(
-        vec20_shape_, param_1, x, dot_dnums, DefaultPrecisionConfig(2)));
-    auto lp_1 = builder.AddInstruction(HloInstruction::CreateBinary(
-        vec20_shape_, HloOpcode::kAdd, matmul_1, param_3));
-    auto matmul_2 = builder.AddInstruction(HloInstruction::CreateDot(
-        vec10_shape_, param_2, lp_1, dot_dnums, DefaultPrecisionConfig(2)));
-    // auto lp_2 = builder.AddInstruction(
-    //   HloInstruction::CreateBinary(vec10_shape_, HloOpCode::kAdd, matmul_2,
-    //   param_4)
-    // );
-    builder.AddInstruction(HloInstruction::CreateBinary(
-        vec10_shape_, HloOpcode::kAdd, matmul_2, x));
     return builder.Build();
   }
 
@@ -262,6 +200,18 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
     return results;
   }
 
+  const HloInstruction* HasOneSwapDone(const HloInstruction* x) {
+    const HloInstruction* swap_done = nullptr;
+    for (auto inst : x->users()) {
+      if (inst->IsCustomCall("__builtin$SwapDone")) {
+        EXPECT_EQ(swap_done, nullptr);
+        swap_done = inst;
+      }
+    }
+    EXPECT_NE(swap_done, nullptr);
+    return swap_done;
+  }
+
   const Shape scalar_shape_ = ShapeUtil::MakeShape(xla::F32, {});
   const Shape vec1_shape_ = ShapeUtil::MakeShape(xla::F32, {1});
   const Shape vec10_shape_ = ShapeUtil::MakeShape(xla::F32, {10});
@@ -301,17 +251,19 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
     done_out_a = result.second;
   }
 
-  EXPECT_EQ(done_out_a->control_successors().size(), 2);
-  auto all_in_a = HasSwapIn(done_out_a);
+  EXPECT_EQ(out_a->control_successors().size(), 2); // in_a, out_done_a
+  EXPECT_TRUE(absl::c_linear_search(out_a->control_successors(), done_out_a));
+  auto all_in_a = HasSwapIn(out_a);
   EXPECT_EQ(all_in_a.size(), 1);
   const HloInstruction* in_a = all_in_a.at(0);
-  EXPECT_TRUE(in_a->IsCustomCall("__builtin$SwapIn"));
+  const HloInstruction* in_a_done = HasOneSwapDone(in_a);
   // check there is only one operand
   EXPECT_EQ(out_a->operand_count(), 1);
   EXPECT_EQ(done_out_a->operand_count(), 1);
   EXPECT_EQ(in_a->operand_count(), 0);
   // check the return value
   EXPECT_EQ(in_a->shape(), a->shape());
+  EXPECT_TRUE(absl::c_linear_search(in_a_done->control_successors(), f));
 
   // check swap inserted for c
   EXPECT_EQ(c->user_count(), 2);
@@ -322,18 +274,19 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
     out_c = result.first;
     done_out_c = result.second;
   }
-  EXPECT_EQ(done_out_c->control_successors().size(), 2);
-  auto all_in_c = HasSwapIn(done_out_c);
+  EXPECT_EQ(out_c->control_successors().size(), 2); // out_done_c, in_c
+  EXPECT_TRUE(absl::c_linear_search(out_c->control_successors(), done_out_c));
+  auto all_in_c = HasSwapIn(out_c);
   EXPECT_EQ(all_in_c.size(), 1);
   const HloInstruction* in_c = all_in_c.at(0);
-  EXPECT_TRUE(in_c->IsCustomCall("__builtin$SwapIn"));
+  const HloInstruction* in_c_done = HasOneSwapDone(in_c);
   // check there is only one operand
   EXPECT_EQ(out_c->operand_count(), 1);
   EXPECT_EQ(done_out_c->operand_count(), 1);
   EXPECT_EQ(in_c->operand_count(), 0);
   // check the return value
   EXPECT_EQ(in_c->shape(), c->shape());
-  // todo(yonghao): check swap in done
+  EXPECT_TRUE(absl::c_linear_search(in_c_done->control_successors(), e));
 
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<Executable> executable,
                           CompileModule(std::move(module)));

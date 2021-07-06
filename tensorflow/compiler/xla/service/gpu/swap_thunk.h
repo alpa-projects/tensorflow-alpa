@@ -26,16 +26,20 @@ namespace gpu {
 
 class SwapThunk : public Thunk {
  public:
-  SwapThunk(Kind kind, ThunkInfo thunk_info);
+  SwapThunk(Kind kind, ThunkInfo thunk_info, int64 event_key);
 
   se::Event* SwapFinishEvent() { return swap_finish_event_.get(); }
 
   static int64 GetExecutableKey(const GpuExecutable* executable);
 
-  static se::Event* getEvent(int64 key);
+  static se::Event* GetEvent(int64 key);
 
  protected:
+  void SetEvent(se::StreamExecutor* executor);
+
   std::unique_ptr<se::Event> swap_finish_event_ = nullptr;
+  const int64 event_key_;
+  int64 executable_key_ = -1;
 
   static absl::flat_hash_map<int64, se::Event*> swap_finish_events_;
 };
@@ -58,8 +62,6 @@ class SwapOutThunk : public SwapThunk {
   const std::vector<BufferAllocation::Slice> operands_;
   const std::vector<int64> byte_sizes_;
   const int64 key_;
-  const int64 event_key_;
-  int64 executable_key_;
   se::StreamExecutor* executor_ = nullptr;
 };
 
@@ -79,8 +81,6 @@ class SwapInThunk : public SwapThunk {
   const std::vector<BufferAllocation::Slice> results_;
   const std::vector<int64> byte_sizes_;
   const int64 key_;
-  const int64 event_key_;
-  int64 executable_key_;
 };
 
 // Thunk to sync a swap(in)

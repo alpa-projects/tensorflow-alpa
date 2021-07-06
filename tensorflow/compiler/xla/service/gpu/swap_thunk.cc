@@ -24,32 +24,35 @@ int64 SwapThunk::GetExecutableKey(const GpuExecutable* executable) {
 
 absl::flat_hash_map<int64, se::Event*> SwapThunk::swap_finish_events_;
 
-se::Event* SwapThunk::getEvent(int64 key) {
-  CHECK(swap_finish_events_.count(key)) << "no such key: " << key;
-  return swap_finish_events_.at(key);
+se::Event* SwapThunk::GetEvent(int64 key) {
+  auto iter = swap_finish_events_.find(key);
+  CHECK(iter != swap_finish_events_.end()) << "no such key: " << key;
+  return iter->second;
 }
 
-SwapThunk::SwapThunk(Kind kind, ThunkInfo thunk_info)
-    : Thunk(kind, thunk_info) {}
+SwapThunk::SwapThunk(Kind kind, ThunkInfo thunk_info, int64 event_key)
+    : Thunk(kind, thunk_info), event_key_(event_key) {}
+
+void SwapThunk::SetEvent(se::StreamExecutor* executor) {
+  swap_finish_event_ = absl::make_unique<se::Event>(executor);
+  swap_finish_event_->Init();
+  swap_finish_events_.insert({event_key_, swap_finish_event_.get()});
+}
 
 SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
                            std::vector<BufferAllocation::Slice> operands,
                            std::vector<int64> byte_sizes, int64 key,
                            int64 event_key)
-    : SwapThunk(Thunk::kSwapOut, thunk_info),
+    : SwapThunk(Thunk::kSwapOut, thunk_info, event_key),
       operands_(std::move(operands)),
       byte_sizes_(std::move(byte_sizes)),
-      key_(key),
-      event_key_(event_key),
-      executable_key_(-1) {}
+      key_(key) {}
 
 Status SwapOutThunk::Initialize(const GpuExecutable& executable,
                                 se::StreamExecutor* executor) {
   // register the key of the executable
   executable_key_ = GetExecutableKey(&executable);
-  swap_finish_event_ = absl::make_unique<se::Event>(executor);
-  swap_finish_event_->Init();
-  swap_finish_events_[event_key_] = swap_finish_event_.get();
+  SetEvent(executor);
   return Status::OK();
 }
 
@@ -120,19 +123,15 @@ SwapInThunk::SwapInThunk(ThunkInfo thunk_info,
                          std::vector<BufferAllocation::Slice> results,
                          std::vector<int64> byte_sizes, int64 key,
                          int64 event_key)
-    : SwapThunk(Thunk::kSwapIn, thunk_info),
+    : SwapThunk(Thunk::kSwapIn, thunk_info, event_key),
       results_(std::move(results)),
       byte_sizes_(std::move(byte_sizes)),
-      key_(key),
-      event_key_(event_key),
-      executable_key_(-1) {}
+      key_(key) {}
 
 Status SwapInThunk::Initialize(const GpuExecutable& executable,
                                se::StreamExecutor* executor) {
   executable_key_ = GetExecutableKey(&executable);
-  swap_finish_event_ = absl::make_unique<se::Event>(executor);
-  swap_finish_event_->Init();
-  swap_finish_events_[event_key_] = swap_finish_event_.get();
+  SetEvent(executor);
   return Status::OK();
 }
 
@@ -174,7 +173,7 @@ SwapDoneThunk::SwapDoneThunk(ThunkInfo thunk_info, int64 event_key)
     : Thunk(Thunk::kSwapDone, thunk_info), event_key_(event_key) {}
 
 Status SwapDoneThunk::ExecuteOnStream(const ExecuteParams& params) {
-  params.stream->ThenWaitFor(SwapThunk::getEvent(event_key_));
+  params.stream->ThenWaitFor(SwapThunk::GetEvent(event_key_));
   return Status::OK();
 }
 

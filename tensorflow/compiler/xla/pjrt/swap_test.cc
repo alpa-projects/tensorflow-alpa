@@ -13,6 +13,8 @@
 namespace xla {
 namespace {
 
+int64 event_key = 24;
+
 TEST(GpuSwap, Basic) {
   TF_ASSERT_OK_AND_ASSIGN(
       std::unique_ptr<PjRtClient> client,
@@ -27,9 +29,9 @@ TEST(GpuSwap, Basic) {
 
   XlaBuilder builder("acomputation");
   auto p0 = Parameter(&builder, 0, shape, "param");
-  int64 key = 10, event_key = 24;
-  std::string out_event_key_str = std::to_string(event_key + 1);
-  std::string in_event_key_str = std::to_string(event_key);
+  int64 key = 10;
+  std::string out_event_key_str = std::to_string(event_key++);
+  std::string in_event_key_str = std::to_string(event_key++);
   auto swap_out = CustomCall(
       &builder, "__builtin$SwapOut", {p0}, keyShape,
       /*opaque=*/std::to_string(key).append(";" + out_event_key_str), true);
@@ -96,9 +98,9 @@ TEST(GpuSwap, SwapWithCompute) {
   XlaBuilder builder("acomputation");
   auto p0 = Parameter(&builder, 0, swapShape, "param");
   auto p1 = Parameter(&builder, 1, computationShape, "param");
-  int64 key = 10, event_key = 24;
-  std::string out_event_key_str = std::to_string(event_key + 1);
-  std::string in_event_key_str = std::to_string(event_key);
+  int64 key = 10, event_key = 214;
+  std::string out_event_key_str = std::to_string(event_key++);
+  std::string in_event_key_str = std::to_string(event_key++);
   auto swap_out = CustomCall(
       &builder, "__builtin$SwapOut", {p0}, keyShape,
       /*opaque=*/std::to_string(key).append(";" + out_event_key_str), true);

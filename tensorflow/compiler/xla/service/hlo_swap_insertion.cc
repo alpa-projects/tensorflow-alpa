@@ -36,7 +36,6 @@
 #include "tensorflow/core/platform/logging.h"
 
 // todo(yonghao): store the space for parameter specifically
-// TODO: if swap out is for a swap in, SwapDone should be on swap in stream
 namespace xla {
 
 namespace {
@@ -71,15 +70,13 @@ using UsesList = absl::InlinedVector<int64, 3>;
 class Item {
  public:
   HloInstruction* instruction;
-  int64 position;
+  int64 position = kInvalidPosition;
   OperandList buffers_used;
   BufferIdList buffers_defined;
   bool is_swap = false;
 
   void ShouldBefore(Item* o) {
-    if (should_before == kInvalidPosition || should_before > o->position) {
-      should_before = o->position;
-    }
+    should_before = std::min(should_before, o->position);
   }
   void ShouldAfter(Item* o) {
     should_after = std::max(should_after, o->position);
@@ -92,9 +89,24 @@ class Item {
 
  private:
   friend class InstructionList;
-  int64 should_before = kInvalidPosition, should_after = kInvalidPosition;
+  int64 should_before = kInvalidPosition, should_after = -1;
   Item* next;
 };
+
+bool IsSwapIn(const Item* item) {
+  return item->instruction->IsCustomCall(kBuiltinSwapInTarget);
+}
+bool IsSwapOut(const Item* item) {
+  return item->instruction->IsCustomCall(kBuiltinSwapOutTarget);
+}
+bool IsSwapDone(const Item* item) {
+  return item->instruction->IsCustomCall(kBuiltinSwapDoneTarget);
+}
+std::string OpaqueByIndex(const std::string& full, int index) {
+  std::vector<std::string> result =
+      absl::StrSplit(full, absl::MaxSplits(';', index + 1));
+  return result.at(index);
+}
 
 class InstructionList {
  public:
@@ -102,7 +114,6 @@ class InstructionList {
     int64 position = 0;
     Item* last = nullptr;
     for (HloInstruction* inst : order.instructions()) {
-      // Add a new item to the linked list.
       Item* item = new Item;
       item->next = nullptr;
       if (last == nullptr) {
@@ -120,14 +131,45 @@ class InstructionList {
     }
   }
 
-  Item* first() { return first_; }
+  ~InstructionList() {
+    for (Item* item = first_; item != nullptr;) {
+      Item* next = item->next;
+      delete item;
+      item = next;
+    }
+    for (int i = 0; i < swap_ins_.size(); ++i) {
+      delete swap_ins_.at(i);
+    }
+    for (int i = 0; i < swap_outs_.size(); ++i) {
+      delete swap_outs_.at(i);
+    }
+    for (int i = 0; i < swap_dones_.size(); ++i) {
+      delete swap_dones_.at(i);
+    }
+  }
 
-  Item* next(Item* it) { return it->next; }
+  Item* first() const { return first_; }
+
+  Item* next(Item* it) const { return it->next; }
 
   Item* GetItem(const HloInstruction* inst) const {
     auto iter = item_map_.find(inst);
     CHECK(iter != item_map_.end()) << "Did not find " << inst->name();
     return iter->second;
+  }
+
+  void SwapToSwapEdge(HloInstruction* from, HloInstruction* to) {
+    if (from->IsCustomCall(kBuiltinSwapOutTarget) && to->IsCustomCall(kBuiltinSwapInTarget)) {
+      auto* from_inst = Cast<HloCustomCallInstruction>(from);
+      auto* to_inst = Cast<HloCustomCallInstruction>(to);
+      if (OpaqueByIndex(from_inst->opaque(), 0) !=
+          OpaqueByIndex(to_inst->opaque(), 0)) {
+        // The to instruction should wait until the from inst ends.
+        std::string new_opaque = to_inst->opaque();
+        new_opaque.append(";").append(OpaqueByIndex(from_inst->opaque(), 1));
+        to_inst->set_raw_backend_config_string(to_inst->opaque());
+      }
+    }
   }
 
   void AddEdge(Item* from, Item* to) {
@@ -142,14 +184,125 @@ class InstructionList {
       return;
     }
     if (from->is_swap && to->is_swap) {
+      if (IsSwapDone(from)) {
+        // edge is from a swap done to a swap in/out
+        CHECK(IsSwapIn(to) || IsSwapOut(to))
+            << "add edge from swap done to swap done";
+        auto* from_swap = from->buffers_used.at(0).instruction;
+        SwapToSwapEdge(from_swap, to->instruction);
+        from_swap->AddControlDependencyTo(to->instruction);
+        return;
+      }
+      if (!IsSwapDone(to)) {
+        SwapToSwapEdge(from->instruction, to->instruction);
+      }
       from->instruction->AddControlDependencyTo(to->instruction);
     }
   }
 
+  // Insert swaps to instruction sequence.
+  // First, set the position of swap out: as early a.p.
+  // If is after a swap in: swap out must be after a later last_use
+  // Then, set the position of swap in: as early a.p.
+  // If it is after a swap out: wait until done.
+  // Finally, swap done is as late a.p.(exactly before the first use).
+  HloInstructionSequence toSequence() {
+    HloInstructionSequence seq;
+
+    absl::c_sort(swap_outs_, [](const Item* x, const Item* y) {
+      if (x->should_after != y->should_after) {
+        return x->should_after < y->should_after;
+      }
+      return x->should_before < y->should_before;
+    });
+    // solve swap in's dependency on swap out
+    int64 cnt = 0;
+    absl::c_for_each(swap_outs_, [&cnt](Item*& item) {
+      item->position = cnt++;  // relative position of swap outs
+    });
+    absl::c_for_each(swap_ins_, [&](Item*& item) {
+      for (HloInstruction* pre : item->instruction->control_predecessors()) {
+        if (pre->IsCustomCall(kBuiltinSwapOutTarget)) {
+          Item* from = GetItem(pre);
+          item->should_after = std::max(item->should_after, from->should_after);
+          item->position = std::max(item->position, from->position);
+          // get relative position of swap in based on swap outs:
+          // avoid so.1, so.2, si.3, si.4, si.3 waits so.2 but si.4 waits so.1
+        }
+      }
+    });
+
+    absl::c_sort(swap_ins_, [](const Item* x, const Item* y) {
+      if (x->should_after != y->should_after) {
+        return x->should_after < y->should_after;
+      }
+      return x->position < y->position;
+    });
+    // sort swap done, at least before next use
+    absl::c_sort(swap_dones_, [](const Item* x, const Item* y) {
+      return x->should_before < y->should_before;
+    });
+
+    // set as a sequence
+    auto done_iter = swap_dones_.begin();
+    auto out_iter = swap_outs_.begin();
+    auto in_iter = swap_ins_.begin();
+
+    for (Item* item = first_; item != nullptr; item = item->next) {
+      while (done_iter != swap_dones_.end()) {
+        if ((*done_iter)->should_before == item->position) {
+          seq.push_back((*done_iter)->instruction);
+          ++done_iter;
+        } else {
+          CHECK((*done_iter)->should_before > item->position);
+          break;
+        }
+      }
+      seq.push_back(item->instruction);
+      while (out_iter != swap_outs_.end()) {
+        if ((*out_iter)->should_after == item->position) {
+          seq.push_back((*out_iter)->instruction);
+          ++out_iter;
+        } else {
+          CHECK((*out_iter)->should_after > item->position);
+          break;
+        }
+      }
+      while (in_iter != swap_ins_.end()) {
+        if ((*in_iter)->should_after == item->position) {
+          seq.push_back((*in_iter)->instruction);
+          ++in_iter;
+        } else {
+          CHECK((*in_iter)->should_after > item->position);
+          break;
+        }
+      }
+    }
+    return seq;
+  }
+
+  void AddSwapIn(Item* item) {
+    swap_ins_.push_back(item);
+    item_map_.insert({item->instruction, item});
+  }
+  void AddSwapOut(Item* item) {
+    swap_outs_.push_back(item);
+    item_map_.insert({item->instruction, item});
+  }
+
+  void AddSwapDone(Item* swap, Item* done) {
+    swap_done_map_.insert({swap, done});
+    swap_dones_.push_back(done);
+    item_map_.insert({done->instruction, done});
+  }
+
+  Item* GetSwapDone(Item* swap) { return swap_done_map_.at(swap); }
+
  private:
   Item* first_;
-
   absl::flat_hash_map<const HloInstruction*, Item*> item_map_;
+  absl::flat_hash_map<Item*, Item*> swap_done_map_;
+  std::vector<Item*> swap_ins_, swap_outs_, swap_dones_;
 };
 
 UsesList GetUsers(const InstructionList& instruction_list,
@@ -230,8 +383,7 @@ class MemoryRecorder {
         CHECK(occupy == 0);
       } else {
         CHECK(!InGPU());
-        CHECK(alloc == defining_instruction ||
-              alloc->instruction->IsCustomCall(kBuiltinSwapInTarget));
+        CHECK(alloc == defining_instruction || IsSwapIn(alloc));
       }
       latest_alloc = alloc;
       occupying_size = occupy;
@@ -269,7 +421,8 @@ class MemoryRecorder {
     std::string IntervalsInfo() const {
       std::string info;
       for (const AllocatedInterval& interval : intervals_) {
-        absl::StrAppend(&info, interval.buffer()->id, ", ", interval.next_use(), "; ");
+        absl::StrAppend(&info, interval.buffer()->id, ", ", interval.next_use(),
+                        "; ");
       }
       return info;
     }
@@ -372,7 +525,6 @@ class MemoryRecorder {
   Item* prepare_for_ = nullptr;
   std::vector<Buffer> buffers_;
   std::vector<Item*> swap_out_inst_, last_use_inst_;
-  absl::flat_hash_map<Item*, Item*> swap_done_map_;
 
   // allocated buffers are stored by a list(btree_set) of heaps(priority_queue).
   // Each heap contains allocated buffers with the same size,
@@ -444,7 +596,6 @@ MemoryRecorder::MemoryRecorder(
       logical_buffer_to_id[logical_buffer] = buffer->id;
     }
   }
-
 }
 
 void MemoryRecorder::AddReleasedInternal(int64 size, Item* item) {
@@ -496,6 +647,9 @@ void MemoryRecorder::ReleaseAll(const absl::flat_hash_set<int64>& sizes,
       buffers.pop();
       // insert to released set
       AddReleasedInternal(size, release_after);
+    }
+    if (buffers.empty()) {
+      allocated_buffers_.erase(iter);
     }
   }
   for (BufferId bid : release_id) {
@@ -550,7 +704,7 @@ std::pair<BufferId, Item*> MemoryRecorder::AllocWithRelease(int64 size,
   // 1. an operand swapped out, whose next use is exactly this instruction;
   // 2. a buffer defined by this instruction;
   // If the first happens, the best fit size has no available buffer(otherwise
-  // next use is later) so try another size;
+  // next use is later) so try another size;(TODO)
   // The second is avoided by RegisterAlloc later;
   auto iter = allocated_buffers_.lower_bound(size);
   if (iter == allocated_buffers_.end()) {
@@ -560,6 +714,7 @@ std::pair<BufferId, Item*> MemoryRecorder::AllocWithRelease(int64 size,
                              iter->second.top().buffer()->latest_alloc);
   memory_usage_ -= iter->second.top().buffer()->occupying_size;
   iter->second.pop();
+  // do not clear empty heap, because the interval will be consumed immediately
   return info;
 }
 
@@ -571,15 +726,15 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
   }
   // try already released memory
   {
-    auto released_by = AllocReleasedMemory(size);
-    Item* released_by_inst = released_by.first;
-    if (released_by_inst != nullptr) {
+    auto release_after = AllocReleasedMemory(size);
+    Item* release_after_inst = release_after.first;
+    if (release_after_inst != nullptr) {
       VLOG(4) << "Alloc " << HumanReadableNumBytes(size) << " for "
               << item->instruction->ToShortString()
               << " with buffer released by "
-              << released_by.first->instruction->ToShortString();
-      instruction_list_.AddEdge(released_by_inst, item);
-      return released_by.second;
+              << release_after.first->instruction->ToShortString();
+      instruction_list_.AddEdge(release_after_inst, item);
+      return release_after.second;
     }
   }
   // cannot alloc at the released interval, swap out a buffer
@@ -601,14 +756,17 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
     Item* swap_out = new Item;
     auto operand = release_buffer.defining_instruction->instruction;
     swap_out->is_swap = true;
-    swap_out->instruction =
+    HloCustomCallInstruction* swap_out_inst = Cast<HloCustomCallInstruction>(
         computation_->AddInstruction(HloInstruction::CreateCustomCall(
             FormalShape, {operand}, kBuiltinSwapOutTarget,
             /*opaque=*/
             std::to_string(SwapKey++).append(";").append(
-                std::to_string(SwapDoneEventKey))));
-    Cast<HloCustomCallInstruction>(swap_out->instruction)
-        ->set_custom_call_has_side_effect(true);
+                std::to_string(SwapDoneEventKey)))));
+
+    swap_out->instruction = swap_out_inst;
+    swap_out_inst->set_custom_call_has_side_effect(true);
+    instruction_list_.AddSwapOut(swap_out);
+
     instruction_list_.AddEdge(release_inst, swap_out);
 
     Item* last_use = last_use_inst_.at(release_bid);
@@ -627,8 +785,9 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
             /*opaque=*/std::to_string(SwapDoneEventKey++))));
     swap_done->instruction = swap_done_inst;
     swap_done_inst->set_custom_call_has_side_effect(true);
-    swap_done_map_.insert({swap_out, swap_done});
+    swap_done->buffers_used.push_back(Operand{kInvalidBufferId, swap_out_inst});
     instruction_list_.AddEdge(swap_out, swap_done);
+    instruction_list_.AddSwapDone(swap_out, swap_done);
 
     // add edge from swap out done to the item
     instruction_list_.AddEdge(swap_done, item);
@@ -636,11 +795,6 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
   }
   release_buffer.SetInGPU(nullptr, 0);
   return interval_size;
-}
-
-std::string FirstOpaque(std::string full) {
-  int64 offset = full.find_first_of(";");
-  return std::string(full.c_str(), offset);
 }
 
 void MemoryRecorder::PrepareForInstruction(Item* item) {
@@ -651,7 +805,8 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
     auto& buffer = buffers_.at(bid);
     if (buffer.InGPU()) {
       if (buffer.IsSwappedIn()) {
-        instruction_list_.AddEdge(swap_done_map_.at(buffer.latest_alloc), item);
+        instruction_list_.AddEdge(
+            instruction_list_.GetSwapDone(buffer.latest_alloc), item);
         buffer.defining_instruction->instruction->ReplaceUseWith(
             item->instruction, buffer.latest_alloc->instruction);
       }
@@ -667,8 +822,9 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
     swap_in->is_swap = true;
 
     std::string opaque =
-        FirstOpaque(
-            (Cast<HloCustomCallInstruction>(swap_out->instruction)->opaque()))
+        OpaqueByIndex(
+            (Cast<HloCustomCallInstruction>(swap_out->instruction)->opaque()),
+            0)
             .append(";")
             .append(std::to_string(SwapDoneEventKey));
     HloCustomCallInstruction* swap_in_inst = Cast<HloCustomCallInstruction>(
@@ -676,13 +832,12 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
             operand.instruction->shape(), {}, kBuiltinSwapInTarget,
             /*opaque=*/opaque)));
 
-    // std::cerr << "buffer alias inst is: "
-    //           << operand.instruction->ToShortString()
-    //           << ", shape is: "
-    //           << operand.instruction->shape().ToString() << "\n";
     swap_in->instruction = swap_in_inst;
     swap_in_inst->set_custom_call_has_side_effect(true);
-    instruction_list_.AddEdge(swap_done_map_.at(swap_out), swap_in);
+    instruction_list_.AddSwapIn(swap_in);
+
+    instruction_list_.AddEdge(swap_out, swap_in);
+    // swap in directly sync(skip swap done)
 
     Item* swap_done = new Item;
     swap_done->is_swap = true;
@@ -692,7 +847,8 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
             /*opaque=*/std::to_string(SwapDoneEventKey++))));
     swap_done->instruction = swap_done_inst;
     swap_done_inst->set_custom_call_has_side_effect(true);
-    swap_done_map_.insert({swap_in, swap_done});
+    swap_done->buffers_used.push_back(Operand{kInvalidBufferId, swap_in_inst});
+    instruction_list_.AddSwapDone(swap_in, swap_done);
 
     int64 interval_size = GetSpaceFor(AllocatedSize(buffer), swap_in);
     buffer.SetInGPU(swap_in, interval_size);
@@ -828,6 +984,9 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
     VLOG(1) << "memory usage after recycle is: " << tracker.memory_usage();
   }
   std::cerr << peak_memory << "\n";
+  
+  schedule->set_sequence(computation, std::move(instruction_list.toSequence()));
+  TF_RETURN_IF_ERROR(schedule->Verify());
   return true;
 }
 
@@ -882,8 +1041,6 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
       bool changed,
       SwapInsertionComputation(module->entry_computation(), &module->schedule(),
                                memory_limit_bytes_));
-  // reschedule because new instructions are inserted.
-  TF_ASSIGN_OR_RETURN(changed, scheduler.Run(module));
   // TODO: replace by a special scheduler instead
   return changed;
 }

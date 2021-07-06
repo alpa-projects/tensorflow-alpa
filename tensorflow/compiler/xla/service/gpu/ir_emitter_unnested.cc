@@ -1627,10 +1627,9 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
   std::vector<int64> byte_sizes;
   std::vector<std::string> keys =
       absl::StrSplit(custom_call.backend_config().str(), ";");
-  CHECK(keys.size() == 2) << "opaque num is: " 
-                          << keys.size() << " instead of 2";
   int64 key = std::stoll(keys[0]);
   int64 event_key = std::stoll(keys[1]);
+  // TODO(yonghao): swap in waits for other swap outs
   if (call_target_name == kBuiltinSwapOutTarget) {
     // CHECK(results.size() == 0)
     //     << "builtinSwapOut meets " << results.size() << " result(s)";

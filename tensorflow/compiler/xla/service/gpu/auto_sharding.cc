@@ -21,7 +21,7 @@ namespace gpu {
 namespace py = pybind11;
 
 // A constant to represent infinity cost.
-constexpr double INFINITY_COST = 1e11;
+constexpr double INFINITY_COST = 1e10;
 
 // Options for the auto-sharding solver.
 struct AutoShardingSolverOption {
@@ -1429,7 +1429,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       undefined_set.insert(ins);
     }
 
-    // Debug options: forcely set the the strategy of some instructions.
+    // Debug options: forcibly set the the strategy of some instructions.
     if (pass_context::GetBool("auto_sharding::force_strategy", false)) {;
       std::vector<int64> inst_indices =
           pass_context::GetIntVector("auto_sharding::force_strategy_inst_indices");

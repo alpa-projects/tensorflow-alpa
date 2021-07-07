@@ -77,7 +77,6 @@ using LeafStrategies = std::vector<StrategyVector*>;
 using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64>;
 using AliasSet = absl::flat_hash_set<std::pair<int64, int64>>;
 
-
 // Store the profiling results of communication and computation.
 class ProfilingResult {
  public:
@@ -85,15 +84,17 @@ class ProfilingResult {
   // parax/profile_communication.py::ProfilingResult .
   ProfilingResult(py::object prof_result) {
     if (!prof_result.is_none()) {
-
       PyGILState_STATE gstate = PyGILState_Ensure();
       {
-        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("all_reduce_cost_dict")),
-                        all_reduce_cost_dict_);
-        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("all_gather_cost_dict")),
-                        all_gather_cost_dict_);
-        PyDictToCppDict(py::cast<py::dict>(prof_result.attr("reduce_scatter_cost_dict")),
-                        reduce_scatter_cost_dict_);
+        PyDictToCppDict(
+            py::cast<py::dict>(prof_result.attr("all_reduce_cost_dict")),
+            all_reduce_cost_dict_);
+        PyDictToCppDict(
+            py::cast<py::dict>(prof_result.attr("all_gather_cost_dict")),
+            all_gather_cost_dict_);
+        PyDictToCppDict(
+            py::cast<py::dict>(prof_result.attr("reduce_scatter_cost_dict")),
+            reduce_scatter_cost_dict_);
       }
       PyGILState_Release(gstate);
     }
@@ -107,32 +108,39 @@ class ProfilingResult {
 
   bool Enabled() const { return enabled_; }
 
-  double EstimateAllGatherCost(const std::vector<std::vector<int>>& replica_groups,
-                               int64 size, std::string dtype) const {
+  double EstimateAllGatherCost(
+      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      std::string dtype) const {
     if (all_gather_cost_dict_.empty()) {
       // Use all-reduce to approximate all-gather.
       return EstimateAllReduceCost(replica_groups, size, dtype) / 2;
     }
 
-    return EstimateInternal(replica_groups, size, dtype, all_gather_cost_dict_) -
+    return EstimateInternal(replica_groups, size, dtype,
+                            all_gather_cost_dict_) -
            EstimateInternal(replica_groups, 0, dtype, all_gather_cost_dict_);
   }
 
-  double EstimateAllReduceCost(const std::vector<std::vector<int>>& replica_groups,
-                               int64 size, std::string dtype) const {
-    return EstimateInternal(replica_groups, size, dtype, all_reduce_cost_dict_) -
+  double EstimateAllReduceCost(
+      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      std::string dtype) const {
+    return EstimateInternal(replica_groups, size, dtype,
+                            all_reduce_cost_dict_) -
            EstimateInternal(replica_groups, 0, dtype, all_reduce_cost_dict_);
   }
 
-  double EstimateReduceScatterCost(const std::vector<std::vector<int>>& replica_groups,
-                                   int64 size, std::string dtype) const {
+  double EstimateReduceScatterCost(
+      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      std::string dtype) const {
     if (reduce_scatter_cost_dict_.empty()) {
       // Use all-reduce to approximate all-gather.
       return EstimateAllReduceCost(replica_groups, size, dtype) / 2;
     }
 
-    return EstimateInternal(replica_groups, size, dtype, reduce_scatter_cost_dict_) -
-           EstimateInternal(replica_groups, 0, dtype, reduce_scatter_cost_dict_);
+    return EstimateInternal(replica_groups, size, dtype,
+                            reduce_scatter_cost_dict_) -
+           EstimateInternal(replica_groups, 0, dtype,
+                            reduce_scatter_cost_dict_);
   }
 
   std::string ToString() {
@@ -150,10 +158,10 @@ class ProfilingResult {
   using Value = std::vector<std::pair<int64, double>>;
 
   // Estimate the cost by linear interpolation bewteen the two closest points.
-  double EstimateInternal(const std::vector<std::vector<int>>& replica_groups,
-                          int64 size,
-                          const std::string& dtype,
-                          const absl::flat_hash_map<Key, Value>& cost_dict) const {
+  double EstimateInternal(
+      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      const std::string& dtype,
+      const absl::flat_hash_map<Key, Value>& cost_dict) const {
     Key key(Group2Str(replica_groups), dtype);
     Value cost_list = cost_dict.at(key);
 
@@ -166,7 +174,7 @@ class ProfilingResult {
       i = 0;
     } else {
       for (i = 0; i < cost_list.size() - 1; ++i) {
-        if (cost_list[i].first <= size && size <= cost_list[i+1].first) {
+        if (cost_list[i].first <= size && size <= cost_list[i + 1].first) {
           break;
         }
       }
@@ -174,14 +182,17 @@ class ProfilingResult {
 
     int64 left_size = cost_list[i].first;
     double left_cost = cost_list[i].second;
-    int64 right_size = cost_list[i+1].first;
-    double right_cost = cost_list[i+1].second;
+    int64 right_size = cost_list[i + 1].first;
+    double right_cost = cost_list[i + 1].second;
 
-    return 1.0 * (size - left_size) / (right_size - left_size) * (right_cost - left_cost) + left_cost;
+    return 1.0 * (size - left_size) / (right_size - left_size) *
+               (right_cost - left_cost) +
+           left_cost;
   }
 
   // Convert a python dict to c++ dict.
-  void PyDictToCppDict(py::dict py_dict, absl::flat_hash_map<Key, Value>& cpp_dict) {
+  void PyDictToCppDict(py::dict py_dict,
+                       absl::flat_hash_map<Key, Value>& cpp_dict) {
     // the type of py_dict: Dict[Tuple(group, dtype) -> List[Tuple(size, time)]]
     for (auto item : py_dict) {
       py::tuple tuple_key = py::cast<py::tuple>(item.first);
@@ -191,8 +202,8 @@ class ProfilingResult {
       py::list list_val = py::cast<py::list>(item.second);
       for (const auto x : list_val) {
         py::tuple tuple_val = py::cast<py::tuple>(x);
-        cpp_dict[key].push_back(std::make_pair(
-          py::cast<int64>(tuple_val[0]), py::cast<double>(tuple_val[1])));
+        cpp_dict[key].push_back(std::make_pair(py::cast<int64>(tuple_val[0]),
+                                               py::cast<double>(tuple_val[1])));
       }
     }
   }
@@ -214,7 +225,8 @@ class ProfilingResult {
   }
 
   // Make a string key of a replica_groups.
-  std::string Group2Str(const std::vector<std::vector<int>>& replica_groups) const {
+  std::string Group2Str(
+      const std::vector<std::vector<int>>& replica_groups) const {
     std::ostringstream os;
 
     os << "(";
@@ -287,7 +299,7 @@ class ClusterEnvironment {
 
     if (prof_result.Enabled()) {
       return prof_result.EstimateAllGatherCost(cached_replica_groups[mesh_dim],
-        num_bytes / 4, "float32");
+                                               num_bytes / 4, "float32");
     }
 
     int64 num_devices = device_mesh.dim(mesh_dim);
@@ -304,7 +316,7 @@ class ClusterEnvironment {
 
     if (prof_result.Enabled()) {
       return prof_result.EstimateAllReduceCost(cached_replica_groups[mesh_dim],
-        num_bytes / 4, "float32");
+                                               num_bytes / 4, "float32");
     }
 
     int64 num_devices = device_mesh.dim(mesh_dim);
@@ -320,8 +332,8 @@ class ClusterEnvironment {
     }
 
     if (prof_result.Enabled()) {
-      return prof_result.EstimateReduceScatterCost(cached_replica_groups[mesh_dim],
-        num_bytes / 4, "float32");
+      return prof_result.EstimateReduceScatterCost(
+          cached_replica_groups[mesh_dim], num_bytes / 4, "float32");
     }
 
     int64 num_devices = device_mesh.dim(mesh_dim);
@@ -711,7 +723,8 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
                 "S" + std::to_string(i) + " @ " + std::to_string(j);
             HloSharding output_spec = Tile(ins->shape(), {i}, {j}, cluster_env);
             double compute_cost = 0, communication_cost = 0;
-            double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+            double memory_cost =
+                GetBytes(ins->shape()) / output_spec.NumTiles();
             strategies->leaf_vector.push_back(
                 ShardingStrategy({name,
                                   output_spec,
@@ -738,7 +751,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         const HloInstruction* operand = ins->operand(0);
-        if (undefined_set.count(operand)) { break; }
+        if (undefined_set.count(operand)) {
+          break;
+        }
 
         // Create follow strategies
         const StrategyVector* src_strategies = strategy_map.at(operand).get();
@@ -764,10 +779,13 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         }
 
         // If the operand is a scalar, following it only generates "Replicated"
-        // strategy. So we should register new strategies instead of following it.
+        // strategy. So we should register new strategies instead of following
+        // it.
         if (operand->shape().rank() == 0) {
-          if (!output_set.count(ins) && operand->opcode() == HloOpcode::kConstant) {
-            // one execption: always replicate intermidiate broadcasted constants.
+          if (!output_set.count(ins) &&
+              operand->opcode() == HloOpcode::kConstant) {
+            // one execption: always replicate intermidiate broadcasted
+            // constants.
             break;
           }
 
@@ -818,7 +836,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         const HloInstruction* operand = ins->operand(0);
-        if (undefined_set.count(operand)) { break; }
+        if (undefined_set.count(operand)) {
+          break;
+        }
 
         // Create follow strategies
         const StrategyVector* src_strategies = strategy_map.at(operand).get();
@@ -854,7 +874,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         const HloInstruction* operand = ins->operand(0);
-        if (undefined_set.count(operand)) { break; }
+        if (undefined_set.count(operand)) {
+          break;
+        }
 
         // Create follow strategies
         const StrategyVector* src_strategies = strategy_map.at(operand).get();
@@ -889,7 +911,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         const HloInstruction* operand = ins->operand(0);
-        if (undefined_set.count(operand)) { break; }
+        if (undefined_set.count(operand)) {
+          break;
+        }
 
         // Create follow strategies
         const StrategyVector* src_strategies = strategy_map.at(operand).get();
@@ -984,7 +1008,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
             max_depth = depth_map.at(ins->operand(i));
           }
         }
-        if (follow_idx == -1) { break; }
+        if (follow_idx == -1) {
+          break;
+        }
 
         // Create follow strategies
         const HloInstruction* operand = ins->operand(follow_idx);
@@ -1023,7 +1049,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
 
         const HloInstruction* operand = ins->operand(0);
         const HloInstruction* unit = ins->operand(1);
-        if (undefined_set.count(operand)) { break; }
+        if (undefined_set.count(operand)) {
+          break;
+        }
 
         // Map old dims to new dim
         const auto& dimensions = ins->dimensions();
@@ -1376,16 +1404,18 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
 
     if (!strategies->is_tuple && strategies->leaf_vector.empty()) {
       // Set the strategy as "undefined".
-      // Its sharding spec will be annotaed by the ShardingPropagation pass later.
+      // Its sharding spec will be annotaed by the ShardingPropagation pass
+      // later.
       std::vector<std::vector<double>> resharding_costs;
       for (size_t i = 0; i < ins->operand_count(); ++i) {
         const HloInstruction* operand = ins->operand(i);
         const StrategyVector* src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
-        resharding_costs.push_back(std::vector<double>(src_strategies->leaf_vector.size(), 0));
+        resharding_costs.push_back(
+            std::vector<double>(src_strategies->leaf_vector.size(), 0));
       }
-      strategies->leaf_vector.push_back(
-        ShardingStrategy({"undefined", Undefined(), 0, 0, 0, resharding_costs}));
+      strategies->leaf_vector.push_back(ShardingStrategy(
+          {"undefined", Undefined(), 0, 0, 0, resharding_costs}));
       undefined_set.insert(ins);
     }
 
@@ -1737,7 +1767,8 @@ class CostGraph {
   std::vector<std::pair<int, int>> to_merge_pairs;
 };
 
-// Serialize parameters of the ILP problem as numpy arrays and call the python solver.
+// Serialize parameters of the ILP problem as numpy arrays and call the python
+// solver.
 std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
     const HloInstructionSequence& sequence, const LivenessSet& liveness_set,
     const StrategyMap& strategy_map, const LeafStrategies& leaf_strategies,
@@ -1928,8 +1959,7 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
 }
 
 // Set the HloSharding for all instructions according to the ILP solution.
-void SetHloSharding(HloModule* module,
-                    const StrategyMap& strategy_map,
+void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
                     const CostGraph& cost_graph,
                     const std::vector<int64> s_val) {
   HloComputation* entry = module->entry_computation();
@@ -1976,7 +2006,6 @@ void SetHloSharding(HloModule* module,
       }
     }
   }
-
 }
 
 // Print liveness set for debugging.
@@ -2095,10 +2124,11 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
 
 enum VisitState { kVisiting, kVisited };
 
-std::vector<HloInstruction *> GetAncestorInstructions(HloInstruction *start_ins) {
-  std::vector<HloInstruction *> postorder;
-  absl::flat_hash_map<HloInstruction *, VisitState> visited;
-  std::vector<HloInstruction *> dfs_stack;
+std::vector<HloInstruction*> GetAncestorInstructions(
+    HloInstruction* start_ins) {
+  std::vector<HloInstruction*> postorder;
+  absl::flat_hash_map<HloInstruction*, VisitState> visited;
+  std::vector<HloInstruction*> dfs_stack;
   dfs_stack.push_back(start_ins);
 
   while (!dfs_stack.empty()) {
@@ -2125,9 +2155,8 @@ std::vector<HloInstruction *> GetAncestorInstructions(HloInstruction *start_ins)
 
 std::unique_ptr<HloModule> CreateStageModule(
     HloModule* full_module,
-    const std::vector<HloInstruction*> &stage_instructions,
+    const std::vector<HloInstruction*>& stage_instructions,
     std::string suffix) {
-
   HloModuleConfig config = full_module->config();
   // TODO (zhuohan): Support input/output alias
   config.set_shardable_value_update_pairs({});
@@ -2136,30 +2165,31 @@ std::unique_ptr<HloModule> CreateStageModule(
   config.mutable_layout_config()->clear();
 
   auto module = absl::make_unique<HloModule>(
-    absl::StrCat(full_module->name(), "-", suffix), config);
+      absl::StrCat(full_module->name(), "-", suffix), config);
 
   std::unique_ptr<HloCloneContext> context_ptr =
       absl::make_unique<HloCloneContext>(module.get(), suffix);
-  HloCloneContext *context = context_ptr.get();
+  HloCloneContext* context = context_ptr.get();
 
   std::vector<std::unique_ptr<HloInstruction>> instructions;
 
-  HloInstruction *stage_start_instruction = stage_instructions.front();
-  HloInstruction *stage_end_instruction = stage_instructions.back();
+  HloInstruction* stage_start_instruction = stage_instructions.front();
+  HloInstruction* stage_end_instruction = stage_instructions.back();
   CHECK(stage_start_instruction->IsCustomCall("xla_pipeline_marker"));
   CHECK(stage_end_instruction->IsCustomCall("xla_pipeline_marker"));
 
   CHECK(stage_start_instruction->shape().IsTuple());
   size_t n_parameters = stage_start_instruction->shape().tuple_shapes_size();
-  std::vector<HloInstruction *> parameters(n_parameters);
+  std::vector<HloInstruction*> parameters(n_parameters);
   for (size_t i = 0; i < n_parameters; ++i) {
     auto new_param = HloInstruction::CreateParameter(
         i, stage_start_instruction->shape().tuple_shapes(i),
         absl::StrCat("param_", i));
     if (stage_start_instruction->has_sharding()) {
       CHECK(stage_start_instruction->sharding().IsTuple());
-      new_param->set_sharding(stage_start_instruction->sharding()
-          .GetSubSharding(stage_start_instruction->shape(), {i}));
+      new_param->set_sharding(
+          stage_start_instruction->sharding().GetSubSharding(
+              stage_start_instruction->shape(), {i}));
     }
     new_param->set_metadata(stage_start_instruction->metadata());
     parameters[i] = new_param.get();
@@ -2168,7 +2198,7 @@ std::unique_ptr<HloModule> CreateStageModule(
 
   // std::cerr << "======old instructions=====" << std::endl;
   for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
-    HloInstruction *ins = stage_instructions[i];
+    HloInstruction* ins = stage_instructions[i];
     // std::cerr << ins->ToString() << std::endl;
     if (ins->opcode() == HloOpcode::kGetTupleElement &&
         ins->operand(0) == stage_start_instruction) {
@@ -2180,31 +2210,37 @@ std::unique_ptr<HloModule> CreateStageModule(
           << ins->ToString();
       std::vector<HloInstruction*> new_operands;
       for (auto operand : ins->operands()) {
-        HloInstruction *new_operand = context->FindInstruction(operand);
+        HloInstruction* new_operand = context->FindInstruction(operand);
         if (new_operand == nullptr) {
-          std::vector<HloInstruction *> ancestors = GetAncestorInstructions(operand);
+          std::vector<HloInstruction*> ancestors =
+              GetAncestorInstructions(operand);
           for (auto ancestor : ancestors) {
             // Make sure the ancestor is a constant
-            // TODO (zhuohan): Might also check that the opcode is not kRngGetAndUpdateState
+            // TODO (zhuohan): Might also check that the opcode is not
+            // kRngGetAndUpdateState
             CHECK_NE(ancestor->opcode(), HloOpcode::kParameter);
-            std::vector<HloInstruction *> new_ancestor_operands;
+            std::vector<HloInstruction*> new_ancestor_operands;
             for (auto ancestor_operand : ancestor->operands()) {
-              new_ancestor_operands.push_back(context->GetInstruction(ancestor_operand));
+              new_ancestor_operands.push_back(
+                  context->GetInstruction(ancestor_operand));
             }
-            instructions.push_back(ancestor->CloneWithNewOperands(ancestor->shape(), new_ancestor_operands, context));
+            instructions.push_back(ancestor->CloneWithNewOperands(
+                ancestor->shape(), new_ancestor_operands, context));
           }
           new_operand = context->GetInstruction(operand);
         }
         new_operands.push_back(new_operand);
       }
-      instructions.push_back(ins->CloneWithNewOperands(ins->shape(), new_operands, context));
+      instructions.push_back(
+          ins->CloneWithNewOperands(ins->shape(), new_operands, context));
     }
   }
   // std::cerr << "======new instructions=====" << std::endl;
   // for (const auto &ins : instructions) {
   //   std::cerr << ins->ToString() << std::endl;
   // }
-  HloComputation::Builder builder(absl::StrCat(full_module->entry_computation()->name(), "-", suffix));
+  HloComputation::Builder builder(
+      absl::StrCat(full_module->entry_computation()->name(), "-", suffix));
   for (auto& ins : instructions) {
     builder.AddInstruction(std::move(ins));
   }
@@ -2213,11 +2249,11 @@ std::unique_ptr<HloModule> CreateStageModule(
           stage_end_instruction->operand(0)));
 
   for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
-    HloInstruction *ins = stage_instructions[i];
-    HloInstruction *new_ins = context->GetInstruction(ins);
+    HloInstruction* ins = stage_instructions[i];
+    HloInstruction* new_ins = context->GetInstruction(ins);
     for (auto successor : ins->control_successors()) {
-      TF_CHECK_OK(new_ins->AddControlDependencyTo(
-          context->GetInstruction(successor)));
+      TF_CHECK_OK(
+          new_ins->AddControlDependencyTo(context->GetInstruction(successor)));
     }
   }
 
@@ -2230,7 +2266,8 @@ std::unique_ptr<HloModule> CreateStageModule(
   return std::move(module);
 }
 
-std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module) {
+std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(
+    HloModule* module) {
   // ----- Slice the hlo module according to the pipeline marker -----
   // TODO (zhuohan): Move this into a seperate pass
   HloComputation* entry = module->entry_computation();
@@ -2243,9 +2280,9 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
     if (current_ins->IsCustomCall("xla_pipeline_marker")) {
       if (in_stage) {
         current_stage_instructions.push_back(current_ins);
-        pipeline_stages.push_back(CreateStageModule(
-            module, current_stage_instructions,
-            std::to_string(pipeline_stages.size())));
+        pipeline_stages.push_back(
+            CreateStageModule(module, current_stage_instructions,
+                              std::to_string(pipeline_stages.size())));
         current_stage_instructions.clear();
         in_stage = false;
       } else {
@@ -2257,7 +2294,7 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStages(HloModule* module
     }
   }
 
-    // ----- Put the sharded HLO module back to Python -----
+  // ----- Put the sharded HLO module back to Python -----
   HloModuleProto module_proto = module->ToProto();
   std::string serilaized_module_proto;
   CHECK(module_proto.SerializeToString(&serilaized_module_proto));
@@ -2347,14 +2384,13 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   device_mesh.SetValues(
       pass_context::GetIntVector("auto_sharding::device_mesh_ids"));
 
-  ProfilingResult prof_result(pass_context::GetPyObject(
-      "auto_sharding::device_mesh_prof_result"));
+  ProfilingResult prof_result(
+      pass_context::GetPyObject("auto_sharding::device_mesh_prof_result"));
   ClusterEnvironment cluster_env(
       device_mesh,
       pass_context::GetDoubleVector("auto_sharding::device_mesh_alpha"),
       pass_context::GetDoubleVector("auto_sharding::device_mesh_beta"),
-      prof_result,
-      solver_option);
+      prof_result, solver_option);
 
   // ----- Build strategies and costs -----
   StrategyMap strategy_map;

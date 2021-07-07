@@ -1299,6 +1299,52 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
                }}));
         }
 
+        // RR = RS x SR
+        // This is a special case where we allow spliting only one dim in the 2d-mesh case.
+        // This allows some recomputation (e.g., the dense layer in the LM_head of BERT).
+        // On the other hand, to prevent the solver from returning trivial solutions,
+        // we should add some extra cost for these strategies.
+        if (device_mesh.dim(0) > 1 && device_mesh.dim(1) > 1) {
+          HloSharding output_spec = HloSharding::Replicate();
+          double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+          strategies->leaf_vector.push_back(ShardingStrategy(
+              {"RR = RS x SR @ {0} (allreduce @ 0,1)",
+               output_spec,
+               0,
+               cluster_env.AllReduceCost(memory_cost, 0) +
+               cluster_env.AllReduceCost(memory_cost, 1),
+               memory_cost,
+               {
+                   ReshardingCostVector(
+                       strategy_map.at(lhs).get(), lhs->shape(),
+                       Tile(lhs->shape(), {lhs_con_dims[0]}, {0}, cluster_env),
+                       cluster_env),
+                   ReshardingCostVector(
+                       strategy_map.at(rhs).get(), rhs->shape(),
+                       Tile(rhs->shape(), {rhs_con_dims[0]}, {0}, cluster_env),
+                       cluster_env),
+               }}));
+
+          strategies->leaf_vector.push_back(ShardingStrategy(
+              {"RR = RS x SR @ {1} (allreduce @ 0,1)",
+               output_spec,
+               0,
+               cluster_env.AllReduceCost(memory_cost, 0) +
+               cluster_env.AllReduceCost(memory_cost, 1),
+               memory_cost,
+               {
+                   ReshardingCostVector(
+                       strategy_map.at(lhs).get(), lhs->shape(),
+                       Tile(lhs->shape(), {lhs_con_dims[0]}, {1}, cluster_env),
+                       cluster_env),
+                   ReshardingCostVector(
+                       strategy_map.at(rhs).get(), rhs->shape(),
+                       Tile(rhs->shape(), {rhs_con_dims[0]}, {1}, cluster_env),
+                       cluster_env),
+               }}));
+        }
+
+
         // Split one batch dim
         for (int64 i = 0; i < lhs_batch_dims.size(); ++i) {
           for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {

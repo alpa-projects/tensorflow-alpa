@@ -92,7 +92,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/parallel_loop_emitter.h"
 #include "tensorflow/compiler/xla/service/gpu/replica_id_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/sequential_thunk.h"
-#include "tensorflow/compiler/xla/service/gpu/swap_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/target_util.h"
 #include "tensorflow/compiler/xla/service/gpu/thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/triangular_solve_thunk.h"
@@ -1629,7 +1628,7 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
       absl::StrSplit(custom_call.backend_config().str(), ";");
   int64 key = std::stoll(keys[0]);
   int64 event_key = std::stoll(keys[1]);
-  // TODO(yonghao): swap in waits for other swap outs
+  static absl::flat_hash_map<int64, SwapOutThunk*> swap_address_map_;
   if (call_target_name == kBuiltinSwapOutTarget) {
     // CHECK(results.size() == 0)
     //     << "builtinSwapOut meets " << results.size() << " result(s)";
@@ -1637,8 +1636,14 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
     for (auto slice : operands) {
       byte_sizes.push_back(slice.size());
     }
-    AddThunkToThunkSequence(absl::make_unique<SwapOutThunk>(
-        GetThunkInfo(op), std::move(operands), std::move(byte_sizes), key, event_key));
+    auto swap_out_thunk = absl::make_unique<SwapOutThunk>(
+        GetThunkInfo(op), std::move(operands), std::move(byte_sizes));
+    TF_RET_CHECK(swap_address_map_.emplace(key, swap_out_thunk.get()).second)
+        << "swap out with unique ID already registered.";
+    TF_RET_CHECK(
+        swap_event_map_.emplace(event_key, swap_out_thunk.get()).second)
+        << "swap done with unique ID already registered.";
+    AddThunkToThunkSequence(std::move(swap_out_thunk));
   } else {
     CHECK(call_target_name == kBuiltinSwapInTarget)
         << "unexpected custom call target for emit swap thunk";
@@ -1648,9 +1653,17 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
     for (auto slice : results) {
       byte_sizes.push_back(slice.size());
     }
-    AddThunkToThunkSequence(
-        absl::make_unique<SwapInThunk>(GetThunkInfo(op), std::move(results),
-                                       std::move(byte_sizes), key, event_key));
+    absl::InlinedVector<const SwapThunk*, 3> waits_for;
+    for (int i = 2; i < keys.size(); ++i) {
+      waits_for.push_back(swap_event_map_.at(std::stoll(keys[i])));
+    }
+    auto swap_in_thunk = absl::make_unique<SwapInThunk>(
+        GetThunkInfo(op), std::move(results), std::move(byte_sizes),
+        swap_address_map_.at(key), std::move(waits_for));
+    TF_RET_CHECK(swap_event_map_.emplace(event_key, swap_in_thunk.get()).second)
+        << "swap done with unique ID already registered.";
+    ;
+    AddThunkToThunkSequence(std::move(swap_in_thunk));
   }
 
   return Status::OK();
@@ -1661,8 +1674,8 @@ Status IrEmitterUnnested::EmitSwapDoneThunk(mlir::Operation* op) {
   const std::string call_target_name = custom_call.call_target_name().str();
 
   int64 event_key = std::stoll(custom_call.backend_config().str());
-  AddThunkToThunkSequence(
-      absl::make_unique<SwapDoneThunk>(GetThunkInfo(op), event_key));
+  AddThunkToThunkSequence(absl::make_unique<SwapDoneThunk>(
+      GetThunkInfo(op), swap_event_map_.at(event_key)));
 
   return Status::OK();
 }

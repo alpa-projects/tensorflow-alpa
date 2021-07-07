@@ -36,6 +36,7 @@
 #include "tensorflow/core/platform/logging.h"
 
 // todo(yonghao): store the space for parameter specifically
+// TODO: add mesh settings
 namespace xla {
 
 namespace {
@@ -56,6 +57,7 @@ const int64 kInvalidPosition = INT64_MAX;
 
 struct Operand {
   BufferId bid;
+  int64 size;
   HloInstruction* instruction;
 
   bool operator==(const Operand& other) const {
@@ -159,7 +161,8 @@ class InstructionList {
   }
 
   void SwapToSwapEdge(HloInstruction* from, HloInstruction* to) {
-    if (from->IsCustomCall(kBuiltinSwapOutTarget) && to->IsCustomCall(kBuiltinSwapInTarget)) {
+    if (from->IsCustomCall(kBuiltinSwapOutTarget) &&
+        to->IsCustomCall(kBuiltinSwapInTarget)) {
       auto* from_inst = Cast<HloCustomCallInstruction>(from);
       auto* to_inst = Cast<HloCustomCallInstruction>(to);
       if (OpaqueByIndex(from_inst->opaque(), 0) !=
@@ -206,7 +209,7 @@ class InstructionList {
   // Then, set the position of swap in: as early a.p.
   // If it is after a swap out: wait until done.
   // Finally, swap done is as late a.p.(exactly before the first use).
-  HloInstructionSequence toSequence() {
+  HloInstructionSequence ToSequence(HloComputation* computation) {
     HloInstructionSequence seq;
 
     absl::c_sort(swap_outs_, [](const Item* x, const Item* y) {
@@ -247,7 +250,8 @@ class InstructionList {
     auto done_iter = swap_dones_.begin();
     auto out_iter = swap_outs_.begin();
     auto in_iter = swap_ins_.begin();
-
+    // TODO: instead of constructing an HloSequence, add dependencies. 
+    HloInstruction* last_inst = nullptr;
     for (Item* item = first_; item != nullptr; item = item->next) {
       while (done_iter != swap_dones_.end()) {
         if ((*done_iter)->should_before == item->position) {
@@ -278,6 +282,12 @@ class InstructionList {
         }
       }
     }
+    while (done_iter != swap_dones_.end()) {
+      computation->RemoveInstruction((*done_iter)->instruction);
+      ++done_iter;
+      // Swap Out for Swap In, the swap out done is useless
+    }
+
     return seq;
   }
 
@@ -322,10 +332,9 @@ UsesList GetUsers(const InstructionList& instruction_list,
       }
       Item* user_item = instruction_list.GetItem(user);
       users.push_back(user_item->position);
-      if (!absl::c_linear_search(user_item->buffers_used,
-                                 Operand{bid, buffer_alias.instruction()})) {
-        user_item->buffers_used.push_back(
-            Operand{bid, buffer_alias.instruction()});
+      Operand op = Operand{bid, 0, buffer_alias.instruction()};
+      if (!absl::c_linear_search(user_item->buffers_used, op)) {
+        user_item->buffers_used.push_back(std::move(op));
       }
     }
   }
@@ -355,6 +364,8 @@ class MemoryRecorder {
 
     bool live_out;
 
+    bool not_share;
+
     Item* defining_instruction;
 
     Item* latest_alloc;
@@ -369,7 +380,9 @@ class MemoryRecorder {
       if (next_use_index == use_positions.size()) {
         return kInvalidPosition;
       }
-      CHECK(next_use_index < use_positions.size());
+      CHECK(next_use_index < use_positions.size())
+          << next_use_index << " v.s." << use_positions.size() << " at " << id
+          << " defined by " << defining_instruction->ToString();
       return use_positions[next_use_index];
     }
 
@@ -390,39 +403,28 @@ class MemoryRecorder {
     }
   };
 
-  struct AllocatedInterval {
-    AllocatedInterval(const Buffer* buffer) : buffer_(buffer) {}
-
-    const Buffer* buffer_;
-
-    int64 next_use() const { return buffer_->next_use(); }
-
-    const Buffer* buffer() const { return buffer_; }
-  };
-
   class Heap {
    public:
     explicit Heap() = default;
 
-    void push(AllocatedInterval interval) {
+    void push(const Buffer* interval) {
       intervals_.push_back(interval);
       std::push_heap(intervals_.begin(), intervals_.end(), compare);
     }
 
     void pop() {
+      CHECK(intervals_.size() > 0);
       std::pop_heap(intervals_.begin(), intervals_.end(), compare);
       intervals_.pop_back();
     }
 
-    const AllocatedInterval& top() { return intervals_.front(); }
-
-    const std::vector<AllocatedInterval>& intervals() { return intervals_; }
+    const Buffer* top() { return intervals_.front(); }
 
     std::string IntervalsInfo() const {
       std::string info;
-      for (const AllocatedInterval& interval : intervals_) {
-        absl::StrAppend(&info, interval.buffer()->id, ", ", interval.next_use(),
-                        "; ");
+      for (const Buffer* interval : intervals_) {
+        absl::StrAppend(&info, interval->id, ", ", interval->next_use(), ", ",
+                        HumanReadableNumBytes(interval->size), "; ");
       }
       return info;
     }
@@ -436,10 +438,9 @@ class MemoryRecorder {
     }
 
    private:
-    std::vector<AllocatedInterval> intervals_;
-    static bool compare(const AllocatedInterval& x,
-                        const AllocatedInterval& y) {
-      return x.next_use() < y.next_use();
+    std::vector<const Buffer*> intervals_;
+    static bool compare(const Buffer*& x, const Buffer*& y) {
+      return x->next_use() < y->next_use();
     }
   };
 
@@ -455,17 +456,20 @@ class MemoryRecorder {
 
   Buffer& CreateBufferFromLogicalBuffer(Item* defining_instruction,
                                         const Shape& shape, bool live_out,
+                                        bool not_share,
                                         const LogicalBuffer* logical_buffer) {
     int64 buffer_id = buffers_.size();
     UsesList users = GetUsers(instruction_list_, logical_buffer, buffer_id,
                               points_to_analysis_);
     buffers_.push_back(Buffer{buffer_id, size_function_(shape), live_out,
-                              defining_instruction, nullptr, 0,
+                              not_share, defining_instruction, nullptr, 0,
                               std::move(users), 0});
     swap_out_inst_.push_back(nullptr);
     last_use_inst_.push_back(nullptr);
     return buffers_.back();
   }
+
+  void PreAllocate();
 
   void AddReleasedInternal(int64 size, Item* item);
 
@@ -483,7 +487,7 @@ class MemoryRecorder {
 
   // try to alloc an already released interval.
   // If no such a interval, return nullptr.
-  std::pair<Item*, int64> AllocReleasedMemory(int64 size);
+  std::pair<Item*, int64> AllocReleasedMemory(int64 size, bool soft);
 
   // try to alloc by releasing a buffer already in the set.
   std::pair<BufferId, Item*> AllocWithRelease(int64 size, Item* item);
@@ -504,16 +508,34 @@ class MemoryRecorder {
          iter != released_intervals_.end(); ++iter) {
       released_size += iter->first * iter->second.size();
     }
-    CHECK(allocated_size == memory_usage_);
-    CHECK(allocated_size + released_size + free_memory_ == memory_bound_)
+    CHECK(allocated_size + unsharable_memory_ == memory_usage_);
+    CHECK(allocated_size + released_size + free_memory_ + unsharable_memory_ ==
+          memory_bound_)
         << "In consistency:\n"
         << "memory bound is: " << memory_bound_
         << ",\n but allocated size is: " << allocated_size
         << ", released size is: " << released_size
-        << ", free memory size is: " << free_memory_;
+        << ", free memory size is: " << free_memory_
+        << "unsharable memory size is: " << unsharable_memory_;
   }
 
+  void PrintStatus() {
+    std::cerr << "allocated: \n";
+    for (auto wi = allocated_buffers_.begin(); wi != allocated_buffers_.end();
+         ++wi) {
+      std::cerr << HumanReadableNumBytes(wi->first) << ":\n";
+      std::cerr << wi->second.IntervalsInfo() << "\n";
+    }
+    std::cerr << "released: \n";
+    for (auto wi = released_intervals_.begin(); wi != released_intervals_.end();
+         ++wi) {
+      std::cerr << HumanReadableNumBytes(wi->first) << " " << wi->second.size()
+                << "\n";
+    }
+    std::cerr << "free: " << HumanReadableNumBytes(free_memory_) << "\n\n";
+  }
   int64 free_memory_;
+  int64 unsharable_memory_;
   HloComputation* computation_;
   InstructionList& instruction_list_;
   int64 memory_bound_;
@@ -526,14 +548,22 @@ class MemoryRecorder {
   std::vector<Buffer> buffers_;
   std::vector<Item*> swap_out_inst_, last_use_inst_;
 
-  // allocated buffers are stored by a list(btree_set) of heaps(priority_queue).
-  // Each heap contains allocated buffers with the same size,
-  // The list is in the order of the size
+  // allocated buffers are stored by a list of heaps(priority_queue).
+  // Each heap contains allocated buffers with the same size
   std::map<int64, Heap> allocated_buffers_;
 
   std::map<int64, std::queue<Item*>> released_intervals_;
 };
 };  // namespace
+
+bool NotShare(const LogicalBuffer* logical_buffer) {
+  if (logical_buffer->IsTuple()) {
+    return true;
+  }
+  if (logical_buffer->instruction()->opcode() == HloOpcode::kConstant) {
+    return true;
+  }
+}
 
 MemoryRecorder::MemoryRecorder(
     HloComputation* computation, InstructionList& inst_list,
@@ -545,6 +575,7 @@ MemoryRecorder::MemoryRecorder(
       memory_bound_(memory_bound),
       points_to_analysis_(points_to_analysis) {
   free_memory_ = memory_bound_;
+  unsharable_memory_ = 0;
   memory_usage_ = 0;
   PointsToSet::BufferSet live_out_set =
       points_to_analysis.GetPointsToSet(computation->root_instruction())
@@ -590,12 +621,75 @@ MemoryRecorder::MemoryRecorder(
         buffer = &CreateBufferFromLogicalBuffer(
             inst_list.GetItem(logical_buffer->instruction()),
             logical_buffer->shape(), ContainsKey(live_out_set, logical_buffer),
-            logical_buffer);
+            NotShare(logical_buffer), logical_buffer);
         item->buffers_defined.push_back(buffer->id);
       }
       logical_buffer_to_id[logical_buffer] = buffer->id;
     }
   }
+  PreAllocate();
+}
+
+void MemoryRecorder::PreAllocate() {
+  if (memory_bound_ == -1) return;
+  std::vector<Item*> insts;
+  for (auto* item = instruction_list_.first(); item != nullptr;
+       item = instruction_list_.next(item)) {
+    insts.push_back(item);
+    absl::c_for_each(item->buffers_used,
+                     [&](Operand& x) { x.size = buffers_.at(x.bid).size; });
+    absl::c_sort(item->buffers_used, [&](const Operand& x, const Operand& y) {
+      return x.size > y.size;
+    });  // sort buffers by size
+  }
+  absl::c_sort(insts, [](Item* x, Item* y) {
+    int idx = 0;
+    do {
+      if (x->buffers_used.size() == idx) return false;
+      if (y->buffers_used.size() == idx) return true;
+      int64 size_x = x->buffers_used.at(idx).size;
+      int64 size_y = y->buffers_used.at(idx).size;
+      if (size_x != size_y) return size_x > size_y;
+      ++idx;
+    } while (true);
+  });
+  std::vector<int64> simulated_heap;
+  int index;
+  for (Item* item : insts) {
+    index = 0;
+    for (const Operand& op : item->buffers_used) {
+      if (index == simulated_heap.size()) {
+        simulated_heap.push_back(op.size);
+        ++index;
+        continue;
+      }
+      if (simulated_heap.at(index) < op.size) {
+        simulated_heap.at(index) = op.size;
+      }
+      ++index;
+    }
+  }
+  int64 sum = 0;
+  for (int64 size : simulated_heap) {
+    sum += size;
+    auto iter = released_intervals_.find(size);
+    if (iter == released_intervals_.end()) {
+      std::queue<Item*> inserted;
+      inserted.push(nullptr);
+      released_intervals_.insert({size, std::move(inserted)});
+    } else {
+      iter->second.push(nullptr);
+    }
+  }
+  std::cerr << HumanReadableNumBytes(memory_bound_) << " " << HumanReadableNumBytes(sum) << "\n";
+  if (memory_bound_ < sum) {
+    VLOG(1) << "memory bound is impossible, increase to: " << sum;
+    memory_bound_ = free_memory_ = sum;
+    free_memory_ = 0;
+  } else {
+    free_memory_ -= sum;
+  }
+  SelfCHECK();
 }
 
 void MemoryRecorder::AddReleasedInternal(int64 size, Item* item) {
@@ -604,9 +698,9 @@ void MemoryRecorder::AddReleasedInternal(int64 size, Item* item) {
   }
   auto iter = released_intervals_.find(size);
   if (iter == released_intervals_.end()) {
-    auto inserted = std::queue<Item*>();
+    std::queue<Item*> inserted;
     inserted.push(item);
-    released_intervals_.insert(std::make_pair(size, inserted));
+    released_intervals_.insert({size, std::move(inserted)});
   } else {
     iter->second.push(item);
   }
@@ -620,7 +714,7 @@ void MemoryRecorder::RegisterAlloc(BufferId bid, int64 size) {
   if (iter == allocated_buffers_.end()) {
     Heap inserted;
     inserted.push(&buffers_.at(bid));
-    allocated_buffers_.insert(std::make_pair(size, inserted));
+    allocated_buffers_.insert({size, inserted});
   } else {
     iter->second.push(&buffers_.at(bid));
   }
@@ -638,11 +732,11 @@ void MemoryRecorder::ReleaseAll(const absl::flat_hash_set<int64>& sizes,
     CHECK(iter != allocated_buffers_.end());
     auto& buffers = iter->second;
     CHECK(!buffers.empty());
-    CHECK(buffers.top().next_use() == kInvalidPosition)
-        << buffers.top().buffer()->id
-        << " has next use at position: " << buffers.top().buffer()->next_use();
-    while (!buffers.empty() && buffers.top().next_use() == kInvalidPosition) {
-      const Buffer* buffer = buffers.top().buffer();
+    CHECK(buffers.top()->next_use() == kInvalidPosition)
+        << buffers.top()->id
+        << " has next use at position: " << buffers.top()->next_use();
+    while (!buffers.empty() && buffers.top()->next_use() == kInvalidPosition) {
+      const Buffer* buffer = buffers.top();
       release_id.push_back(buffer->id);
       buffers.pop();
       // insert to released set
@@ -682,10 +776,11 @@ bool MemoryRecorder::AllocFreeMemory(int64 size) {
 
 // The return item can never be a swap out because
 // swap out is created only in AllocWithRelease and consumed immediately
-std::pair<Item*, int64> MemoryRecorder::AllocReleasedMemory(int64 size) {
+std::pair<Item*, int64> MemoryRecorder::AllocReleasedMemory(int64 size,
+                                                            bool soft) {
   auto iter = released_intervals_.lower_bound(size);
-  if (iter == released_intervals_.end()) {
-    return std::make_pair(nullptr, 0);
+  if (iter == released_intervals_.end() || (iter->first > size * 10 && soft)) {
+    return std::make_pair(nullptr, -1);
   }
   Item* head = iter->second.front();
   int64 interval_len = iter->first;
@@ -704,15 +799,24 @@ std::pair<BufferId, Item*> MemoryRecorder::AllocWithRelease(int64 size,
   // 1. an operand swapped out, whose next use is exactly this instruction;
   // 2. a buffer defined by this instruction;
   // If the first happens, the best fit size has no available buffer(otherwise
-  // next use is later) so try another size;(TODO)
+  // next use is later) so try another size;
   // The second is avoided by RegisterAlloc later;
   auto iter = allocated_buffers_.lower_bound(size);
   if (iter == allocated_buffers_.end()) {
     return std::make_pair(kInvalidBufferId, nullptr);
   }
-  auto info = std::make_pair(iter->second.top().buffer()->id,
-                             iter->second.top().buffer()->latest_alloc);
-  memory_usage_ -= iter->second.top().buffer()->occupying_size;
+  while (iter->second.top()->next_use() == prepare_for_->position) {
+    ++iter;
+    if (iter == allocated_buffers_.end()) {
+      CHECK(false) << "\nunavailable when allocating "
+                   << HumanReadableNumBytes(size) << " for inst "
+                   << item->instruction->ToShortString();
+      return std::make_pair(kInvalidBufferId, nullptr);
+    }
+  }
+  auto info =
+      std::make_pair(iter->second.top()->id, iter->second.top()->latest_alloc);
+  memory_usage_ -= iter->second.top()->occupying_size;
   iter->second.pop();
   // do not clear empty heap, because the interval will be consumed immediately
   return info;
@@ -720,20 +824,42 @@ std::pair<BufferId, Item*> MemoryRecorder::AllocWithRelease(int64 size,
 
 int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
   // TODO: more info: constant, entry parameter, live out...
-  // try free memory first
+  if (size == 0) {
+    return size;
+  }
+  // try already released memory
+  {
+    auto release_after = AllocReleasedMemory(size, true);
+    Item* release_after_inst = release_after.first;
+    if (release_after.second > 0) {
+      if (release_after_inst != nullptr) {
+        VLOG(4) << "Alloc " << HumanReadableNumBytes(size) << " for "
+                << item->instruction->ToShortString() << " with "
+                << HumanReadableNumBytes(release_after.second)
+                << " buffer released by "
+                << release_after.first->instruction->ToShortString();
+        instruction_list_.AddEdge(release_after_inst, item);
+      }
+      return release_after.second;
+    }
+  }
+  // try free memory
   if (AllocFreeMemory(size)) {
     return size;
   }
   // try already released memory
   {
-    auto release_after = AllocReleasedMemory(size);
+    auto release_after = AllocReleasedMemory(size, false);
     Item* release_after_inst = release_after.first;
-    if (release_after_inst != nullptr) {
-      VLOG(4) << "Alloc " << HumanReadableNumBytes(size) << " for "
-              << item->instruction->ToShortString()
-              << " with buffer released by "
-              << release_after.first->instruction->ToShortString();
-      instruction_list_.AddEdge(release_after_inst, item);
+    if (release_after.second > 0) {
+      if (release_after_inst != nullptr) {
+        VLOG(4) << "Alloc " << HumanReadableNumBytes(size) << " for "
+                << item->instruction->ToShortString() << " with "
+                << HumanReadableNumBytes(release_after.second)
+                << " buffer released by "
+                << release_after.first->instruction->ToShortString();
+        instruction_list_.AddEdge(release_after_inst, item);
+      }
       return release_after.second;
     }
   }
@@ -744,8 +870,8 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
   Buffer& release_buffer = buffers_.at(release_bid);
   int64 interval_size = release_buffer.occupying_size;
   VLOG(3) << "Alloc " << HumanReadableNumBytes(size) << " for "
-          << item->instruction->ToShortString()
-          << " with swapping out buffer of"
+          << item->instruction->ToShortString() << " with swapping out "
+          << HumanReadableNumBytes(interval_size) << " buffer of "
           << release_inst->instruction->ToShortString();
 
   if (swap_out_inst_.at(release_bid) != nullptr) {
@@ -766,6 +892,7 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
     swap_out->instruction = swap_out_inst;
     swap_out_inst->set_custom_call_has_side_effect(true);
     instruction_list_.AddSwapOut(swap_out);
+    std::cerr << "creating a swap out...\n";
 
     instruction_list_.AddEdge(release_inst, swap_out);
 
@@ -785,7 +912,8 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
             /*opaque=*/std::to_string(SwapDoneEventKey++))));
     swap_done->instruction = swap_done_inst;
     swap_done_inst->set_custom_call_has_side_effect(true);
-    swap_done->buffers_used.push_back(Operand{kInvalidBufferId, swap_out_inst});
+    swap_done->buffers_used.push_back(
+        Operand{kInvalidBufferId, 0, swap_out_inst});
     instruction_list_.AddEdge(swap_out, swap_done);
     instruction_list_.AddSwapDone(swap_out, swap_done);
 
@@ -807,8 +935,8 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
       if (buffer.IsSwappedIn()) {
         instruction_list_.AddEdge(
             instruction_list_.GetSwapDone(buffer.latest_alloc), item);
-        buffer.defining_instruction->instruction->ReplaceUseWith(
-            item->instruction, buffer.latest_alloc->instruction);
+        operand.instruction->ReplaceUseWith(item->instruction,
+                                            buffer.latest_alloc->instruction);
       }
       last_use_inst_[bid] = item;
       continue;
@@ -847,7 +975,8 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
             /*opaque=*/std::to_string(SwapDoneEventKey++))));
     swap_done->instruction = swap_done_inst;
     swap_done_inst->set_custom_call_has_side_effect(true);
-    swap_done->buffers_used.push_back(Operand{kInvalidBufferId, swap_in_inst});
+    swap_done->buffers_used.push_back(
+        Operand{kInvalidBufferId, 0, swap_in_inst});
     instruction_list_.AddSwapDone(swap_in, swap_done);
 
     int64 interval_size = GetSpaceFor(AllocatedSize(buffer), swap_in);
@@ -984,10 +1113,10 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
     VLOG(1) << "memory usage after recycle is: " << tracker.memory_usage();
   }
   std::cerr << peak_memory << "\n";
-  
-  schedule->set_sequence(computation, std::move(instruction_list.toSequence()));
-  TF_RETURN_IF_ERROR(schedule->Verify());
-  return true;
+
+  // schedule->set_sequence(computation, std::move(instruction_list.ToSequence(computation)));
+  // TF_RETURN_IF_ERROR(schedule->Verify());
+  return true;  // TODO
 }
 
 StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
@@ -1033,15 +1162,11 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
   VLOG(1) << "Peak memory usage of module (before): "
           << HumanReadableNumBytes(before_peak_memory);
 
-  if (before_peak_memory < memory_limit_bytes_) {
-    return false;
-  }
-
   TF_ASSIGN_OR_RETURN(
       bool changed,
       SwapInsertionComputation(module->entry_computation(), &module->schedule(),
                                memory_limit_bytes_));
-  // TODO: replace by a special scheduler instead
+  scheduler.Run(module);
   return changed;
 }
 

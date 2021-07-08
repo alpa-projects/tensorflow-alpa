@@ -1,7 +1,6 @@
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_SLICE_AUTO_SHARDED_STAGES
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_SLICE_AUTO_SHARDED_STAGES
 
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
 
 namespace xla {

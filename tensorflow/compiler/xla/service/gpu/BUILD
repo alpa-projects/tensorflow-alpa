@@ -2222,12 +2222,8 @@ cc_library(
     hdrs = ["slice_auto_sharded_stages.h"],
     deps = [
         "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/service:dump",
         "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:hlo_live_range",
-        "//tensorflow/compiler/xla/service:hlo_memory_scheduler",
         "//tensorflow/compiler/xla/service:hlo_pass",
-        "//tensorflow/compiler/xla/service:hlo_sharding_util",
         "//tensorflow/compiler/xla/service:pass_context",
         "@pybind11",
     ],

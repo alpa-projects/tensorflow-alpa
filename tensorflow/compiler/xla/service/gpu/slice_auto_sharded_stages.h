@@ -21,4 +21,3 @@ class SliceAutoShardedStages : public HloModulePass {
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_SLICE_AUTO_SHARDED_STAGES
-

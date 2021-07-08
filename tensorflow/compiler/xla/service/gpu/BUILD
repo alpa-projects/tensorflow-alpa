@@ -576,7 +576,7 @@ cc_library(
         "outfeed_thunk.cc",
         "replica_id_thunk.cc",
         "sequential_thunk.cc",
-        "swap_thunk.cc", 
+        "swap_thunk.cc",
         "thunk_schedule.cc",
         "triangular_solve_thunk.cc",
         "while_thunk.cc",
@@ -601,7 +601,7 @@ cc_library(
         "outfeed_thunk.h",
         "replica_id_thunk.h",
         "sequential_thunk.h",
-        "swap_thunk.h", 
+        "swap_thunk.h",
         "thunk_schedule.h",
         "triangular_solve_thunk.h",
         "while_thunk.h",
@@ -647,7 +647,7 @@ cc_library(
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
-        "//tensorflow/compiler/xla/pjrt:pjrt_gpu_swap", 
+        "//tensorflow/compiler/xla/pjrt:pjrt_gpu_swap",
         "//tensorflow/compiler/xla/service:buffer_assignment",
         "//tensorflow/compiler/xla/service:executable",
         "//tensorflow/compiler/xla/service:hlo",
@@ -1408,6 +1408,7 @@ cc_library(
         ":reduction_dimension_grouper",
         ":reduction_layout_normalizer",
         ":reduction_splitter",
+        ":slice_auto_sharded_stages",
         ":stream_assignment",
         ":stream_executor_util",
         ":target_constants",
@@ -2212,6 +2213,19 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_library(
+    name = "slice_auto_sharded_stages",
+    srcs = ["slice_auto_sharded_stages.cc"],
+    hdrs = ["slice_auto_sharded_stages.h"],
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "//tensorflow/compiler/xla/service:pass_context",
+        "@pybind11",
     ],
 )
 

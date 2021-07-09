@@ -45,7 +45,7 @@ const char* const kBuiltinSwapOutTarget = "__builtin$SwapOut";
 const char* const kBuiltinSwapInTarget = "__builtin$SwapIn";
 const char* const kBuiltinSwapDoneTarget = "__builtin$SwapDone";
 int64 SwapKey = 0;
-int64 SwapDoneEventKey = 0;
+int64 SwapDoneEventKey = 100;
 const Shape FormalShape = ShapeUtil::MakeNil();
 
 using ::tensorflow::strings::HumanReadableNumBytes;
@@ -250,7 +250,7 @@ class InstructionList {
     auto done_iter = swap_dones_.begin();
     auto out_iter = swap_outs_.begin();
     auto in_iter = swap_ins_.begin();
-    // TODO: instead of constructing an HloSequence, add dependencies. 
+    // TODO: instead of constructing an HloSequence, add dependencies.
     HloInstruction* last_inst = nullptr;
     for (Item* item = first_; item != nullptr; item = item->next) {
       while (done_iter != swap_dones_.end()) {
@@ -358,23 +358,39 @@ class MemoryRecorder {
 
  private:
   struct Buffer {
+    // The unique id of the buffer, as well as the index in buffers_
     BufferId id;
 
+    // The size of the buffer
     int64 size;
 
+    // whether the buffer is live out of the computation
     bool live_out;
 
+    // Whether the buffer is allocated without sharing(constant, entry
+    // parameter, tuple etc.)
     bool not_share;
 
+    // The instruction defines the buffer
     Item* defining_instruction;
 
+    // The latest allocation instruction, can be defining inst or swap in
     Item* latest_alloc;
 
+    // The size it actually occupies. This can be larger than actual size
     int64 occupying_size;
 
+    // All uses with the order of positions in the HloInstructionSequence
     UsesList use_positions;
 
+    // The index of the next use at use_positions.
     int64 next_use_index;
+
+    // Position in the tuple this buffer definition lives in
+    ShapeIndex index;
+
+    // Shape of this buffer
+    Shape shape;
 
     int64 next_use() const {
       if (next_use_index == use_positions.size()) {
@@ -455,15 +471,16 @@ class MemoryRecorder {
   }
 
   Buffer& CreateBufferFromLogicalBuffer(Item* defining_instruction,
-                                        const Shape& shape, bool live_out,
-                                        bool not_share,
+                                        bool live_out, bool not_share,
                                         const LogicalBuffer* logical_buffer) {
     int64 buffer_id = buffers_.size();
     UsesList users = GetUsers(instruction_list_, logical_buffer, buffer_id,
                               points_to_analysis_);
+    const Shape& shape = logical_buffer->shape();
     buffers_.push_back(Buffer{buffer_id, size_function_(shape), live_out,
                               not_share, defining_instruction, nullptr, 0,
-                              std::move(users), 0});
+                              std::move(users), 0, logical_buffer->index(),
+                              shape});
     swap_out_inst_.push_back(nullptr);
     last_use_inst_.push_back(nullptr);
     return buffers_.back();
@@ -620,8 +637,8 @@ MemoryRecorder::MemoryRecorder(
       } else {
         buffer = &CreateBufferFromLogicalBuffer(
             inst_list.GetItem(logical_buffer->instruction()),
-            logical_buffer->shape(), ContainsKey(live_out_set, logical_buffer),
-            NotShare(logical_buffer), logical_buffer);
+            ContainsKey(live_out_set, logical_buffer), NotShare(logical_buffer),
+            logical_buffer);
         item->buffers_defined.push_back(buffer->id);
       }
       logical_buffer_to_id[logical_buffer] = buffer->id;
@@ -681,7 +698,8 @@ void MemoryRecorder::PreAllocate() {
       iter->second.push(nullptr);
     }
   }
-  std::cerr << HumanReadableNumBytes(memory_bound_) << " " << HumanReadableNumBytes(sum) << "\n";
+  std::cerr << HumanReadableNumBytes(memory_bound_) << " "
+            << HumanReadableNumBytes(sum) << "\n";
   if (memory_bound_ < sum) {
     VLOG(1) << "memory bound is impossible, increase to: " << sum;
     memory_bound_ = free_memory_ = sum;
@@ -881,6 +899,16 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
   } else {
     Item* swap_out = new Item;
     auto operand = release_buffer.defining_instruction->instruction;
+    // The released buffer is allocated as a tuple element. Notice that we only swap out array so swap in cannot be a tuple. 
+    if (operand->shape().IsTuple() && !release_buffer.IsSwappedIn()) {
+      Shape shape = operand->shape();
+      for (size_t i = 0; i < release_buffer.index.size(); ++i) {
+        int64 index = release_buffer.index[i];
+        shape = ShapeUtil::GetSubshape(shape, {index});
+        operand = computation_->AddInstruction(
+            HloInstruction::CreateGetTupleElement(shape, {operand}, index));
+      }
+    }
     swap_out->is_swap = true;
     HloCustomCallInstruction* swap_out_inst = Cast<HloCustomCallInstruction>(
         computation_->AddInstruction(HloInstruction::CreateCustomCall(
@@ -1114,7 +1142,8 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
   }
   std::cerr << peak_memory << "\n";
 
-  // schedule->set_sequence(computation, std::move(instruction_list.ToSequence(computation)));
+  // schedule->set_sequence(computation,
+  // std::move(instruction_list.ToSequence(computation)));
   // TF_RETURN_IF_ERROR(schedule->Verify());
   return true;  // TODO
 }

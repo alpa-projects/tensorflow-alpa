@@ -37,6 +37,8 @@ struct AutoShardingSolverOption {
   bool override_reduce_scatter_cost;
   double reduce_scatter_cost;
 
+  bool allow_recompute_heavy_op;
+
   bool load_strategy;
 };
 
@@ -342,6 +344,19 @@ class ClusterEnvironment {
             0.001);
   }
 
+  double DotCost(const Shape& lhs_shape, const Shape& rhs_shape,
+                 const DotDimensionNumbers& dot_dnums) const {
+    if (!solver_option.allow_recompute_heavy_op) {
+      return INFINITY_COST;
+    }
+
+    // TODO(lmzheng): When profiling data is not available, it is not easy to align the
+    // scale of compute cost and communication cost. Here we just use some
+    // a simple heurstic to compute the compute cost with communication cost.
+    double num_bytes = GetBytes(lhs_shape) + GetBytes(rhs_shape);
+    return AllReduceCost(num_bytes, 0) + AllReduceCost(num_bytes, 1);
+  }
+
   // Get the corresponding mesh dimension for every tensor dimension
   // -1 means replicated on that dimension
   std::vector<int> GetTensorDimToMeshDim(const Shape& shape,
@@ -411,6 +426,7 @@ class ClusterEnvironment {
     return cost;
   }
 
+  // Print the information of this device mesh.
   std::string ToString() {
     std::ostringstream os;
     os << "device_mesh: " << device_mesh.ToString() << "\n";
@@ -504,11 +520,6 @@ HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
 
   // Make HloSharding
   Array<int64> tile_assignment(tile_assignment_dimensions);
-  // std::cerr << "shape: " << shape.ToString() << std::endl;
-  // std::cerr << "tensor dims: " << ToString(tensor_dims) << std::endl;
-  // std::cerr << "mesh dims: " << ToString(mesh_dims) << std::endl;
-  // std::cerr << "tile_assignment: " << ToString(tile_assignment.dimensions())
-  // << std::endl;
   tile_assignment.SetValues(tile_assignment_devices);
 
   return replicate_on_last_tile_dim ? HloSharding::PartialTile(tile_assignment)
@@ -1302,17 +1313,15 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         // RR = RS x SR
         // This is a special case where we allow spliting only one dim in the 2d-mesh case.
         // This allows some recomputation (e.g., the dense layer in the LM_head of BERT).
-        // On the other hand, to prevent the solver from returning trivial solutions,
-        // we should add some extra cost for these strategies.
         if (device_mesh.dim(0) > 1 && device_mesh.dim(1) > 1) {
           HloSharding output_spec = HloSharding::Replicate();
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+
           strategies->leaf_vector.push_back(ShardingStrategy(
-              {"RR = RS x SR @ {0} (allreduce @ 0,1)",
+              {"RR = RS x SR @ {0} (allreduce @ 0)",
                output_spec,
-               0,
-               cluster_env.AllReduceCost(memory_cost, 0) +
-               cluster_env.AllReduceCost(memory_cost, 1),
+               cluster_env.DotCost(lhs->shape(), rhs->shape(), dot_dnums),
+               cluster_env.AllReduceCost(memory_cost, 0),
                memory_cost,
                {
                    ReshardingCostVector(
@@ -1326,10 +1335,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
                }}));
 
           strategies->leaf_vector.push_back(ShardingStrategy(
-              {"RR = RS x SR @ {1} (allreduce @ 0,1)",
+              {"RR = RS x SR @ {1} (allreduce @ 1)",
                output_spec,
-               0,
-               cluster_env.AllReduceCost(memory_cost, 0) +
+               cluster_env.DotCost(lhs->shape(), rhs->shape(), dot_dnums),
                cluster_env.AllReduceCost(memory_cost, 1),
                memory_cost,
                {
@@ -2214,10 +2222,14 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   solver_option.override_all_gather_cost = false;
   solver_option.override_all_reduce_cost = false;
   solver_option.override_reduce_scatter_cost = false;
+  solver_option.allow_recompute_heavy_op = false;
   if (pass_context::GetBool("auto_sharding::force_all_gather_cost", false)) {
     solver_option.override_all_gather_cost = true;
     solver_option.all_gather_cost =
         pass_context::GetDouble("auto_sharding::all_gather_cost");
+  }
+  if (pass_context::GetBool("auto_sharding::allow_recompute_heavy_op", false)) {
+    solver_option.allow_recompute_heavy_op = true;
   }
   solver_option.load_strategy =
       pass_context::GetBool("auto_sharding::load_strategy", false);

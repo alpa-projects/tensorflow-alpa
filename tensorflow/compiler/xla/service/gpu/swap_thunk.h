@@ -27,13 +27,11 @@ class SwapThunk : public Thunk {
  public:
   SwapThunk(Kind kind, ThunkInfo thunk_info);
 
-  se::Event* SwapFinishEvent() { return swap_finish_event_.get(); }
-
-  se::Event* DoneEvent() const { return swap_finish_event_.get(); }
+  se::Event* DoneEvent(int device_ordinal) const;
 
  protected:
-  void SetEvent(se::StreamExecutor* executor);
-  std::unique_ptr<se::Event> swap_finish_event_ = nullptr;
+  absl::Mutex mu_;
+  absl::flat_hash_map<int, std::unique_ptr<se::Event>> done_events_ ABSL_GUARDED_BY(mu_);
 };
 
 // Thunk to run a GPU swap out

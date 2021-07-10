@@ -13,9 +13,8 @@ namespace gpu {
 SwapThunk::SwapThunk(Kind kind, ThunkInfo thunk_info)
     : Thunk(kind, thunk_info) {}
 
-void SwapThunk::SetEvent(se::StreamExecutor* executor) {
-  swap_finish_event_ = absl::make_unique<se::Event>(executor);
-  swap_finish_event_->Init();
+se::Event* SwapThunk::DoneEvent(int device_ordinal) const {
+  return done_events_.at(device_ordinal).get();
 }
 
 SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
@@ -27,8 +26,6 @@ SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
 
 Status SwapOutThunk::Initialize(const GpuExecutable& executable,
                                 se::StreamExecutor* executor) {
-  // register the key of the executable
-  SetEvent(executor);
   return Status::OK();
 }
 
@@ -48,6 +45,7 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   TF_ASSIGN_OR_RETURN(const DeviceAssignment::LogicalID logical_id,
                       params.device_assn->LogicalIdForDevice(global_device_id));
   int PartitionId = logical_id.computation_id;
+  int device_ordinal = params.stream->parent()->device_ordinal();
 
   if (address_list_.empty()) {
     // alloc memory for the first time. todo: will this influence profile?
@@ -61,19 +59,27 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   }
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+  CHECK(operands_.size() == address_list_.size());
   for (int32 i = 0; i < operands_.size(); ++i) {
     const BufferAllocation::Slice& slice = operands_.at(i);
     if (!slice.allocation()) {
       return InternalError("custom call input missing buffer allocation");
     }
-    se::DeviceMemoryBase destination_data =
+    se::DeviceMemoryBase src_data =
         params.buffer_allocations->GetDeviceAddress(slice);
 
     void* source_address_ = address_list_.at(i);
-    params.stream->ThenMemcpy(source_address_, destination_data,
-                              byte_sizes_.at(i));
+    params.stream->ThenMemcpy(source_address_, src_data, byte_sizes_.at(i));
   }
-  params.stream->ThenRecordEvent(swap_finish_event_.get());
+
+  auto done_event = std::make_unique<se::Event>(params.stream->parent());
+  TF_RET_CHECK(done_event->Init());
+  params.stream->ThenRecordEvent(done_event.get());
+
+  {
+    absl::MutexLock lock(&mu_);
+    done_events_.insert_or_assign(device_ordinal, std::move(done_event));
+  }
 #else   //  GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   return Unavailable(
       "Swap on GPU are not supported in this configuration. Please "
@@ -95,7 +101,6 @@ SwapInThunk::SwapInThunk(ThunkInfo thunk_info,
 
 Status SwapInThunk::Initialize(const GpuExecutable& executable,
                                se::StreamExecutor* executor) {
-  SetEvent(executor);
   return Status::OK();
 }
 
@@ -106,13 +111,16 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
                       params.GetGlobalDeviceId());
   TF_ASSIGN_OR_RETURN(const DeviceAssignment::LogicalID logical_id,
                       params.device_assn->LogicalIdForDevice(global_device_id));
-  int PartitionId = logical_id.computation_id;  // TODO(yonghao)
+  int PartitionId = logical_id.computation_id;
+  int device_ordinal = params.stream->parent()->device_ordinal();
 
-  params.stream->ThenWaitFor(memory_ref_->DoneEvent());
+  params.stream->ThenWaitFor(memory_ref_->DoneEvent(device_ordinal));
   for (const SwapThunk* thunk : waits_for_) {
-    params.stream->ThenWaitFor(thunk->DoneEvent());
+    params.stream->ThenWaitFor(thunk->DoneEvent(device_ordinal));
   }
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+  CHECK(memory_ref_->AddressList().size() == results_.size())
+      << memory_ref_->AddressList().size() << " v.s. " << results_.size();
   for (int32 i = 0; i < results_.size(); ++i) {
     const BufferAllocation::Slice& slice = results_.at(i);
     if (!slice.allocation()) {
@@ -125,7 +133,15 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
     params.stream->ThenMemcpy(&destination_data, source_address_,
                               byte_sizes_.at(i));
   }
-  params.stream->ThenRecordEvent(swap_finish_event_.get());
+
+  auto done_event = std::make_unique<se::Event>(params.stream->parent());
+  TF_RET_CHECK(done_event->Init());
+  params.stream->ThenRecordEvent(done_event.get());
+
+  {
+    absl::MutexLock lock(&mu_);
+    done_events_.insert_or_assign(device_ordinal, std::move(done_event));
+  }
 #else   //  GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   return Unavailable(
       "Swap on GPU are not supported in this configuration. Please "
@@ -138,7 +154,9 @@ SwapDoneThunk::SwapDoneThunk(ThunkInfo thunk_info, const SwapThunk* start)
     : Thunk(Thunk::kSwapDone, thunk_info), start_(start) {}
 
 Status SwapDoneThunk::ExecuteOnStream(const ExecuteParams& params) {
-  params.stream->ThenWaitFor(start_->DoneEvent());
+  int device_ordinal = params.stream->parent()->device_ordinal();
+
+  params.stream->ThenWaitFor(start_->DoneEvent(device_ordinal));
   return Status::OK();
 }
 

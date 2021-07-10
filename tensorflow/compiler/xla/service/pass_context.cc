@@ -30,20 +30,28 @@ void SetPassContext(py::dict dict) {
     } else if (py::isinstance<py::list>(item.second) ||
                py::isinstance<py::tuple>(item.second)) {
       auto tuple_val = py::cast<py::tuple>(item.second);
-      if (py::isinstance<py::int_>(tuple_val[0])) {
+      // Infer the type according to the first element of the tuple.
+      if (!tuple_val.empty() &&  py::isinstance<py::int_>(tuple_val[0])) {
         std::vector<int64> int_vector;
         int_vector.reserve(tuple_val.size());
         for (size_t i = 0; i < tuple_val.size(); ++i) {
           int_vector.push_back(py::cast<int64>(tuple_val[i]));
         }
         obj = absl::any(std::move(int_vector));
-      } else if (py::isinstance<py::float_>(tuple_val[0])) {
+      } else if (!tuple_val.empty() && py::isinstance<py::float_>(tuple_val[0])) {
         std::vector<double> double_vector;
         double_vector.reserve(tuple_val.size());
         for (size_t i = 0; i < tuple_val.size(); ++i) {
           double_vector.push_back(py::cast<double>(tuple_val[i]));
         }
         obj = absl::any(std::move(double_vector));
+      } else if (!tuple_val.empty() && py::isinstance<py::str>(tuple_val[0])) {
+        std::vector<std::string> str_vector;
+        str_vector.reserve(tuple_val.size());
+        for (size_t i = 0; i < tuple_val.size(); ++i) {
+          str_vector.push_back(py::cast<std::string>(tuple_val[i]));
+        }
+        obj = absl::any(std::move(str_vector));
       } else {
         obj = absl::any(py::cast<py::object>(item.second));
       }
@@ -109,6 +117,10 @@ std::vector<int64> GetIntVector(const std::string& name) {
 
 std::vector<double> GetDoubleVector(const std::string& name) {
   return GetWithoutDefaultValue<std::vector<double>>(name);
+}
+
+std::vector<std::string> GetStringVector(const std::string& name) {
+  return GetWithoutDefaultValue<std::vector<std::string>>(name);
 }
 
 py::object GetPyObject(const std::string& name) {

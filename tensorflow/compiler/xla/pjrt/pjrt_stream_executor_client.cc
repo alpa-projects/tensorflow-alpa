@@ -1708,7 +1708,7 @@ PjRtStreamExecutorExecutable::PjRtStreamExecutorExecutable(
     // This must go after `executables_` is initialized.
     VLOG(3) << "PjRtStreamExecutorExecutable device_assignment:\n"
             << device_assignment_->ToString();
-    if (!pass_context::GetBool("build_option::pass_through_device_assignment", false)) {
+    if (!pass_context::GetBool("build_option::bypass_device_assignment", false)) {
       CHECK_GE(addressable_devices_.size(), 1) << device_assignment_->ToString();
       CHECK_LE(addressable_devices_.size(), client_->addressable_device_count())
           << "Inconsistent local device count.";
@@ -2301,7 +2301,7 @@ PjRtStreamExecutorClient::GetExecutableExtras(CompileOptions* options) {
       &num_replicas, &num_partitions, &device_assignment));
 
   // Find devices that are addressable by this client/task.
-  if (!pass_context::GetBool("build_option::pass_through_device_assignment", false)) {
+  if (!pass_context::GetBool("build_option::bypass_device_assignment", false)) {
     if (device_assignment != nullptr) {
       addressable_device_logical_ids.reserve(num_replicas * num_partitions);
       addressable_devices.reserve(num_replicas * num_partitions);

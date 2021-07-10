@@ -2303,7 +2303,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     std::tie(s_val, e_val) = CallSolver(sequence, liveness_set, strategy_map,
                                         leaf_strategies, cost_graph, alias_set);
   } else {
-    s_val = pass_context::GetIntVector("auto_sharding::strategy_vector");
+    s_val = pass_context::GetIntVector("auto_sharding::solution_vector");
   }
 
   if (pass_context::GetBool("auto_sharding::print_strategy", false)) {

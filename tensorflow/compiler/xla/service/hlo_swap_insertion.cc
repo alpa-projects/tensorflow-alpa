@@ -986,6 +986,7 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
 void MemoryRecorder::PrepareForInstruction(Item* item) {
   prepare_for_ = item;
   // prepare for operands
+  // TODO(yonghao): get space for buffer_used and buffer_defined together? or can we reuse? 
   for (auto& operand : item->buffers_used) {
     int64 bid = operand.bid;
     auto& buffer = buffers_.at(bid);
@@ -1191,7 +1192,9 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
         return size_function_(buffer.shape());
       },
       ComputationSchedulerToModuleScheduler(DefaultMemoryScheduler));
+  bool clear_schedule = false;
   if (!module->has_schedule()) {
+    clear_schedule = true;
     scheduler.Run(module);
   }
   TF_RET_CHECK(module->has_schedule());
@@ -1232,7 +1235,11 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
       bool changed,
       SwapInsertionComputation(module->entry_computation(), &module->schedule(),
                                memory_limit_bytes_));
-  scheduler.Run(module);
+  if (clear_schedule) {
+    module->clear_schedule();
+  } else {
+    scheduler.Run(module);
+  }
   return changed;
 }
 

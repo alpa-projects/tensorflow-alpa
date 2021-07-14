@@ -5,13 +5,16 @@
 #include <vector>
 
 #include "tensorflow/compiler/xla/service/gpu/gpu_executable.h"
+#include "tensorflow/compiler/xla/service/gpu/gpu_spmd_partitioner.h"
 #include "tensorflow/compiler/xla/service/gpu/tests/gpu_codegen_test.h"
 #include "tensorflow/compiler/xla/service/hlo_computation.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_matchers.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/hlo_ordering.h"
+#include "tensorflow/compiler/xla/service/hlo_pass_pipeline.h"
 #include "tensorflow/compiler/xla/service/hlo_swap_insertion.h"
+#include "tensorflow/compiler/xla/service/sharding_propagation.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/tests/hlo_test_base.h"
 #include "tensorflow/compiler/xla/tests/test_utils.h"
@@ -39,6 +42,7 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
     TF_EXPECT_OK(scheduler.Run(module).status());
     HloSwapInsertion swap(ByteSizeOf, memory_limit_bytes);
     auto result = swap.Run(module);
+    TF_EXPECT_OK(verifier().Run(module).status());
     return result;
   }
 
@@ -166,7 +170,8 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
     return host_outputs;
   }
 
-  std::pair<const HloInstruction*, const HloInstruction*> HasOneSwapOutAndDone(const HloInstruction* x) {
+  std::pair<const HloInstruction*, const HloInstruction*> HasOneSwapOutAndDone(
+      const HloInstruction* x) {
     EXPECT_GE(x->user_count(), 2);
     const HloInstruction* swap_out;
     const HloInstruction* swap_done;
@@ -185,7 +190,8 @@ class HloSwapInsertionTest : public gpu::GpuCodegenTest {
     }
     EXPECT_NE(swap_out, nullptr);
     EXPECT_NE(swap_done, nullptr);
-    EXPECT_TRUE(absl::c_linear_search(swap_out->control_successors(), swap_done));
+    EXPECT_TRUE(
+        absl::c_linear_search(swap_out->control_successors(), swap_done));
     return std::make_pair(swap_out, swap_done);
   }
 
@@ -252,11 +258,10 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
   }
 
   EXPECT_EQ(out_a->control_successors().size(), 2); // in_a, out_done_a
-  EXPECT_TRUE(absl::c_linear_search(out_a->control_successors(), done_out_a));
-  auto all_in_a = HasSwapIn(out_a);
-  EXPECT_EQ(all_in_a.size(), 1);
-  const HloInstruction* in_a = all_in_a.at(0);
-  const HloInstruction* in_a_done = HasOneSwapDone(in_a);
+  EXPECT_TRUE(absl::c_linear_search(out_a->control_successors(),
+  done_out_a)); auto all_in_a = HasSwapIn(out_a); EXPECT_EQ(all_in_a.size(),
+  1); const HloInstruction* in_a = all_in_a.at(0); const HloInstruction*
+  in_a_done = HasOneSwapDone(in_a);
   // check there is only one operand
   EXPECT_EQ(out_a->operand_count(), 1);
   EXPECT_EQ(done_out_a->operand_count(), 1);
@@ -275,11 +280,10 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
     done_out_c = result.second;
   }
   EXPECT_EQ(out_c->control_successors().size(), 2); // out_done_c, in_c
-  EXPECT_TRUE(absl::c_linear_search(out_c->control_successors(), done_out_c));
-  auto all_in_c = HasSwapIn(out_c);
-  EXPECT_EQ(all_in_c.size(), 1);
-  const HloInstruction* in_c = all_in_c.at(0);
-  const HloInstruction* in_c_done = HasOneSwapDone(in_c);
+  EXPECT_TRUE(absl::c_linear_search(out_c->control_successors(),
+  done_out_c)); auto all_in_c = HasSwapIn(out_c); EXPECT_EQ(all_in_c.size(),
+  1); const HloInstruction* in_c = all_in_c.at(0); const HloInstruction*
+  in_c_done = HasOneSwapDone(in_c);
   // check there is only one operand
   EXPECT_EQ(out_c->operand_count(), 1);
   EXPECT_EQ(done_out_c->operand_count(), 1);
@@ -300,42 +304,41 @@ TEST_F(HloSwapInsertionTest, SingleComputation) {
     c_value.push_back(i);
   }
   RunModuleWithHostBuffers(
-      gExec, {ToF32Span(&a_value), ToF32Span(&b_value), ToF32Span(&c_value)});
+      gExec, {ToF32Span(&a_value), ToF32Span(&b_value),
+      ToF32Span(&c_value)});
 }
 
-TEST_F(HloSwapInsertionTest, GetTupleElement) {
-  const char* hasIndirectUse = R"(
-HloModule module
-
-reducer {
-  parameter.1 = f32[] parameter(0)
-  parameter.3 = f32[] parameter(2)
-  add.2 = f32[] add(parameter.1, parameter.3)
-  parameter.0 = f32[] parameter(1)
-  parameter.2 = f32[] parameter(3)
-  add.3 = f32[] add(parameter.0, parameter.2)
-  ROOT tuple.4 = (f32[], f32[]) tuple(add.2, add.3)
-}
-
-ENTRY entry {
-  parameter.6 = (f32[], f32[], f32[10]) parameter(0)
-  get-tuple-element.10 = f32[] get-tuple-element(parameter.6), index=0
-  get-tuple-element.11 = f32[] get-tuple-element(parameter.6), index=1
-  get-tuple-element.12 = f32[10] get-tuple-element(parameter.6), index=2
-  bitcast = f32[5,2]{1,0} bitcast(f32[10] get-tuple-element.12)
-  constant = f32[] constant(0)
-  ROOT reduce = (f32[], f32[]) reduce(get-tuple-element.10,
-  get-tuple-element.11, constant, constant), dimensions={}, to_apply=reducer
-}
-)";
+TEST_F(HloSwapInsertionTest, ReshardingTest) {
+  const char* const hlo_string = R"(
+HloModule ShardingComputation
+ENTRY %SingleComputation (init: f32[1]) -> f32[8,8] {
+  %init = f32[1]{0} parameter(0)
+  %reshape = f32[] reshape(f32[1]{0} %init)
+  %broadcast = f32[8,8]{1,0} broadcast(f32[] %reshape), dimensions={}, sharding={devices=[2, 2]0,1,2,3}
+  %broadcast.2 = f32[8,8]{1,0} broadcast(f32[] %reshape), dimensions={}, sharding={devices=[2, 2]0,1,2,3}
+  %broadcast.1 = f32[8,8]{1,0} broadcast(f32[] %reshape), dimensions={}, sharding={devices=[2, 2]0,1,2,3}
+  %add = f32[8,8]{1,0} add(f32[8,8]{1,0} %broadcast, f32[8,8]{1,0} %broadcast.1)
+  %add.1 = f32[8,8]{1,0} add(f32[8,8]{1,0} %add, f32[8,8]{1,0} %broadcast.2), sharding={devices=[4,1]0,1,2,3}
+  ROOT %add.2 = f32[8,8]{1,0} add(f32[8,8]{1,0} %add.1, f32[8,8]{1,0} %broadcast), sharding={devices=[4,1]0,1,2,3}
+})";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
-                          ParseAndReturnVerifiedModule(hasIndirectUse));
+                          ParseAndReturnVerifiedModule(hlo_string));
+  {
+    HloPassPipeline pass("gpu-partitioning");
+    pass.AddPass<ShardingPropagation>(/*is_spmd=*/true);
+    pass.AddPass<gpu::GpuSpmdPartitioner>(4, /*num_replicas=*/1);
+    pass.AddPass<HloVerifier>(/*layout_sensitive=*/false,
+                              /*allow_mixed_precision=*/false);
+    TF_ASSERT_OK(pass.Run(module.get()).status());
+  }
 
-  // memory constraint: (1+30) * 4
   TF_ASSERT_OK_AND_ASSIGN(bool changed,
-                          RunHloSwapInsertion(5 * 4, module.get()));
+                          RunHloSwapInsertion(580, module.get()));
 
   EXPECT_TRUE(changed);
+
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<Executable> executable,
+                          CompileModule(std::move(module)));
 }
 
 };  // namespace

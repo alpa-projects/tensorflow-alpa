@@ -647,7 +647,6 @@ cc_library(
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
-        "//tensorflow/compiler/xla/pjrt:pjrt_gpu_swap", 
         "//tensorflow/compiler/xla/service:buffer_assignment",
         "//tensorflow/compiler/xla/service:executable",
         "//tensorflow/compiler/xla/service:hlo",

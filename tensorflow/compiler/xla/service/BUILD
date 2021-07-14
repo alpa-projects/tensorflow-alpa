@@ -4265,6 +4265,7 @@ cc_library(
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla/service/spmd:spmd_partitioner",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "@com_google_absl//absl/algorithm:container",

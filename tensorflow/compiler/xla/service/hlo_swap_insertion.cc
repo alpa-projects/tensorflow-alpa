@@ -36,7 +36,6 @@
 #include "tensorflow/core/platform/logging.h"
 
 // todo(yonghao): store the space for parameter specifically
-// TODO: add mesh settings
 namespace xla {
 
 namespace {
@@ -54,6 +53,14 @@ using BufferId = int64;
 const BufferId kInvalidBufferId = -1;
 const int64 InfiniteMemory = -1;
 const int64 kInvalidPosition = INT64_MAX;
+
+// Shape GetShardedBufferShape(const Shape& shape, const HloInstruction* inst) {
+//   if (inst->has_sharding()) {
+//     return spmd::MakePartitionedShape(shape, inst->sharding());
+//   } else {
+//     return shape;
+//   }
+// }
 
 struct Operand {
   BufferId bid;
@@ -361,7 +368,8 @@ class MemoryRecorder {
     // The unique id of the buffer, as well as the index in buffers_
     BufferId id;
 
-    // The size of the buffer
+    // The size of the buffer. In SPMD it is the sharded size according to its
+    // defining inst.
     int64 size;
 
     // whether the buffer is live out of the computation
@@ -388,9 +396,6 @@ class MemoryRecorder {
 
     // Position in the tuple this buffer definition lives in
     ShapeIndex index;
-
-    // Shape of this buffer
-    Shape shape;
 
     int64 next_use() const {
       if (next_use_index == use_positions.size()) {
@@ -439,7 +444,8 @@ class MemoryRecorder {
     std::string IntervalsInfo() const {
       std::string info;
       for (const Buffer* interval : intervals_) {
-        absl::StrAppend(&info, interval->id, ", ", interval->next_use(), ", ",
+        absl::StrAppend(&info, "id: ", interval->id,
+                        ", next use: ", interval->next_use(), "actual size: , ",
                         HumanReadableNumBytes(interval->size), "; ");
       }
       return info;
@@ -479,8 +485,7 @@ class MemoryRecorder {
     const Shape& shape = logical_buffer->shape();
     buffers_.push_back(Buffer{buffer_id, size_function_(shape), live_out,
                               not_share, defining_instruction, nullptr, 0,
-                              std::move(users), 0, logical_buffer->index(),
-                              shape});
+                              std::move(users), 0, logical_buffer->index()});
     swap_out_inst_.push_back(nullptr);
     last_use_inst_.push_back(nullptr);
     return buffers_.back();
@@ -650,22 +655,33 @@ MemoryRecorder::MemoryRecorder(
 void MemoryRecorder::PreAllocate() {
   if (memory_bound_ == -1) return;
   std::vector<Item*> insts;
+  absl::flat_hash_map<Item*, absl::InlinedVector<int64, 5>> intervals_;
   for (auto* item = instruction_list_.first(); item != nullptr;
        item = instruction_list_.next(item)) {
     insts.push_back(item);
-    absl::c_for_each(item->buffers_used,
-                     [&](Operand& x) { x.size = buffers_.at(x.bid).size; });
+    absl::InlinedVector<int64, 5> intervals;
+    absl::c_for_each(item->buffers_used, [&](Operand& x) {
+      x.size = buffers_.at(x.bid).size;
+      intervals.push_back(x.size);
+    });
+    absl::c_for_each(item->buffers_defined, [&](BufferId& id) {
+      intervals.push_back(buffers_.at(id).size);
+    });
     absl::c_sort(item->buffers_used, [&](const Operand& x, const Operand& y) {
       return x.size > y.size;
-    });  // sort buffers by size
+    });
+    absl::c_sort(intervals, std::greater<int64>());
+    intervals_.insert({item, std::move(intervals)});
   }
-  absl::c_sort(insts, [](Item* x, Item* y) {
+  absl::c_sort(insts, [&intervals_](Item* x, Item* y) {
     int idx = 0;
+    auto& x_intervals = intervals_.at(x);
+    auto& y_intervals = intervals_.at(y);
     do {
-      if (x->buffers_used.size() == idx) return false;
-      if (y->buffers_used.size() == idx) return true;
-      int64 size_x = x->buffers_used.at(idx).size;
-      int64 size_y = y->buffers_used.at(idx).size;
+      if (x_intervals.size() == idx) return false;
+      if (y_intervals.size() == idx) return true;
+      int64 size_x = x_intervals.at(idx);
+      int64 size_y = y_intervals.at(idx);
       if (size_x != size_y) return size_x > size_y;
       ++idx;
     } while (true);
@@ -674,14 +690,14 @@ void MemoryRecorder::PreAllocate() {
   int index;
   for (Item* item : insts) {
     index = 0;
-    for (const Operand& op : item->buffers_used) {
+    for (const int64 size : intervals_.at(item)) {
       if (index == simulated_heap.size()) {
-        simulated_heap.push_back(op.size);
+        simulated_heap.push_back(size);
         ++index;
         continue;
       }
-      if (simulated_heap.at(index) < op.size) {
-        simulated_heap.at(index) = op.size;
+      if (simulated_heap.at(index) < size) {
+        simulated_heap.at(index) = size;
       }
       ++index;
     }
@@ -698,13 +714,15 @@ void MemoryRecorder::PreAllocate() {
       iter->second.push(nullptr);
     }
   }
-  std::cerr << HumanReadableNumBytes(memory_bound_) << " "
-            << HumanReadableNumBytes(sum) << "\n";
   if (memory_bound_ < sum) {
-    VLOG(1) << "memory bound is impossible, increase to: " << sum;
+    LOG(WARNING) << "memory bound(" << HumanReadableNumBytes(memory_bound_)
+                 << ") is impossible, increase to: "
+                 << HumanReadableNumBytes(sum);
     memory_bound_ = free_memory_ = sum;
     free_memory_ = 0;
   } else {
+    VLOG(1) << "memory bound: " << HumanReadableNumBytes(memory_bound_)
+            << ", worst peak: " << HumanReadableNumBytes(sum);
     free_memory_ -= sum;
   }
   SelfCHECK();
@@ -826,6 +844,7 @@ std::pair<BufferId, Item*> MemoryRecorder::AllocWithRelease(int64 size,
   while (iter->second.top()->next_use() == prepare_for_->position) {
     ++iter;
     if (iter == allocated_buffers_.end()) {
+      PrintStatus();
       CHECK(false) << "\nunavailable when allocating "
                    << HumanReadableNumBytes(size) << " for inst "
                    << item->instruction->ToShortString();
@@ -898,15 +917,21 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
     instruction_list_.AddEdge(last_use, item);
   } else {
     Item* swap_out = new Item;
-    auto operand = release_buffer.defining_instruction->instruction;
-    // The released buffer is allocated as a tuple element. Notice that we only swap out array so swap in cannot be a tuple. 
-    if (operand->shape().IsTuple() && !release_buffer.IsSwappedIn()) {
+    auto operand = release_buffer.latest_alloc->instruction;
+    // The released buffer is an element in a tuple
+    if (operand->shape().IsTuple()) {
       Shape shape = operand->shape();
+      ShapeIndex total_idx = {};
       for (size_t i = 0; i < release_buffer.index.size(); ++i) {
         int64 index = release_buffer.index[i];
-        shape = ShapeUtil::GetSubshape(shape, {index});
-        operand = computation_->AddInstruction(
-            HloInstruction::CreateGetTupleElement(shape, {operand}, index));
+        total_idx.push_back(index);
+        operand =
+            computation_->AddInstruction(HloInstruction::CreateGetTupleElement(
+                ShapeUtil::GetSubshape(shape, total_idx), {operand}, index));
+        // if (operand->has_sharding()) {
+        //   operand->set_sharding(
+        //       operand->sharding().GetSubSharding(shape, total_idx));
+        // }
       }
     }
     swap_out->is_swap = true;
@@ -919,8 +944,10 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
 
     swap_out->instruction = swap_out_inst;
     swap_out_inst->set_custom_call_has_side_effect(true);
+    // if (operand->has_sharding()) {
+    //   swap_out_inst->set_sharding(operand->sharding());
+    // }
     instruction_list_.AddSwapOut(swap_out);
-    std::cerr << "creating a swap out...\n";
 
     instruction_list_.AddEdge(release_inst, swap_out);
 
@@ -940,6 +967,9 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
             /*opaque=*/std::to_string(SwapDoneEventKey++))));
     swap_done->instruction = swap_done_inst;
     swap_done_inst->set_custom_call_has_side_effect(true);
+    // if (operand->has_sharding()) {
+    //   swap_done_inst->set_sharding(operand->sharding());
+    // }
     swap_done->buffers_used.push_back(
         Operand{kInvalidBufferId, 0, swap_out_inst});
     instruction_list_.AddEdge(swap_out, swap_done);
@@ -990,6 +1020,10 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
 
     swap_in->instruction = swap_in_inst;
     swap_in_inst->set_custom_call_has_side_effect(true);
+    // todo: operand inst may have sharding different with swap out
+    // if (operand.instruction->has_sharding()) {
+    //   swap_in_inst->set_sharding(operand.instruction->sharding());
+    // }
     instruction_list_.AddSwapIn(swap_in);
 
     instruction_list_.AddEdge(swap_out, swap_in);
@@ -1003,6 +1037,9 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
             /*opaque=*/std::to_string(SwapDoneEventKey++))));
     swap_done->instruction = swap_done_inst;
     swap_done_inst->set_custom_call_has_side_effect(true);
+    // if (operand.instruction->has_sharding()) {
+    //   swap_done_inst->set_sharding(operand.instruction->sharding());
+    // }
     swap_done->buffers_used.push_back(
         Operand{kInvalidBufferId, 0, swap_in_inst});
     instruction_list_.AddSwapDone(swap_in, swap_done);
@@ -1140,7 +1177,7 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
     tracker.RecycleAfterInstruction(item);
     VLOG(1) << "memory usage after recycle is: " << tracker.memory_usage();
   }
-  std::cerr << peak_memory << "\n";
+  VLOG(1) << "peak memory is: " << peak_memory << "\n";
 
   // schedule->set_sequence(computation,
   // std::move(instruction_list.ToSequence(computation)));

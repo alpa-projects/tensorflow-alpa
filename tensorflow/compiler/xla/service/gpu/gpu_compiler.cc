@@ -115,6 +115,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/logistic_expander.h"
 #include "tensorflow/compiler/xla/service/loop_schedule_linearizer.h"
 #include "tensorflow/compiler/xla/service/operand_upcaster.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/qr_expander.h"
 #include "tensorflow/compiler/xla/service/real_imag_expander.h"
 #include "tensorflow/compiler/xla/service/reshape_mover.h"
@@ -464,13 +465,15 @@ Status GpuCompiler::OptimizeHloModule(
   }
 
   {
-    HloPassPipeline pipeline("swap inserter");
-    pipeline.AddPass<HloSwapInsertion>(
-        [](const Shape& shape) {
-          return ShapeUtil::ByteSizeOf(shape, sizeof(void*));
-        },
-        1024 * 1024 * 260);
-    TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+    if (pass_context::GetBool("swap::enable", false)) {
+      HloPassPipeline pipeline("swap insertion");
+      pipeline.AddPass<HloSwapInsertion>(
+          [](const Shape& shape) {
+            return ShapeUtil::ByteSizeOf(shape, sizeof(void*));
+          },
+          pass_context::GetInt("swap::bound", INT64_MAX));
+      TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+    }
   }
   return Status::OK();
 }

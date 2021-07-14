@@ -1,5 +1,3 @@
-#include "tensorflow/compiler/xla/pjrt/swap.h"
-
 #include <random>
 
 #include "tensorflow/compiler/xla/client/executable_build_options.h"
@@ -12,8 +10,6 @@
 
 namespace xla {
 namespace {
-
-int64 event_key = 24;
 
 TEST(GpuSwap, Basic) {
   TF_ASSERT_OK_AND_ASSIGN(
@@ -29,7 +25,7 @@ TEST(GpuSwap, Basic) {
 
   XlaBuilder builder("acomputation");
   auto p0 = Parameter(&builder, 0, shape, "param");
-  int64 key = 10;
+  int64 key = 10, event_key = 24;
   std::string out_event_key_str = std::to_string(event_key++);
   std::string in_event_key_str = std::to_string(event_key++);
   auto swap_out = CustomCall(
@@ -98,7 +94,7 @@ TEST(GpuSwap, SwapWithCompute) {
   XlaBuilder builder("acomputation");
   auto p0 = Parameter(&builder, 0, swapShape, "param");
   auto p1 = Parameter(&builder, 1, computationShape, "param");
-  int64 key = 10, event_key = 214;
+  int64 key = 15, event_key = 214;
   std::string out_event_key_str = std::to_string(event_key++);
   std::string in_event_key_str = std::to_string(event_key++);
   auto swap_out = CustomCall(

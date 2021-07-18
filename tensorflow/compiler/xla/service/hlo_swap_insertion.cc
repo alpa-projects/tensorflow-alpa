@@ -210,15 +210,13 @@ class InstructionList {
     }
   }
 
-  // Insert swaps to instruction sequence.
+  // Insert swaps to instruction sequence by adding control dependency.
   // First, set the position of swap out: as early a.p.
   // If is after a swap in: swap out must be after a later last_use
   // Then, set the position of swap in: as early a.p.
   // If it is after a swap out: wait until done.
   // Finally, swap done is as late a.p.(exactly before the first use).
-  HloInstructionSequence ToSequence(HloComputation* computation) {
-    HloInstructionSequence seq;
-
+  void Reschedule(HloComputation* computation) {
     absl::c_sort(swap_outs_, [](const Item* x, const Item* y) {
       if (x->should_after != y->should_after) {
         return x->should_after < y->should_after;
@@ -257,22 +255,23 @@ class InstructionList {
     auto done_iter = swap_dones_.begin();
     auto out_iter = swap_outs_.begin();
     auto in_iter = swap_ins_.begin();
-    // TODO: instead of constructing an HloSequence, add dependencies.
     HloInstruction* last_inst = nullptr;
     for (Item* item = first_; item != nullptr; item = item->next) {
       while (done_iter != swap_dones_.end()) {
         if ((*done_iter)->should_before == item->position) {
-          seq.push_back((*done_iter)->instruction);
           ++done_iter;
         } else {
           CHECK((*done_iter)->should_before > item->position);
           break;
         }
       }
-      seq.push_back(item->instruction);
       while (out_iter != swap_outs_.end()) {
         if ((*out_iter)->should_after == item->position) {
-          seq.push_back((*out_iter)->instruction);
+          HloInstruction* inst = (*out_iter)->instruction;
+          if (last_inst != nullptr) {
+            last_inst->AddControlDependencyTo(inst);
+          }
+          last_inst = inst;
           ++out_iter;
         } else {
           CHECK((*out_iter)->should_after > item->position);
@@ -281,7 +280,11 @@ class InstructionList {
       }
       while (in_iter != swap_ins_.end()) {
         if ((*in_iter)->should_after == item->position) {
-          seq.push_back((*in_iter)->instruction);
+          HloInstruction* inst = (*in_iter)->instruction;
+          if (last_inst != nullptr) {
+            last_inst->AddControlDependencyTo(inst);
+          }
+          last_inst = inst;
           ++in_iter;
         } else {
           CHECK((*in_iter)->should_after > item->position);
@@ -294,8 +297,6 @@ class InstructionList {
       ++done_iter;
       // Swap Out for Swap In, the swap out done is useless
     }
-
-    return seq;
   }
 
   void AddSwapIn(Item* item) {
@@ -314,6 +315,8 @@ class InstructionList {
   }
 
   Item* GetSwapDone(Item* swap) { return swap_done_map_.at(swap); }
+
+  bool changed() { return !swap_outs_.empty(); }
 
  private:
   Item* first_;
@@ -469,11 +472,13 @@ class MemoryRecorder {
   int64 AllocatedSize(const Buffer& buffer) const {
     HloInstruction* inst = buffer.defining_instruction->instruction;
     HloOpcode def_opcode = inst->opcode();
-    if (buffer.live_out || def_opcode == HloOpcode::kParameter) {
+    if (def_opcode == HloOpcode::kParameter) {
       return 0;
-    } else {
-      return buffer.size;
     }
+    if (buffer.live_out && !computation_->IsEntryComputation()) {
+      return 0;
+    }
+    return buffer.size;
   }
 
   Buffer& CreateBufferFromLogicalBuffer(Item* defining_instruction,
@@ -593,8 +598,8 @@ MemoryRecorder::MemoryRecorder(
     const HloSwapInsertion::ShapeSizeFunction& size_function)
     : computation_(computation),
       instruction_list_(inst_list),
-      size_function_(size_function),
       memory_bound_(memory_bound),
+      size_function_(size_function),
       points_to_analysis_(points_to_analysis) {
   free_memory_ = memory_bound_;
   unsharable_memory_ = 0;
@@ -626,7 +631,7 @@ MemoryRecorder::MemoryRecorder(
             buffer->live_out || ContainsKey(live_out_set, logical_buffer);
 
         // Add users of while to Buffer users.
-        bool unused;
+        // bool unused;
         // for (ItemUse& user_item : GetUsers(instruction_list, logical_buffer,
         //                                    points_to_analysis, &unused)) {
         //   auto existing_user_it = absl::c_find_if(
@@ -947,6 +952,8 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
     // if (operand->has_sharding()) {
     //   swap_out_inst->set_sharding(operand->sharding());
     // }
+    swap_out_inst->set_custom_call_schedule(
+        CustomCallSchedule::SCHEDULE_EARLIEST);
     instruction_list_.AddSwapOut(swap_out);
 
     instruction_list_.AddEdge(release_inst, swap_out);
@@ -970,6 +977,8 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
     // if (operand->has_sharding()) {
     //   swap_done_inst->set_sharding(operand->sharding());
     // }
+    swap_done_inst->set_custom_call_schedule(
+        CustomCallSchedule::SCHEDULE_LATEST);
     swap_done->buffers_used.push_back(
         Operand{kInvalidBufferId, 0, swap_out_inst});
     instruction_list_.AddEdge(swap_out, swap_done);
@@ -986,7 +995,6 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
 void MemoryRecorder::PrepareForInstruction(Item* item) {
   prepare_for_ = item;
   // prepare for operands
-  // TODO(yonghao): get space for buffer_used and buffer_defined together? or can we reuse? 
   for (auto& operand : item->buffers_used) {
     int64 bid = operand.bid;
     auto& buffer = buffers_.at(bid);
@@ -1021,10 +1029,12 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
 
     swap_in->instruction = swap_in_inst;
     swap_in_inst->set_custom_call_has_side_effect(true);
-    // todo: operand inst may have sharding different with swap out
+    // operand inst may have sharding different with swap out
     // if (operand.instruction->has_sharding()) {
     //   swap_in_inst->set_sharding(operand.instruction->sharding());
     // }
+    swap_in_inst->set_custom_call_schedule(
+        CustomCallSchedule::SCHEDULE_EARLIEST);
     instruction_list_.AddSwapIn(swap_in);
 
     instruction_list_.AddEdge(swap_out, swap_in);
@@ -1041,6 +1051,8 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
     // if (operand.instruction->has_sharding()) {
     //   swap_done_inst->set_sharding(operand.instruction->sharding());
     // }
+    swap_done_inst->set_custom_call_schedule(
+        CustomCallSchedule::SCHEDULE_LATEST);
     swap_done->buffers_used.push_back(
         Operand{kInvalidBufferId, 0, swap_in_inst});
     instruction_list_.AddSwapDone(swap_in, swap_done);
@@ -1053,7 +1065,7 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
     instruction_list_.AddEdge(swap_done, item);
     last_use_inst_.at(bid) = item;
   }
-  SelfCHECK();
+  // SelfCHECK();
   // prepare for results
   absl::InlinedVector<std::pair<BufferId, int64>, 3> intervals_for_defined;
   for (auto bid : item->buffers_defined) {
@@ -1068,7 +1080,7 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
     RegisterAlloc(interval.first, interval.second);
   }
   // computation cost
-  SelfCHECK();
+  // SelfCHECK();
 }
 
 void MemoryRecorder::RecycleAfterInstruction(Item* item) {
@@ -1157,33 +1169,30 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
     tracker.PrepareForInstruction(item);
     peak_memory =
         std::max<int64>(peak_memory, tracker.memory_usage() + callee_usage);
-    VLOG(1) << "memory usage after computation is: " << tracker.memory_usage();
-    // // callee usage is too large, try to swap the callee.(todo)
-    // const CallSite* callsite = call_graph_node.GetCallSite(instruction);
-    // if (callsite != nullptr &&
-    //     callsite->context() == CallContext::kSequential &&
-    //     callee_usage + tracker.memory_usage() > memory_limit_bytes_) {
-    //   for (HloComputation* called_computation :
-    //        callsite->called_computations()) {
-    //     int64 subcomputation_memory_limit_bytes =
-    //         std::max<int64>(0, memory_limit_bytes_ - tracker.memory_usage());
-    //     VLOG(3) << "dive into subcomputation";
-    //     TF_ASSIGN_OR_RETURN(
-    //         bool subcomputation_changed,
-    //         SwapInsertionComputation(called_computation, schedule,
-    //                                  subcomputation_memory_limit_bytes));
-    //     changed |= subcomputation_changed;
-    //   }
-    // }
+    VLOG(4) << "memory usage after computation is: " << tracker.memory_usage();
+    // callee usage is too large, try to swap the callee.
+    const CallSite* callsite = call_graph_node.GetCallSite(instruction);
+    if (callsite != nullptr &&
+        callsite->context() == CallContext::kSequential &&
+        callee_usage + tracker.memory_usage() > memory_limit_bytes_) {
+      for (HloComputation* called_computation :
+           callsite->called_computations()) {
+        int64 subcomputation_memory_limit_bytes =
+            std::max<int64>(0, memory_limit_bytes_ - tracker.memory_usage());
+        VLOG(3) << "dive into subcomputation";
+        TF_ASSIGN_OR_RETURN(
+            bool subcomputation_changed,
+            SwapInsertionComputation(called_computation, schedule,
+                                     subcomputation_memory_limit_bytes));
+        changed |= subcomputation_changed;
+      }
+    }
     tracker.RecycleAfterInstruction(item);
-    VLOG(1) << "memory usage after recycle is: " << tracker.memory_usage();
+    VLOG(4) << "memory usage after recycle is: " << tracker.memory_usage();
   }
-  VLOG(1) << "peak memory is: " << peak_memory << "\n";
-
-  // schedule->set_sequence(computation,
-  // std::move(instruction_list.ToSequence(computation)));
-  // TF_RETURN_IF_ERROR(schedule->Verify());
-  return true;  // TODO
+  VLOG(1) << "peak memory after swap is: " << peak_memory << "\n";
+  // instruction_list.Reschedule(computation);
+  return changed || instruction_list.changed();
 }
 
 StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {

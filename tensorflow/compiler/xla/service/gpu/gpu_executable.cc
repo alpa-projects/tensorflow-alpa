@@ -186,14 +186,15 @@ Status GpuExecutable::ExecuteThunks(
     ScopedAnnotation annotation([&] { return thunk->profile_annotation(); });
 
     int32 stream_no = thunk_schedule_->StreamNumberForThunk(thunk.get());
-    se::Stream* stream;
+    se::Stream* stream =
+        (stream_no == 0 ? main_stream : sub_streams[stream_no - 1].get());
+    se::Stream* async_stream;
     if (thunk->kind() == Thunk::kSwapIn) {
-      stream = host_to_device_stream;
+      async_stream = host_to_device_stream;
     } else if (thunk->kind() == Thunk::kSwapOut) {
-      stream = device_to_host_stream;
+      async_stream = device_to_host_stream;
     } else {
-      stream =
-          (stream_no == 0 ? main_stream : sub_streams[stream_no - 1].get());
+      async_stream = async_comms_stream.ok() ? async_comms_stream->get() : nullptr;
     }
 
     for (const Thunk* dependency : thunk_schedule_->DependsOn(thunk.get())) {
@@ -211,7 +212,7 @@ Status GpuExecutable::ExecuteThunks(
     Thunk::ExecuteParams thunk_params{
         &buffer_allocations,
         stream,
-        async_comms_stream.ok() ? async_comms_stream->get() : nullptr,
+        async_stream,
         run_options->run_options().run_id(),
         &profiler,
         run_options->run_options().device_assignment(),

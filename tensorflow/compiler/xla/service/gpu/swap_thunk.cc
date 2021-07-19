@@ -45,11 +45,11 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   TF_ASSIGN_OR_RETURN(const DeviceAssignment::LogicalID logical_id,
                       params.device_assn->LogicalIdForDevice(global_device_id));
   int PartitionId = logical_id.computation_id;
-  int device_ordinal = params.stream->parent()->device_ordinal();
+  int device_ordinal = params.async_comms_stream->parent()->device_ordinal();
 
   if (address_list_.empty()) {
     // alloc memory for the first time. todo: will this influence profile?
-    executor_ = params.stream->parent();
+    executor_ = params.async_comms_stream->parent();
     for (int64 byte_size : byte_sizes_) {
       address_list_.push_back(executor_->HostMemoryAllocate(byte_size));
     }
@@ -57,6 +57,7 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
     // not consider NUMA. Allocate it manually and then uses a
     // HostMemoryRegister instead.
   }
+  params.async_comms_stream->ThenWaitFor(params.stream);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   CHECK(operands_.size() == address_list_.size());
@@ -69,12 +70,12 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
         params.buffer_allocations->GetDeviceAddress(slice);
 
     void* source_address_ = address_list_.at(i);
-    params.stream->ThenMemcpy(source_address_, src_data, byte_sizes_.at(i));
+    params.async_comms_stream->ThenMemcpy(source_address_, src_data, byte_sizes_.at(i));
   }
 
-  auto done_event = std::make_unique<se::Event>(params.stream->parent());
+  auto done_event = std::make_unique<se::Event>(params.async_comms_stream->parent());
   TF_RET_CHECK(done_event->Init());
-  params.stream->ThenRecordEvent(done_event.get());
+  params.async_comms_stream->ThenRecordEvent(done_event.get());
 
   {
     absl::MutexLock lock(&mu_);
@@ -112,11 +113,11 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
   TF_ASSIGN_OR_RETURN(const DeviceAssignment::LogicalID logical_id,
                       params.device_assn->LogicalIdForDevice(global_device_id));
   int PartitionId = logical_id.computation_id;
-  int device_ordinal = params.stream->parent()->device_ordinal();
+  int device_ordinal = params.async_comms_stream->parent()->device_ordinal();
 
-  params.stream->ThenWaitFor(memory_ref_->DoneEvent(device_ordinal));
+  params.async_comms_stream->ThenWaitFor(memory_ref_->DoneEvent(device_ordinal));
   for (const SwapThunk* thunk : waits_for_) {
-    params.stream->ThenWaitFor(thunk->DoneEvent(device_ordinal));
+    params.async_comms_stream->ThenWaitFor(thunk->DoneEvent(device_ordinal));
   }
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   CHECK(memory_ref_->AddressList().size() == results_.size())
@@ -130,13 +131,13 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
         params.buffer_allocations->GetDeviceAddress(slice);
 
     void* source_address_ = memory_ref_->AddressList().at(i);
-    params.stream->ThenMemcpy(&destination_data, source_address_,
+    params.async_comms_stream->ThenMemcpy(&destination_data, source_address_,
                               byte_sizes_.at(i));
   }
 
-  auto done_event = std::make_unique<se::Event>(params.stream->parent());
+  auto done_event = std::make_unique<se::Event>(params.async_comms_stream->parent());
   TF_RET_CHECK(done_event->Init());
-  params.stream->ThenRecordEvent(done_event.get());
+  params.async_comms_stream->ThenRecordEvent(done_event.get());
 
   {
     absl::MutexLock lock(&mu_);

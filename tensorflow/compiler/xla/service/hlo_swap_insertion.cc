@@ -448,7 +448,7 @@ class MemoryRecorder {
       std::string info;
       for (const Buffer* interval : intervals_) {
         absl::StrAppend(&info, "id: ", interval->id,
-                        ", next use: ", interval->next_use(), "actual size: , ",
+                        ", next use: ", interval->next_use(), ", actual size: ",
                         HumanReadableNumBytes(interval->size), "; ");
       }
       return info;
@@ -674,6 +674,9 @@ void MemoryRecorder::PreAllocate() {
     });
     absl::c_sort(item->buffers_used, [&](const Operand& x, const Operand& y) {
       return x.size > y.size;
+    });
+    absl::c_sort(item->buffers_defined, [&](BufferId x, BufferId y) {
+      return buffers_.at(x).size > buffers_.at(y).size;
     });
     absl::c_sort(intervals, std::greater<int64>());
     intervals_.insert({item, std::move(intervals)});
@@ -994,8 +997,8 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
 
 void MemoryRecorder::PrepareForInstruction(Item* item) {
   prepare_for_ = item;
-  // prepare for operands
-  for (auto& operand : item->buffers_used) {
+  absl::InlinedVector<std::pair<BufferId, int64>, 3> intervals_for_defined;
+  auto alloc_use_ = [&](Operand& operand) {
     int64 bid = operand.bid;
     auto& buffer = buffers_.at(bid);
     if (buffer.InGPU()) {
@@ -1006,7 +1009,7 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
                                             buffer.latest_alloc->instruction);
       }
       last_use_inst_[bid] = item;
-      continue;
+      return;
     }
     // swap in from CPU
     Item* swap_out = swap_out_inst_.at(bid);
@@ -1064,22 +1067,44 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
     operand.instruction->ReplaceUseWith(item->instruction, swap_in_inst);
     instruction_list_.AddEdge(swap_done, item);
     last_use_inst_.at(bid) = item;
-  }
-  // SelfCHECK();
-  // prepare for results
-  absl::InlinedVector<std::pair<BufferId, int64>, 3> intervals_for_defined;
-  for (auto bid : item->buffers_defined) {
+  };
+  auto alloc_def_ = [&](int64 bid) {
     auto& buffer = buffers_.at(bid);
     int interval_size = GetSpaceFor(AllocatedSize(buffer), item);
     buffer.SetInGPU(item, interval_size);
     intervals_for_defined.push_back(std::make_pair(bid, interval_size));
+  };
+  // prepare for operands
+  auto use_iter = item->buffers_used.begin();
+  auto def_iter = item->buffers_defined.begin();
+  while(true) {
+    if (use_iter == item->buffers_used.end()) {
+      while(def_iter != item->buffers_defined.end()) {
+        alloc_def_(*def_iter);
+        ++def_iter;
+      }
+      break;
+    }
+    if (def_iter == item->buffers_defined.end()) {
+      while(use_iter != item->buffers_used.end()) {
+        alloc_use_(*use_iter);
+        ++use_iter;
+      }
+      break;
+    }
+    if (use_iter->size < buffers_.at(*def_iter).size) {
+      alloc_def_(*def_iter);
+      ++def_iter;
+      continue;
+    }
+    alloc_use_(*use_iter);
+    ++use_iter;
   }
   // Register allocation later to avoid: a defined buffer occupies the space of
   // another.
   for (auto& interval : intervals_for_defined) {
     RegisterAlloc(interval.first, interval.second);
   }
-  // computation cost
   // SelfCHECK();
 }
 

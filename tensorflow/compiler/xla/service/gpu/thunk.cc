@@ -82,6 +82,8 @@ StatusOr<GlobalDeviceId> Thunk::ExecuteParams::GetGlobalDeviceId() const {
       return "kPartitionId";
     case Thunk::kSequential:
       return "kSequential";
+    case Thunk::kSwapDone: 
+      return "kSwapDone";
     case Thunk::kSwapIn:
       return "kSwapIn";
     case Thunk::kSwapOut: 

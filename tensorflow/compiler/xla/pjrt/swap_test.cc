@@ -1,5 +1,3 @@
-#include "tensorflow/compiler/xla/pjrt/swap.h"
-
 #include <random>
 
 #include "tensorflow/compiler/xla/client/executable_build_options.h"
@@ -21,17 +19,28 @@ TEST(GpuSwap, Basic) {
 
   PjRtDevice* device = client->addressable_devices().at(0);
 
-  int n = 1024;
+  int n = 1024 * 1024;
   Shape shape = ShapeUtil::MakeShape(S32, {n});
-  Shape keyShape = ShapeUtil::MakeShape(S64, {});
+  Shape keyShape = ShapeUtil::MakeNil();
 
   XlaBuilder builder("acomputation");
   auto p0 = Parameter(&builder, 0, shape, "param");
-  int64 key = 10;
-  auto swap_out = CustomCall(&builder, "__builtin$SwapOut", {p0}, keyShape,
-                             /*opaque=*/std::to_string(key));
-  auto swap_in = CustomCall(&builder, "__builtin$SwapIn", {swap_out}, shape,
-                            std::to_string(key));
+  int64 key = 10, event_key = 24;
+  std::string out_event_key_str = std::to_string(event_key++);
+  std::string in_event_key_str = std::to_string(event_key++);
+  auto swap_out = CustomCall(
+      &builder, "__builtin$SwapOut", {p0}, keyShape,
+      /*opaque=*/std::to_string(key).append(";" + out_event_key_str), true);
+  auto swap_out_done =
+      CustomCall(&builder, "__builtin$SwapDone", {p0, swap_out}, keyShape,
+                 /*opaque=*/out_event_key_str, true);
+  auto swap_in =
+      CustomCall(&builder, "__builtin$SwapIn", {swap_out_done}, shape,
+                 std::to_string(key).append(";" + in_event_key_str), true);
+  auto swap_in_done = CustomCall(&builder, "__builtin$SwapDone", {swap_in},
+                                 keyShape, in_event_key_str, true);
+
+  auto add = Add(swap_in, p0);
   TF_ASSERT_OK_AND_ASSIGN(XlaComputation computation, builder.Build());
 
   CompileOptions compile_options;
@@ -50,7 +59,7 @@ TEST(GpuSwap, Basic) {
   std::vector<int32> expected_outputs(n);
   for (int i = 0; i < n; ++i) {
     inputs[i] = tensorflow::random::New64();
-    expected_outputs[i] = inputs[i];
+    expected_outputs[i] = inputs[i] * 2;
   }
   TF_ASSERT_OK_AND_ASSIGN(
       auto in_buffer0,
@@ -80,16 +89,25 @@ TEST(GpuSwap, SwapWithCompute) {
   int swapN = n * n;
   Shape swapShape = ShapeUtil::MakeShape(S32, {swapN});
   Shape computationShape = ShapeUtil::MakeShape(F32, {computationN});
-  Shape keyShape = ShapeUtil::MakeShape(S64, {});
+  Shape keyShape = ShapeUtil::MakeNil();
 
   XlaBuilder builder("acomputation");
   auto p0 = Parameter(&builder, 0, swapShape, "param");
   auto p1 = Parameter(&builder, 1, computationShape, "param");
-  int64 key = 10;
-  auto swap_out = CustomCall(&builder, "__builtin$SwapOut", {p0}, keyShape,
-                             /*opaque=*/std::to_string(key));
-  auto swap_in = CustomCall(&builder, "__builtin$SwapIn", {swap_out}, swapShape,
-                            std::to_string(key));
+  int64 key = 15, event_key = 214;
+  std::string out_event_key_str = std::to_string(event_key++);
+  std::string in_event_key_str = std::to_string(event_key++);
+  auto swap_out = CustomCall(
+      &builder, "__builtin$SwapOut", {p0}, keyShape,
+      /*opaque=*/std::to_string(key).append(";" + out_event_key_str), true);
+  auto swap_out_done =
+      CustomCall(&builder, "__builtin$SwapDone", {p0, swap_out}, keyShape,
+                 /*opaque=*/out_event_key_str, true);
+  auto swap_in = CustomCall(
+      &builder, "__builtin$SwapIn", {swap_out_done}, swapShape,
+      /*opaque=*/std::to_string(key).append(";" + in_event_key_str), true);
+  auto swap_in_done = CustomCall(&builder, "__builtin$SwapDone", {swap_in},
+                                 keyShape, /*opaque=*/in_event_key_str, true);
 
   auto n1 = Neg(p1);
   auto s1 = Sin(n1);

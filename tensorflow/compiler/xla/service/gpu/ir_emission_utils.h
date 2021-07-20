@@ -60,6 +60,7 @@ extern const char* const kCusolverCholeskyCallTarget;
 // Swap in or out. 
 extern const char* const kBuiltinSwapOutTarget;
 extern const char* const kBuiltinSwapInTarget;
+extern const char* const kBuiltinSwapDoneTarget;
 
 // Returns true if either the dimensions being reduced or the dimensions being
 // kept are contiguous in the input of the reduce instruction.

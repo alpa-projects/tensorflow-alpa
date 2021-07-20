@@ -66,8 +66,9 @@ class Thunk {
     kReplicaId,
     kPartitionId,
     kSequential,
-    kSwapIn, 
-    kSwapOut, 
+    kSwapDone,
+    kSwapIn,
+    kSwapOut,
     kTriangularSolve,
     kWhile,
   };

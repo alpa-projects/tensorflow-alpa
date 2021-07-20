@@ -4442,6 +4442,7 @@ cc_library(
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla/service/spmd:spmd_partitioner",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "@com_google_absl//absl/algorithm:container",
@@ -4453,10 +4454,10 @@ cc_library(
     ]
 )
 tf_cc_test(
-    name = "hlo_swap_insertion_test", 
-    srcs = ["hlo_swap_insertion_test.cc"], 
+    name = "hlo_swap_insertion_test",
+    srcs = ["hlo_swap_insertion_test.cc"],
     deps = [
-        ":hlo_swap_insertion", 
+        ":hlo_swap_insertion",
         ":flatten_call_graph",
         ":hlo",
         ":hlo_matchers",
@@ -4464,9 +4465,14 @@ tf_cc_test(
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
+        "//tensorflow/compiler/xla/service/gpu:gpu_compiler",
+        "//tensorflow/compiler/xla/service/gpu:gpu_executable",
+        "//tensorflow/compiler/xla/service/gpu/tests:gpu_codegen_test",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+        "//tensorflow/core:lib",
         "//tensorflow/core:test",
+        "//tensorflow/core/platform:resource_loader",
         "@com_google_absl//absl/flags:flag",
     ]
 )

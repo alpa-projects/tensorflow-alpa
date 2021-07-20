@@ -1,5 +1,5 @@
-#include "tensorflow/compiler/xla/service/gpu/auto_sharding.h"
-#include "tensorflow/compiler/xla/service/gpu/auto_sharding_util.h"
+#include "tensorflow/compiler/xla/service/spmd/auto_sharding.h"
+#include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 
 #include "pybind11/numpy.h"
 #include "pybind11/pybind11.h"

@@ -349,7 +349,6 @@ UsesList GetUsers(const InstructionList& instruction_list,
     }
   }
   absl::c_sort(users);
-
   return users;
 }
 
@@ -603,6 +602,7 @@ MemoryRecorder::MemoryRecorder(
       points_to_analysis_(points_to_analysis) {
   free_memory_ = memory_bound_;
   unsharable_memory_ = 0;
+
   memory_usage_ = 0;
   PointsToSet::BufferSet live_out_set =
       points_to_analysis.GetPointsToSet(computation->root_instruction())
@@ -1231,6 +1231,7 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
     clear_schedule = true;
     scheduler.Run(module);
   }
+
   TF_RET_CHECK(module->has_schedule());
   TF_ASSIGN_OR_RETURN(points_to_analysis_, TuplePointsToAnalysis::Run(module));
 
@@ -1269,6 +1270,7 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
       bool changed,
       SwapInsertionComputation(module->entry_computation(), &module->schedule(),
                                memory_limit_bytes_));
+
   if (clear_schedule) {
     module->clear_schedule();
   } else {

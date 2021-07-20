@@ -1507,9 +1507,9 @@ class ConvertConvOp : public OpRewritePattern<OpTy> {
         pad_low = get_int(explicit_paddings[2 * dim]);
         pad_high = get_int(explicit_paddings[2 * dim + 1]);
       } else {
-        tensorflow::int64 output_size;
-        tensorflow::int64 pad_low_int64;
-        tensorflow::int64 pad_high_int64;
+        int64_t output_size;
+        int64_t pad_low_int64;
+        int64_t pad_high_int64;
         tensorflow::Status status = tensorflow::GetWindowedOutputSizeVerboseV2(
             input_ty.getDimSize(dim), filter_ty.getDimSize(i), dilation, stride,
             padding, &output_size, &pad_low_int64, &pad_high_int64);
@@ -1790,14 +1790,22 @@ class ConvertBroadcastToOp : public OpRewritePattern<TF::BroadcastToOp> {
   LogicalResult matchAndRewrite(TF::BroadcastToOp op,
                                 PatternRewriter &rewriter) const override {
     auto input_type = op.input().getType().dyn_cast<RankedTensorType>();
-    auto output_type = op.output().getType().dyn_cast<RankedTensorType>();
-    if (!input_type || !output_type) {
-      return rewriter.notifyMatchFailure(op, "requires ranked shape");
+    auto output_type = op.output().getType();
+    if (!input_type) {
+      return rewriter.notifyMatchFailure(op, "requires ranked input shape");
     }
-    auto rank_diff = output_type.getRank() - input_type.getRank();
-    // The tf.BroadcastTo op performs "right-aligned" numpy-style broadcasting.
-    auto broadcast_dimensions = llvm::to_vector<4>(
-        llvm::seq<int64_t>(rank_diff, output_type.getRank()));
+    llvm::SmallVector<int64_t, 4> broadcast_dimensions;
+    if (input_type.getRank() > 0) {
+      auto ranked_output_type = output_type.dyn_cast<RankedTensorType>();
+      if (!ranked_output_type) {
+        return rewriter.notifyMatchFailure(op, "requires ranked output shape");
+      }
+      auto rank_diff = ranked_output_type.getRank() - input_type.getRank();
+      // The tf.BroadcastTo op performs "right-aligned" numpy-style
+      // broadcasting.
+      broadcast_dimensions = llvm::to_vector<4>(
+          llvm::seq<int64_t>(rank_diff, ranked_output_type.getRank()));
+    }
     rewriter.replaceOpWithNewOp<DynamicBroadcastInDimOp>(
         op, output_type, op.input(), op.shape(),
         rewriter.getI64TensorAttr(broadcast_dimensions));
@@ -6616,49 +6624,7 @@ class ConvertShapeOp : public OpRewritePattern<TF::ShapeOp> {
         RankedTensorType::get(result_ty.getShape(), rewriter.getIndexType());
     auto shape_op =
         rewriter.create<shape::ShapeOfOp>(op.getLoc(), index_tensor, input);
-
-    // Index cast is not defined on tensors, so we use a tensor.generate to have
-    // it work on scalars.
-    rewriter.replaceOpWithNewOp<tensor::GenerateOp>(
-        op, result_ty,
-        result_ty.hasStaticShape()
-            ? ValueRange{}
-            : ValueRange{rewriter.create<RankOp>(op.getLoc(), input)},
-        [&](OpBuilder &b, Location loc, ValueRange args) {
-          Value dim = args.front();
-          Value extent = b.create<tensor::ExtractOp>(loc, shape_op, dim);
-          Value casted =
-              b.create<IndexCastOp>(loc, extent, result_ty.getElementType());
-          b.create<tensor::YieldOp>(loc, casted);
-        });
-    return success();
-  }
-};
-
-class ConvertDynamicReshapeOp : public OpRewritePattern<TF::ReshapeOp> {
- public:
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TF::ReshapeOp op,
-                                PatternRewriter &rewriter) const override {
-    auto tensor = op.tensor();
-    auto shape = op.shape();
-
-    auto tensor_ty = tensor.getType().cast<ShapedType>();
-    auto shape_ty = shape.getType().cast<ShapedType>();
-    auto result_ty = op.getType().cast<ShapedType>();
-
-    if (!result_ty.hasRank() || !tensor_ty.hasRank() || !shape_ty.hasRank()) {
-      return failure();
-    }
-
-    // Handle with the static case.
-    if (result_ty.hasStaticShape()) {
-      return failure();
-    }
-
-    rewriter.replaceOpWithNewOp<mhlo::DynamicReshapeOp>(op, result_ty, tensor,
-                                                        shape);
+    rewriter.replaceOpWithNewOp<IndexCastOp>(op, shape_op, result_ty);
     return success();
   }
 };
@@ -7501,7 +7467,6 @@ void PopulateLegalizeTfPatterns(MLIRContext *context,
     ConvertCumsumOp,
     ConvertDiagPartOp,
     ConvertDynamicExpandDimsOp,
-    ConvertDynamicReshapeOp,
     ConvertEinsumOp,
     ConvertRFFTOp,
     ConvertIRFFTOp,

@@ -251,7 +251,10 @@ def get_soft_device_placement():
     1. there's no GPU implementation for the OP
     2. no GPU devices are known or registered
     3. need to co-locate with reftype input(s) which are from CPU
-
+  
+  If disabled, the placement is strict and CPU fallback is not allowed.
+  An error is raised when an Op cannot be placed onto its intended device.
+  
   Returns:
     If soft placement is enabled.
   """
@@ -804,6 +807,10 @@ def set_logical_device_configuration(device, logical_devices):
   `tf.config.LogicalDevice` associated with it once the runtime is initialized.
   Specifying a list of `tf.config.LogicalDeviceConfiguration` objects allows
   multiple devices to be created on the same `tf.config.PhysicalDevice`.
+
+  Logical device configurations can be modified by calling this function as
+  long as the runtime is uninitialized. After the runtime is initialized
+  calling this function raises a RuntimeError.
 
   The following example splits the CPU into 2 logical devices:
 

@@ -729,7 +729,7 @@ class XlaBuilder {
       const absl::optional<Shape>& shape_with_layout = absl::nullopt,
       const absl::optional<bool> use_global_device_ids = absl::nullopt);
 
-  XlaOp AllReduceScatter(
+  XlaOp ReduceScatter(
       XlaOp operand, const XlaComputation& computation, int64 scatter_dimension,
       int64 shard_count, absl::Span<const ReplicaGroup> replica_groups = {},
       const absl::optional<ChannelHandle>& channel_id = absl::nullopt,
@@ -1325,12 +1325,12 @@ class XlaBuilder {
                          const absl::optional<ChannelHandle>& channel_id,
                          const absl::optional<Shape>& shape_with_layout,
                          const absl::optional<bool> use_global_device_ids);
-  friend XlaOp AllReduceScatter(
-      XlaOp operand, const XlaComputation& computation, int64 scatter_dimension,
-      int64 shard_count, absl::Span<const ReplicaGroup> replica_groups,
-      const absl::optional<ChannelHandle>& channel_id,
-      const absl::optional<Layout>& layout,
-      const absl::optional<bool> use_global_device_ids);
+  friend XlaOp ReduceScatter(XlaOp operand, const XlaComputation& computation,
+                             int64 scatter_dimension, int64 shard_count,
+                             absl::Span<const ReplicaGroup> replica_groups,
+                             const absl::optional<ChannelHandle>& channel_id,
+                             const absl::optional<Layout>& layout,
+                             const absl::optional<bool> use_global_device_ids);
   friend XlaOp AllToAll(XlaOp operand, int64 split_dimension,
                         int64 concat_dimension, int64 split_count,
                         absl::Span<const ReplicaGroup> replica_groups,
@@ -2281,7 +2281,7 @@ XlaOp AllReduce(XlaOp operand, const XlaComputation& computation,
                 const absl::optional<Shape>& shape_with_layout = absl::nullopt,
                 const absl::optional<bool> use_global_device_ids = absl::nullopt);
 
-XlaOp AllReduceScatter(
+XlaOp ReduceScatter(
     XlaOp operand, const XlaComputation& computation, int64 scatter_dimension,
     int64 shard_count, absl::Span<const ReplicaGroup> replica_groups = {},
     const absl::optional<ChannelHandle>& channel_id = absl::nullopt,

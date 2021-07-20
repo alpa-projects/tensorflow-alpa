@@ -63,7 +63,7 @@ class Thunk {
     kNcclAllReduce,
     kNcclAllReduceStart,
     kNcclAllReduceDone,
-    kNcclAllReduceScatter,
+    kNcclReduceScatter,
     kNcclAllToAll,
     kOutfeed,
     kReplicaId,
@@ -138,7 +138,7 @@ class Thunk {
   // after the copy has completed.
   template <typename T>
   void SafeH2DMemcpy(
-      se::DeviceMemory<T> dest, std::unique_ptr<T[]> buf, int64 count,
+      se::DeviceMemory<T> dest, std::unique_ptr<T[]> buf, int64_t count,
       se::Stream* stream,
       std::vector<std::function<void()>>* deferred_host_callbacks) {
     stream->ThenMemcpy(&dest, buf.get(), count * sizeof(T));

@@ -19440,6 +19440,26 @@ https://www.tensorflow.org/performance/xla/operation_semantics#reducewindow .
   TF_DerivedOperandTypeAttr Tindices = TF_DerivedOperandTypeAttr<2>;
 }
 
+def TF_XlaRemoveDynamicDimensionSizeOp : TF_Op<"XlaRemoveDynamicDimensionSize", [NoSideEffect]> {
+  let summary = "Inverse of XlaSetDynamicDimensionSize.";
+
+  let description = [{
+Make an xla bounded dynamic dimension into a static dimension. The bound of the
+size of dimension `dim_index` becomes the static dimension size.
+  }];
+
+  let arguments = (ins
+    TF_Tensor:$input,
+    TF_Int32Tensor:$dim_index
+  );
+
+  let results = (outs
+    TF_Tensor:$output
+  );
+
+  TF_DerivedOperandTypeAttr T = TF_DerivedOperandTypeAttr<0>;
+}
+
 def TF_XlaReplicaIdOp : TF_Op<"XlaReplicaId", [NoSideEffect, TF_NoConstantFold]> {
   let summary = "Replica ID.";
 
@@ -19659,6 +19679,32 @@ Semantics are documented at
 
   TF_DerivedOperandSizeAttr N = TF_DerivedOperandSizeAttr<0>;
   TF_DerivedOperandTypeAttr T = TF_DerivedOperandTypeAttr<0>;
+}
+
+def TF_XlaVariadicReduceV2Op : TF_Op<"XlaVariadicReduceV2", [AttrSizedOperandSegments, NoSideEffect]> {
+  let summary = "Wraps the variadic XLA Reduce operator.";
+
+  let description = [{
+Semantics are documented at
+ https://www.tensorflow.org/performance/xla/operation_semantics#variadic_reduce.
+
+This is an expanded version of XlaVariadicReduce, with support for
+operands of different dtypes, and improved shape inference.
+  }];
+
+  let arguments = (ins
+    Arg<Variadic<TF_Tensor>, [{the input tensor(s)}]>:$inputs,
+    Arg<Variadic<TF_Tensor>, [{scalar initial value(s) for the reduction}]>:$init_values,
+
+    I64ArrayAttr:$dimensions_to_reduce,
+    SymbolRefAttr:$reducer
+  );
+
+  let results = (outs
+    Variadic<TF_Tensor>:$outputs
+  );
+
+  TF_DerivedOperandTypeListAttr T = TF_DerivedOperandTypeListAttr<0>;
 }
 
 def TF_XlaVariadicSortOp : TF_Op<"XlaVariadicSort", [NoSideEffect]> {

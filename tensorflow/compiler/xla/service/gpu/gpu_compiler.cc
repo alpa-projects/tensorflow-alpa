@@ -64,7 +64,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/flatten_call_graph.h"
 #include "tensorflow/compiler/xla/service/gather_expander.h"
 #include "tensorflow/compiler/xla/service/gpu/alias_passthrough_params.h"
-#include "tensorflow/compiler/xla/service/gpu/auto_sharding.h"
 #include "tensorflow/compiler/xla/service/gpu/cudnn_batchnorm_rewriter.h"
 #include "tensorflow/compiler/xla/service/gpu/fusion_bitcast_lift.h"
 #include "tensorflow/compiler/xla/service/gpu/fusion_merger.h"
@@ -507,7 +506,7 @@ Status GpuCompiler::OptimizeHloModule(
           [](const Shape& shape) {
             return ShapeUtil::ByteSizeOf(shape, sizeof(void*));
           },
-          pass_context::GetInt("swap::bound", INT64_MAX));
+          pass_context::GetInt("swap::device_memory_bound", INT64_MAX));
       TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
     }
   }

@@ -16,7 +16,6 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_SWAP_THUNK_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_SWAP_THUNK_H_
 
-#include "tensorflow/compiler/xla/pjrt/swap.h"
 #include "tensorflow/compiler/xla/service/gpu/buffer_allocations.h"
 #include "tensorflow/compiler/xla/service/gpu/hlo_execution_profiler.h"
 #include "tensorflow/compiler/xla/service/gpu/thunk.h"
@@ -24,36 +23,47 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
+class SwapThunk : public Thunk {
+ public:
+  SwapThunk(Kind kind, ThunkInfo thunk_info);
+
+  se::Event* DoneEvent(int device_ordinal) const;
+
+ protected:
+  absl::Mutex mu_;
+  absl::flat_hash_map<int, std::unique_ptr<se::Event>> done_events_ ABSL_GUARDED_BY(mu_);
+};
+
 // Thunk to run a GPU swap out
-class SwapOutThunk : public Thunk {
+class SwapOutThunk : public SwapThunk {
  public:
   SwapOutThunk(ThunkInfo thunk_info,
                std::vector<BufferAllocation::Slice> operands,
-               BufferAllocation::Slice result, std::vector<int64> byte_sizes,
-               int64 key);
+               std::vector<int64> byte_sizes);
 
   Status Initialize(const GpuExecutable& executable,
                     se::StreamExecutor* executor) override;
 
   Status ExecuteOnStream(const ExecuteParams& params) override;
+
+  const std::vector<void*>& AddressList() const { return address_list_; }
 
   ~SwapOutThunk() override;
 
  private:
   const std::vector<BufferAllocation::Slice> operands_;
-  const BufferAllocation::Slice result_;
   const std::vector<int64> byte_sizes_;
-  const int64 key_;
-  int64 executable_key_;
   se::StreamExecutor* executor_ = nullptr;
+  std::vector<void*> address_list_;
 };
 
 // Thunk to run a GPU swap in
-class SwapInThunk : public Thunk {
+class SwapInThunk : public SwapThunk {
  public:
-  SwapInThunk(ThunkInfo thunk_info, BufferAllocation::Slice operands,
+  SwapInThunk(ThunkInfo thunk_info,
               std::vector<BufferAllocation::Slice> results,
-              std::vector<int64> byte_sizes, int64 key);
+              std::vector<int64> byte_sizes, SwapOutThunk* memory_ref,
+              absl::InlinedVector<const SwapThunk*, 3> waits_for);
 
   Status Initialize(const GpuExecutable& executable,
                     se::StreamExecutor* executor) override;
@@ -61,13 +71,22 @@ class SwapInThunk : public Thunk {
   Status ExecuteOnStream(const ExecuteParams& params) override;
 
  private:
-  const BufferAllocation::Slice operand_;
   const std::vector<BufferAllocation::Slice> results_;
   const std::vector<int64> byte_sizes_;
-  const int64 key_;
-  int64 executable_key_;
+  const absl::InlinedVector<const SwapThunk*, 3> waits_for_;
+  const SwapOutThunk* memory_ref_;
 };
 
+// Thunk to sync a swap(in)
+class SwapDoneThunk : public Thunk {
+ public:
+  SwapDoneThunk(ThunkInfo thunk_info, const SwapThunk* start);
+
+  Status ExecuteOnStream(const ExecuteParams& params) override;
+
+ private:
+  const SwapThunk* start_;
+};
 }  // namespace gpu
 }  // namespace xla
 

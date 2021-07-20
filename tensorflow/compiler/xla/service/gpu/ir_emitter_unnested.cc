@@ -940,6 +940,9 @@ Status IrEmitterUnnested::EmitCustomCall(mlir::Operation* op) {
         call.call_target_name() == kBuiltinSwapInTarget) {
       return EmitSwapThunk(op);
     }
+    if (call.call_target_name() == kBuiltinSwapDoneTarget) {
+      return EmitSwapDoneThunk(op);
+    }
     return EmitCustomCallThunk(op);
   }
 
@@ -1522,37 +1525,59 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
     TF_ASSIGN_OR_RETURN(results, values_to_slices(custom_call.output()));
   }
 
-  int64 key = std::stoll(custom_call.backend_config().str());
   std::vector<int64> byte_sizes;
+  std::vector<std::string> keys =
+      absl::StrSplit(custom_call.backend_config().str(), ";");
+  int64 key = std::stoll(keys[0]);
+  int64 event_key = std::stoll(keys[1]);
+  static absl::flat_hash_map<int64, SwapOutThunk*> swap_address_map_;
   if (call_target_name == kBuiltinSwapOutTarget) {
-    CHECK(results.size() == 1)
-        << "builtinSwapOut meets multiple results, is: " << results.size();
-    CHECK(results[0].size() == 8)
-        << "builtinSwapOut meets result size incorrect, is: "
-        << results[0].size();
+    // CHECK(results.size() == 0)
+    //     << "builtinSwapOut meets " << results.size() << " result(s)";
     byte_sizes.reserve(operands.size());
     for (auto slice : operands) {
       byte_sizes.push_back(slice.size());
     }
-    AddThunkToThunkSequence(absl::make_unique<SwapOutThunk>(
-        GetThunkInfo(op), std::move(operands), results[0],
-        std::move(byte_sizes), key));
+    auto swap_out_thunk = absl::make_unique<SwapOutThunk>(
+        GetThunkInfo(op), std::move(operands), std::move(byte_sizes));
+    TF_RET_CHECK(swap_address_map_.emplace(key, swap_out_thunk.get()).second)
+        << "swap out with unique ID already registered.";
+    TF_RET_CHECK(
+        swap_event_map_.emplace(event_key, swap_out_thunk.get()).second)
+        << "swap done with unique ID already registered.";
+    AddThunkToThunkSequence(std::move(swap_out_thunk));
   } else {
     CHECK(call_target_name == kBuiltinSwapInTarget)
         << "unexpected custom call target for emit swap thunk";
-    CHECK(operands.size() == 1)
-        << "builtinSwapIn meets multiple operands, is: " << operands.size();
-    CHECK(operands[0].size() == 8)
-        << "builtinSwapIn meets result size incorrect, is: "
-        << operands[0].size();
+    // CHECK(operands.size() == 0)
+    //     << "builtinSwapIn meets " << operands.size() << "operand(s)";
     byte_sizes.reserve(results.size());
     for (auto slice : results) {
       byte_sizes.push_back(slice.size());
     }
-    AddThunkToThunkSequence(absl::make_unique<SwapInThunk>(
-        GetThunkInfo(op), operands[0], std::move(results),
-        std::move(byte_sizes), key));
+    absl::InlinedVector<const SwapThunk*, 3> waits_for;
+    for (int i = 2; i < keys.size(); ++i) {
+      waits_for.push_back(swap_event_map_.at(std::stoll(keys[i])));
+    }
+    auto swap_in_thunk = absl::make_unique<SwapInThunk>(
+        GetThunkInfo(op), std::move(results), std::move(byte_sizes),
+        swap_address_map_.at(key), std::move(waits_for));
+    TF_RET_CHECK(swap_event_map_.emplace(event_key, swap_in_thunk.get()).second)
+        << "swap done with unique ID already registered.";
+    ;
+    AddThunkToThunkSequence(std::move(swap_in_thunk));
   }
+
+  return Status::OK();
+}
+
+Status IrEmitterUnnested::EmitSwapDoneThunk(mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+  const std::string call_target_name = custom_call.call_target_name().str();
+
+  int64 event_key = std::stoll(custom_call.backend_config().str());
+  AddThunkToThunkSequence(absl::make_unique<SwapDoneThunk>(
+      GetThunkInfo(op), swap_event_map_.at(event_key)));
 
   return Status::OK();
 }
@@ -5443,6 +5468,9 @@ Status IrEmitterUnnested::EmitOp(mlir::Operation* op) {
     if (call.call_target_name() == kBuiltinSwapOutTarget ||
         call.call_target_name() == kBuiltinSwapInTarget) {
       return EmitSwapThunk(op);
+    }
+    if (call.call_target_name() == kBuiltinSwapDoneTarget) {
+      return EmitSwapDoneThunk(op);
     }
     return EmitCustomCallThunk(op);
   }

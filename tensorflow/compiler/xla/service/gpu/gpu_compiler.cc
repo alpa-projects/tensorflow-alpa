@@ -112,11 +112,13 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_proto_util.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding_metadata.h"
 #include "tensorflow/compiler/xla/service/hlo_subcomputation_unification.h"
+#include "tensorflow/compiler/xla/service/hlo_swap_insertion.h"
 #include "tensorflow/compiler/xla/service/hlo_verifier.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
 #include "tensorflow/compiler/xla/service/logistic_expander.h"
 #include "tensorflow/compiler/xla/service/loop_schedule_linearizer.h"
 #include "tensorflow/compiler/xla/service/operand_upcaster.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/qr_expander.h"
 #include "tensorflow/compiler/xla/service/real_imag_expander.h"
 #include "tensorflow/compiler/xla/service/reduce_scatter_combiner.h"
@@ -497,6 +499,17 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
 
+  {
+    if (pass_context::GetBool("swap::enable", false)) {
+      HloPassPipeline pipeline("swap insertion");
+      pipeline.AddPass<HloSwapInsertion>(
+          [](const Shape& shape) {
+            return ShapeUtil::ByteSizeOf(shape, sizeof(void*));
+          },
+          pass_context::GetInt("swap::device_memory_bound", INT64_MAX));
+      TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+    }
+  }
   return Status::OK();
 }
 

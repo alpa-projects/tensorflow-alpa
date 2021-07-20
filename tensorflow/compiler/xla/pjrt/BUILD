@@ -485,20 +485,6 @@ tf_cc_test(
     ],
 )
 
-cc_library(
-    name = "pjrt_gpu_swap", 
-    srcs = ["swap.cc"], 
-    hdrs = ["swap.h"], 
-    defines = if_cuda(["GOOGLE_CUDA=1"]),
-    deps = [
-        "//tensorflow/compiler/xla/service:custom_call_target_registry", 
-        "//tensorflow/compiler/xla/service:executable", 
-        "//tensorflow/compiler/xla:shape_util", 
-        "//tensorflow/compiler/xla:types", 
-        "@com_google_absl//absl/container:flat_hash_map",
-    ]
-)
-
 tf_cc_test(
     name = "gpu_swap_test",
     srcs = ["swap_test.cc"],
@@ -508,7 +494,6 @@ tf_cc_test(
     deps = [
         ":gpu_device",
         ":pjrt_client",
-        ":pjrt_gpu_swap", 
         "//tensorflow/compiler/xla:test",
         "//tensorflow/compiler/xla/client:executable_build_options",
         "//tensorflow/compiler/xla/client:xla_builder",

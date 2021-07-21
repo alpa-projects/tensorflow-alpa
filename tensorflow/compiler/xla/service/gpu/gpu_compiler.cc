@@ -640,6 +640,12 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
+  if (pass_context::GetBool("build_option::skip_hlo_passes", false)) {
+    // Do no run the HLO optimization passes. Assume the input HloModule
+    // has already been optimized.
+    return std::move(module);
+  }
+
   // We dump the post-optimization HLO in RunBackend so no need to dump it here.
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunHloPasses");
   tensorflow::profiler::TraceMe activity(
@@ -1013,6 +1019,14 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
 StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
+  if (pass_context::GetBool("build_option::skip_backend_codegen", false)) {
+    // Do no run backend code generation. Return a dummy executable.
+    GpuExecutable::Params params;
+    params.debug_module = std::move(module);
+    auto* gpu_executable = new GpuExecutable(std::move(params));
+    return std::unique_ptr<Executable>(gpu_executable);
+  }
+
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunBackend");
   std::string slow_compilation_msg =
       absl::StrCat("Compiling module ", module->name());

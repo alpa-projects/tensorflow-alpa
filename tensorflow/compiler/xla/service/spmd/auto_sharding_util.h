@@ -73,10 +73,85 @@ std::string ToString(const std::vector<T>& vector) {
   return os.str();
 }
 
+// A simple matrix class to store and manipulate the cost matrices on edges.
+// It can create a view for matrix transpose without copying the memory.
+class Matrix {
+ public:
+  Matrix() : n(0), m(0), transpose(false), data(nullptr) {}
+
+  Matrix(size_t n, size_t m) {
+    this->n = n;
+    this->m = m;
+    transpose = false;
+    data = std::make_shared<std::vector<double>>(n * m, 0.0);
+  }
+
+  Matrix(size_t n, size_t m, bool transpose,
+         std::shared_ptr<std::vector<double>> data) {
+    this->n = n;
+    this->m = m;
+    this->transpose = transpose;
+    this->data = data;
+  }
+
+  Matrix Transpose() { return Matrix(m, n, !transpose, data); }
+
+  double operator()(size_t i, size_t j) const {
+    size_t idx;
+    if (transpose) {
+      idx = j * n + i;
+    } else {
+      idx = i * m + j;
+    }
+    CHECK(data != nullptr) << n << " , " << m;
+    return (*data)[idx];
+  }
+
+  double& operator()(size_t i, size_t j) {
+    size_t idx;
+    if (transpose) {
+      idx = j * n + i;
+    } else {
+      idx = i * m + j;
+    }
+    CHECK(data != nullptr) << n << " . " << m;
+    return (*data)[idx];
+  }
+
+  Matrix operator+(const Matrix& other) {
+    CHECK_EQ(n, other.n);
+    CHECK_EQ(m, other.m);
+    Matrix ret = Matrix(n, m);
+    for (size_t i = 0; i < n; ++i) {
+      for (size_t j = 0; j < m; ++j) {
+        ret(i, j) = operator()(i, j) + other(i, j);
+      }
+    }
+    return ret;
+  }
+
+  std::string ToString() const {
+    std::ostringstream os;
+
+    for (size_t i = 0; i < n; ++i) {
+      for (size_t j = 0; j < m; ++j) {
+        os << operator()(i, j) << " ";
+      }
+      os << "\n";
+    }
+
+    return os.str();
+  }
+
+  size_t n;
+  size_t m;
+  bool transpose;
+  std::shared_ptr<std::vector<double>> data;
+};
+
 /*
  * Shape Utility
  */
-
 // Get the bytes of an array shape without checking its layout.
 // This is modified from ShapeUtil::ByteSizeOfElements (shape_util.cc)
 int64 ByteSizeOfElementsNoCheck(const Shape& shape) {

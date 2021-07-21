@@ -1019,23 +1019,47 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-        // Follow the deepest instruction
+        // Follow the operand with the max depth
         int64 follow_idx = -1;
-        int64 max_depth = -1;
+        int64 max_depth = -1 << 30;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
-          if (!undefined_set.count(ins->operand(i)) &&
-              depth_map.at(ins->operand(i)) > max_depth) {
+          const HloInstruction* operand = ins->operand(i);
+          if (!undefined_set.count(operand) && depth_map.at(operand) > max_depth) {
             follow_idx = i;
-            max_depth = depth_map.at(ins->operand(i));
+            max_depth = depth_map.at(operand);
           }
         }
-        if (follow_idx == -1) {
-          break;
+        CHECK_GE(follow_idx, 0);
+        const StrategyVector* src_strategies = strategy_map.at(
+          ins->operand(follow_idx)).get();
+
+        // Peer Propagation: if the strategies of some operands are undefined,
+        // let the undefined operands follow the deepest operand.
+        // Currently, we only enable this for HloOpcode::kIota.
+        for (int64 i = 0; i < ins->operand_count(); ++i) {
+          const HloInstruction* operand = ins->operand(i);
+          if (undefined_set.count(operand) && operand->opcode() == HloOpcode::kIota) {
+            undefined_set.erase(operand);
+            StrategyVector* operand_strategies = strategy_map.at(operand).get();
+            operand_strategies->leaf_vector.clear();
+            operand_strategies->following = strategies.get();
+
+            for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
+              HloSharding output_spec = src_strategies->leaf_vector[sid].output_sharding;
+
+              std::string name = SimpleToString(output_spec);
+              double compute_cost = 0, communication_cost = 0;
+              double memory_cost = GetBytes(operand->shape()) / output_spec.NumTiles();
+              // iota does not have any operand
+              std::vector<std::vector<double>> resharding_costs;
+              operand_strategies->leaf_vector.push_back(ShardingStrategy(
+                  {name, output_spec, compute_cost, communication_cost, memory_cost,
+                   resharding_costs}));
+            }
+          }
         }
 
         // Create follow strategies
-        const HloInstruction* operand = ins->operand(follow_idx);
-        const StrategyVector* src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
 
@@ -1435,6 +1459,9 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       }
       case HloOpcode::kIota: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
+        // Enumerating all possible strategies for iota on a 2-d mesh is too tedious,
+        // so we leave it as undefined. Its strategies can be defined by
+        // "Peer Propagation" when it is used for the first time.
         break;
       }
       case HloOpcode::kGetTupleElement: {
@@ -1559,82 +1586,6 @@ AliasSet BuildAliasSet(const HloModule* module,
   return alias_set;
 }
 
-// A simple matrix class to store and manipulate on cost matrices on edges.
-// It can create a view for transpose without copying the memory.
-class Matrix {
- public:
-  Matrix() : n(0), m(0), transpose(false), data(nullptr) {}
-
-  Matrix(size_t n, size_t m) {
-    this->n = n;
-    this->m = m;
-    transpose = false;
-    data = std::make_shared<std::vector<double>>(n * m, 0.0);
-  }
-
-  Matrix(size_t n, size_t m, bool transpose,
-         std::shared_ptr<std::vector<double>> data) {
-    this->n = n;
-    this->m = m;
-    this->transpose = transpose;
-    this->data = data;
-  }
-
-  Matrix Transpose() { return Matrix(m, n, !transpose, data); }
-
-  double operator()(size_t i, size_t j) const {
-    size_t idx;
-    if (transpose) {
-      idx = j * n + i;
-    } else {
-      idx = i * m + j;
-    }
-    CHECK(data != nullptr) << n << " , " << m;
-    return (*data)[idx];
-  }
-
-  double& operator()(size_t i, size_t j) {
-    size_t idx;
-    if (transpose) {
-      idx = j * n + i;
-    } else {
-      idx = i * m + j;
-    }
-    CHECK(data != nullptr) << n << " . " << m;
-    return (*data)[idx];
-  }
-
-  Matrix operator+(const Matrix& other) {
-    CHECK_EQ(n, other.n);
-    CHECK_EQ(m, other.m);
-    Matrix ret = Matrix(n, m);
-    for (size_t i = 0; i < n; ++i) {
-      for (size_t j = 0; j < m; ++j) {
-        ret(i, j) = operator()(i, j) + other(i, j);
-      }
-    }
-    return ret;
-  }
-
-  std::string ToString() const {
-    std::ostringstream os;
-
-    for (size_t i = 0; i < n; ++i) {
-      for (size_t j = 0; j < m; ++j) {
-        os << operator()(i, j) << " ";
-      }
-      os << "\n";
-    }
-
-    return os.str();
-  }
-
-  size_t n;
-  size_t m;
-  bool transpose;
-  std::shared_ptr<std::vector<double>> data;
-};
-
 // A graph data structure to simplify the edge cost graph.
 // It merges nodes and does path compression.
 class CostGraph {
@@ -1718,7 +1669,7 @@ class CostGraph {
 
     // std::cerr << "Merge: " << src << " to " << dst << std::endl;
 
-    Matrix edge_cost = edge_costs[{dst, src}];
+    Matrix edge_cost = GetEdgeCost(dst, src);
 
     // Find the strategy to follow greedily
     std::vector<int> reindexing;

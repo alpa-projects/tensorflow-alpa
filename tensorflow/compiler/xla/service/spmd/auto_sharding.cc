@@ -1460,7 +1460,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       case HloOpcode::kIota: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         // Enumerating all possible strategies for iota on a 2-d mesh is too tedious,
-        // so we leave it as undefined. Its strategies can be defined by
+        // so we leave it as undefined. Its strategies will be defined by
         // "Peer Propagation" when it is used for the first time.
         break;
       }

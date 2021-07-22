@@ -7,7 +7,7 @@
 #include "tensorflow/compiler/xla/shape_util.h"
 
 namespace xla {
-namespace gpu {
+namespace spmd {
 
 /*
  * Array/Vector Utility
@@ -287,5 +287,5 @@ absl::optional<HloSharding> PropagateDimwiseSharding(const HloSharding& input_sp
   return input_spec;
 }
 
-}  // namespace gpu
+}  // namespace spmd
 }  // namespace xla

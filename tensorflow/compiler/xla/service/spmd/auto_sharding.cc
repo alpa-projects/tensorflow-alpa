@@ -16,7 +16,7 @@
 #include "tensorflow/compiler/xla/service/pass_context.h"
 
 namespace xla {
-namespace gpu {
+namespace spmd {
 
 namespace py = pybind11;
 
@@ -1617,7 +1617,7 @@ class CostGraph {
       }
 
       if (strategies->following) {
-        to_merge_pairs.push_back({strategies->id, strategies->following->id});
+        to_merge_pairs_.push_back({strategies->id, strategies->following->id});
       }
     }
   }
@@ -1664,40 +1664,46 @@ class CostGraph {
   void MergeNode(int src, int dst) {
     CHECK(adjacency[src].count(dst));
     CHECK(adjacency[dst].count(src));
-    CHECK(!merged_to.count(dst));
+    CHECK(!merged_to_.count(src));
+    CHECK(!merged_to_.count(dst));
     CHECK_NE(src, dst);
-
-    // std::cerr << "Merge: " << src << " to " << dst << std::endl;
 
     Matrix edge_cost = GetEdgeCost(dst, src);
 
-    // Find the strategy to follow greedily
-    std::vector<int> reindexing;
+    std::vector<int> reindexing(node_lens[dst]);
+    if (node_lens[dst] == node_lens[src]) {
+      // Assume the orders of strategies in src and dst match
+      // (i.e. i-th strategy in src follows i-th strategy in dst).
+      // This is true in most cases because of how we create the
+      // following strategies.
+      std::iota(reindexing.begin(), reindexing.end(), 0);
+    } else {
+      // Otherwise, find the strategy to follow greedily.
+      // For every straetgy in dst, find the strategy in src with
+      // the lowest resharding cost.
+      std::vector<int> arange(node_lens[src]);
+      std::iota(arange.begin(), arange.end(), 0);
+      for (int i = 0; i < node_lens[dst]; ++i) {
+        std::vector<std::pair<double, int>> keys;
 
-    std::vector<int> arange(node_lens[src]);
-    std::iota(arange.begin(), arange.end(), 0);
-    for (int i = 0; i < node_lens[dst]; ++i) {
-      std::vector<std::pair<double, int>> keys;
+        // If there are multiple strategies with the same lowest costs,
+        // prefer to follow "replicated", which has the largest index.
+        // Node: We assume the strategy "Repilcated" is always appended
+        // as the last strategy in BuildStrategyAndCost.
+        for (int j = 0; j < node_lens[src]; ++j) {
+          keys.push_back({edge_cost(i, j), -j});
+        }
 
-      // Pick the strategy with the lowest cost to follow.
-      // If there are multiple strategies with the same lowest costs,
-      // prefer to follow "replicated", which has the largest index.
-      // Node: We assume the strategy "Repilcated" is always appended
-      // as the last strategy in BuildStrategyAndCost.
+        std::sort(arange.begin(), arange.end(), [&keys](int l, int r) {
+          return (keys[l].first < keys[r].first) ||
+                 (keys[l].first == keys[r].first &&
+                  keys[l].second < keys[r].second);
+        });
 
-      for (int j = 0; j < node_lens[src]; ++j) {
-        keys.push_back({edge_cost(i, j), -j});
+        reindexing[i] = arange.front();
       }
-
-      std::sort(arange.begin(), arange.end(), [&keys](int l, int r) {
-        return (keys[l].first < keys[r].first) ||
-               (keys[l].first == keys[r].first &&
-                keys[l].second < keys[r].second);
-      });
-
-      reindexing.push_back(arange.front());
     }
-    merged_to[src] = dst;
+    merged_to_[src] = dst;
     reindexing_vector[src] = reindexing;
 
     // Merge edge cost matrix
@@ -1726,8 +1732,8 @@ class CostGraph {
   }
 
   int QueryDestination(int node) {
-    if (merged_to.count(node)) {
-      int old_dst = merged_to[node];
+    if (merged_to_.count(node)) {
+      int old_dst = merged_to_[node];
       int new_dst = QueryDestination(old_dst);
       if (old_dst != new_dst) {
         // Compresss path
@@ -1738,7 +1744,7 @@ class CostGraph {
               old_reindexing_vector[reindexing_vector[old_dst][i]]);
         }
         reindexing_vector[node] = new_reindexing_vector;
-        merged_to[node] = new_dst;
+        merged_to_[node] = new_dst;
       }
       return new_dst;
     } else {
@@ -1751,10 +1757,9 @@ class CostGraph {
         pass_context::GetBool("auto_sharding::simplify_graph", true);
 
     // Merge nodes
-    for (const auto& pair : to_merge_pairs) {
+    for (const auto& pair : to_merge_pairs_) {
       int src = pair.first;
       int dst = pair.second;
-      CHECK(!merged_to.count(src));
       dst = QueryDestination(dst);
       if (enable) {
         MergeNode(src, dst);
@@ -1764,7 +1769,7 @@ class CostGraph {
     // Build follow map
     follow_idx.reserve(node_lens.size());
     for (int i = 0; i < node_lens.size(); ++i) {
-      if (merged_to.count(i)) {
+      if (merged_to_.count(i)) {
         follow_idx.push_back(QueryDestination(i));
       } else {
         follow_idx.push_back(-1);
@@ -1797,14 +1802,24 @@ class CostGraph {
     return os.str();
   }
 
+  // The number of strategies of each node.
   std::vector<int> node_lens;
+  // The adjacency list of each node.
   std::vector<absl::flat_hash_set<int>> adjacency;
+  // The cost matrix between two nodes.
   absl::flat_hash_map<std::pair<int, int>, Matrix> edge_costs;
+  // The reindexing vector of the node.
+  // A reindexing vector maps a strategy index from the node being followed
+  // to a strategy index of the curret node.
   absl::flat_hash_map<int, std::vector<int>> reindexing_vector;
-  absl::flat_hash_map<int, int> merged_to;
+  // Maps a node id to the node id that is being followed by this node.
+  // The value is -1 if the current node does not follow any node.
   std::vector<int> follow_idx;
 
-  std::vector<std::pair<int, int>> to_merge_pairs;
+  // Save the destination of merged nodes.
+  absl::flat_hash_map<int, int> merged_to_;
+  // Save pairs that need to be merged.
+  std::vector<std::pair<int, int>> to_merge_pairs_;
 };
 
 // Serialize parameters of the ILP problem as numpy arrays and call the python
@@ -2242,7 +2257,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       BuildStrategyAndCost(sequence, ins_depth_map, cluster_env, solver_option);
   AliasSet alias_set =
       BuildAliasSet(module, alias_analysis->dataflow_analysis(), strategy_map);
-  // std::cerr << PrintStrategyMap(strategy_map, sequence);
+  //std::cerr << PrintStrategyMap(strategy_map, sequence);
 
   // ----- Build cost graph and merge unimporant nodes -----
   CostGraph cost_graph(leaf_strategies);
@@ -2272,5 +2287,5 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   return true;
 }
 
-}  // namespace gpu
+}  // namespace spmd
 }  // namespace xla

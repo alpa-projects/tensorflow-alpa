@@ -375,7 +375,7 @@ Status GpuCompiler::OptimizeHloModule(
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
-      spmd_pipeline.AddPass<AutoSharding>();
+      spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<GpuSpmdPartitioner>(

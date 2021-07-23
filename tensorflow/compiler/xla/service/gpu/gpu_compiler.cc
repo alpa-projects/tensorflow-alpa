@@ -489,7 +489,7 @@ Status GpuCompiler::OptimizeHloModule(
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
-      spmd_pipeline.AddPass<AutoSharding>();
+      spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<GpuSpmdPartitioner>(
@@ -591,10 +591,13 @@ Status GpuCompiler::OptimizeHloModule(
         /*combine_threshold_in_bytes=*/1024 * 1024 * 1024,
         /*combine_threshold_count=*/256);
     pipeline.AddPass<AllReduceCombiner>(
-        debug_options.xla_gpu_all_reduce_combine_threshold_bytes(),
+        /*combine_threshold_in_bytes=*/
+        pass_context::GetInt("combiner::all_reduce_threshold",
+                             debug_options.xla_gpu_all_reduce_combine_threshold_bytes()),
         /*combine_threshold_count=*/256);
     pipeline.AddPass<ReduceScatterCombiner>(
-        /*combine_threshold_in_bytes=*/30 * 1024 * 1024,
+        /*combine_threshold_in_bytes=*/
+        pass_context::GetInt("combiner::all_reduce_threshold", 30 * 1024 * 1024),
         /*combine_threshold_count=*/256);
 
     if (debug_options.xla_gpu_all_reduce_contiguous()) {
@@ -769,6 +772,12 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
+  if (pass_context::GetBool("build_option::skip_hlo_passes", false)) {
+    // Do no run the HLO optimization passes. Assume the input HloModule
+    // has already been optimized.
+    return std::move(module);
+  }
+
   // We dump the post-optimization HLO in RunBackend so no need to dump it here.
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunHloPasses");
   tensorflow::profiler::TraceMe activity(
@@ -1178,6 +1187,14 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
 StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
+  if (pass_context::GetBool("build_option::skip_backend_codegen", false)) {
+    // Do no run backend code generation. Return a dummy executable.
+    GpuExecutable::Params params;
+    params.debug_module = std::move(module);
+    auto* gpu_executable = new GpuExecutable(std::move(params));
+    return std::unique_ptr<Executable>(gpu_executable);
+  }
+
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunBackend");
   std::string slow_compilation_msg =
       absl::StrCat("Compiling module ", module->name());

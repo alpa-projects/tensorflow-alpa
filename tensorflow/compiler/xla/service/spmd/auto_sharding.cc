@@ -16,7 +16,7 @@
 #include "tensorflow/compiler/xla/service/pass_context.h"
 
 namespace xla {
-namespace gpu {
+namespace spmd {
 
 namespace py = pybind11;
 
@@ -561,35 +561,37 @@ InstructionDepthMap BuildInstructionDepthMap(
     CHECK(!current_frontier.empty());
     next_frontier.clear();
     for (const HloInstruction* inst : current_frontier) {
-      int delta = 0;
-
-      // Heavy operators have more weight (distance).
-      switch (inst->opcode()) {
-        case HloOpcode::kConstant:
-        case HloOpcode::kBroadcast:
-          delta = 0;
-          break;
-        case HloOpcode::kDot:
-        case HloOpcode::kConvolution:
-          delta = 1000;
-          break;
-        // A temporary hack here: reduce ops will generate replicated sharding.
-        // We do not want the later broadcast and elementwise ops to follow it.
-        // So we give reduce ops some penalty and let the elementwise ops to
-        // follow other operands.
-        // TODO(lmzheng): remove this hack by correctly registering strategies
-        // for broadcast.
-        case HloOpcode::kReduce:
-          delta = -10;
-          break;
-        default:
-          delta = 1;
-          break;
-      }
-
       for (const HloInstruction* node : edge_dict[inst]) {
         int now_degree = --degree_dict[node];
         if (now_degree == 0) {
+          int delta = 0;
+
+          // Heavy operators have more weight (distance).
+          switch (node->opcode()) {
+            case HloOpcode::kDot:
+            case HloOpcode::kConvolution:
+              delta = 1000;
+              break;
+            case HloOpcode::kBroadcast:
+              delta = -3;
+              break;
+            // A temporary hack here: reduce ops will generate replicated sharding.
+            // We do not want the later broadcast and elementwise ops to follow it.
+            // So we give reduce ops some penalty and let the elementwise ops to
+            // follow other operands.
+            // TODO(lmzheng): remove this hack by correctly registering strategies
+            // for broadcast.
+            case HloOpcode::kReduce:
+              delta = -10;
+              break;
+            case HloOpcode::kConstant:
+              delta = 0;
+              break;
+            default:
+              delta = 1;
+              break;
+          }
+
           next_frontier.push_back(node);
           depth_map[node] = depth_map[inst] + delta;
           collected += 1;
@@ -1019,23 +1021,21 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-        // Follow the deepest instruction
+        // Follow the operand with the max depth
         int64 follow_idx = -1;
-        int64 max_depth = -1;
+        int64 max_depth = -1 << 30;
         for (int64 i = 0; i < ins->operand_count(); ++i) {
-          if (!undefined_set.count(ins->operand(i)) &&
-              depth_map.at(ins->operand(i)) > max_depth) {
+          const HloInstruction* operand = ins->operand(i);
+          if (!undefined_set.count(operand) && depth_map.at(operand) > max_depth) {
             follow_idx = i;
-            max_depth = depth_map.at(ins->operand(i));
+            max_depth = depth_map.at(operand);
           }
         }
-        if (follow_idx == -1) {
-          break;
-        }
+        CHECK_GE(follow_idx, 0);
 
         // Create follow strategies
-        const HloInstruction* operand = ins->operand(follow_idx);
-        const StrategyVector* src_strategies = strategy_map.at(operand).get();
+        const StrategyVector* src_strategies = strategy_map.at(
+          ins->operand(follow_idx)).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
 
@@ -1435,6 +1435,38 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       }
       case HloOpcode::kIota: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
+
+        // Fully tile the buffer to 2-d mesh
+        for (int64 i = 0; i < ins->shape().rank(); ++i) {
+          for (int64 j = 0; j < ins->shape().rank(); ++j) {
+            if (i == j) {
+              continue;
+            }
+
+            if (ins->shape().dimensions(i) < device_mesh.dim(0) ||
+                ins->shape().dimensions(j) < device_mesh.dim(1)) {
+              continue;
+            }
+
+            std::string name =
+                "S{" + std::to_string(i) + "," + std::to_string(j) + "} @ {0,1}";
+            HloSharding output_spec = Tile(ins->shape(), {i, j}, {0, 1}, cluster_env);
+            double compute_cost = 0, communication_cost = 0;
+            double memory_cost =
+                GetBytes(ins->shape()) / output_spec.NumTiles();
+            strategies->leaf_vector.push_back(
+                ShardingStrategy({name,
+                                  output_spec,
+                                  compute_cost,
+                                  communication_cost,
+                                  memory_cost,
+                                  {}}));
+          }
+        }
+
+        // Replicate
+        strategies->leaf_vector.push_back(ShardingStrategy(
+            {"R", HloSharding::Replicate(), 4, 0, GetBytes(ins->shape()), {}}));
         break;
       }
       case HloOpcode::kGetTupleElement: {
@@ -1559,82 +1591,6 @@ AliasSet BuildAliasSet(const HloModule* module,
   return alias_set;
 }
 
-// A simple matrix class to store and manipulate on cost matrices on edges.
-// It can create a view for transpose without copying the memory.
-class Matrix {
- public:
-  Matrix() : n(0), m(0), transpose(false), data(nullptr) {}
-
-  Matrix(size_t n, size_t m) {
-    this->n = n;
-    this->m = m;
-    transpose = false;
-    data = std::make_shared<std::vector<double>>(n * m, 0.0);
-  }
-
-  Matrix(size_t n, size_t m, bool transpose,
-         std::shared_ptr<std::vector<double>> data) {
-    this->n = n;
-    this->m = m;
-    this->transpose = transpose;
-    this->data = data;
-  }
-
-  Matrix Transpose() { return Matrix(m, n, !transpose, data); }
-
-  double operator()(size_t i, size_t j) const {
-    size_t idx;
-    if (transpose) {
-      idx = j * n + i;
-    } else {
-      idx = i * m + j;
-    }
-    CHECK(data != nullptr) << n << " , " << m;
-    return (*data)[idx];
-  }
-
-  double& operator()(size_t i, size_t j) {
-    size_t idx;
-    if (transpose) {
-      idx = j * n + i;
-    } else {
-      idx = i * m + j;
-    }
-    CHECK(data != nullptr) << n << " . " << m;
-    return (*data)[idx];
-  }
-
-  Matrix operator+(const Matrix& other) {
-    CHECK_EQ(n, other.n);
-    CHECK_EQ(m, other.m);
-    Matrix ret = Matrix(n, m);
-    for (size_t i = 0; i < n; ++i) {
-      for (size_t j = 0; j < m; ++j) {
-        ret(i, j) = operator()(i, j) + other(i, j);
-      }
-    }
-    return ret;
-  }
-
-  std::string ToString() const {
-    std::ostringstream os;
-
-    for (size_t i = 0; i < n; ++i) {
-      for (size_t j = 0; j < m; ++j) {
-        os << operator()(i, j) << " ";
-      }
-      os << "\n";
-    }
-
-    return os.str();
-  }
-
-  size_t n;
-  size_t m;
-  bool transpose;
-  std::shared_ptr<std::vector<double>> data;
-};
-
 // A graph data structure to simplify the edge cost graph.
 // It merges nodes and does path compression.
 class CostGraph {
@@ -1666,7 +1622,7 @@ class CostGraph {
       }
 
       if (strategies->following) {
-        to_merge_pairs.push_back({strategies->id, strategies->following->id});
+        to_merge_pairs_.push_back({strategies->id, strategies->following->id});
       }
     }
   }
@@ -1713,40 +1669,46 @@ class CostGraph {
   void MergeNode(int src, int dst) {
     CHECK(adjacency[src].count(dst));
     CHECK(adjacency[dst].count(src));
-    CHECK(!merged_to.count(dst));
+    CHECK(!merged_to_.count(src));
+    CHECK(!merged_to_.count(dst));
     CHECK_NE(src, dst);
 
-    // std::cerr << "Merge: " << src << " to " << dst << std::endl;
+    Matrix edge_cost = GetEdgeCost(dst, src);
 
-    Matrix edge_cost = edge_costs[{dst, src}];
+    std::vector<int> reindexing(node_lens[dst]);
+    if (node_lens[dst] == node_lens[src]) {
+      // Assume the orders of strategies in src and dst match
+      // (i.e. i-th strategy in src follows i-th strategy in dst).
+      // This is true in most cases because of how we create the
+      // following strategies.
+      std::iota(reindexing.begin(), reindexing.end(), 0);
+    } else {
+      // Otherwise, find the strategy to follow greedily.
+      // For every straetgy in dst, find the strategy in src with
+      // the lowest resharding cost.
+      std::vector<int> arange(node_lens[src]);
+      std::iota(arange.begin(), arange.end(), 0);
+      for (int i = 0; i < node_lens[dst]; ++i) {
+        std::vector<std::pair<double, int>> keys;
 
-    // Find the strategy to follow greedily
-    std::vector<int> reindexing;
+        // If there are multiple strategies with the same lowest costs,
+        // prefer to follow "replicated", which has the largest index.
+        // Node: We assume the strategy "Repilcated" is always appended
+        // as the last strategy in BuildStrategyAndCost.
+        for (int j = 0; j < node_lens[src]; ++j) {
+          keys.push_back({edge_cost(i, j), -j});
+        }
 
-    std::vector<int> arange(node_lens[src]);
-    std::iota(arange.begin(), arange.end(), 0);
-    for (int i = 0; i < node_lens[dst]; ++i) {
-      std::vector<std::pair<double, int>> keys;
+        std::sort(arange.begin(), arange.end(), [&keys](int l, int r) {
+          return (keys[l].first < keys[r].first) ||
+                 (keys[l].first == keys[r].first &&
+                  keys[l].second < keys[r].second);
+        });
 
-      // Pick the strategy with the lowest cost to follow.
-      // If there are multiple strategies with the same lowest costs,
-      // prefer to follow "replicated", which has the largest index.
-      // Node: We assume the strategy "Repilcated" is always appended
-      // as the last strategy in BuildStrategyAndCost.
-
-      for (int j = 0; j < node_lens[src]; ++j) {
-        keys.push_back({edge_cost(i, j), -j});
+        reindexing[i] = arange.front();
       }
-
-      std::sort(arange.begin(), arange.end(), [&keys](int l, int r) {
-        return (keys[l].first < keys[r].first) ||
-               (keys[l].first == keys[r].first &&
-                keys[l].second < keys[r].second);
-      });
-
-      reindexing.push_back(arange.front());
     }
-    merged_to[src] = dst;
+    merged_to_[src] = dst;
     reindexing_vector[src] = reindexing;
 
     // Merge edge cost matrix
@@ -1775,8 +1737,8 @@ class CostGraph {
   }
 
   int QueryDestination(int node) {
-    if (merged_to.count(node)) {
-      int old_dst = merged_to[node];
+    if (merged_to_.count(node)) {
+      int old_dst = merged_to_[node];
       int new_dst = QueryDestination(old_dst);
       if (old_dst != new_dst) {
         // Compresss path
@@ -1787,7 +1749,7 @@ class CostGraph {
               old_reindexing_vector[reindexing_vector[old_dst][i]]);
         }
         reindexing_vector[node] = new_reindexing_vector;
-        merged_to[node] = new_dst;
+        merged_to_[node] = new_dst;
       }
       return new_dst;
     } else {
@@ -1800,10 +1762,9 @@ class CostGraph {
         pass_context::GetBool("auto_sharding::simplify_graph", true);
 
     // Merge nodes
-    for (const auto& pair : to_merge_pairs) {
+    for (const auto& pair : to_merge_pairs_) {
       int src = pair.first;
       int dst = pair.second;
-      CHECK(!merged_to.count(src));
       dst = QueryDestination(dst);
       if (enable) {
         MergeNode(src, dst);
@@ -1813,7 +1774,7 @@ class CostGraph {
     // Build follow map
     follow_idx.reserve(node_lens.size());
     for (int i = 0; i < node_lens.size(); ++i) {
-      if (merged_to.count(i)) {
+      if (merged_to_.count(i)) {
         follow_idx.push_back(QueryDestination(i));
       } else {
         follow_idx.push_back(-1);
@@ -1846,14 +1807,24 @@ class CostGraph {
     return os.str();
   }
 
+  // The number of strategies of each node.
   std::vector<int> node_lens;
+  // The adjacency list of each node.
   std::vector<absl::flat_hash_set<int>> adjacency;
+  // The cost matrix between two nodes.
   absl::flat_hash_map<std::pair<int, int>, Matrix> edge_costs;
+  // The reindexing vector of the node.
+  // A reindexing vector maps a strategy index from the node being followed
+  // to a strategy index of the curret node.
   absl::flat_hash_map<int, std::vector<int>> reindexing_vector;
-  absl::flat_hash_map<int, int> merged_to;
+  // Maps a node id to the node id that is being followed by this node.
+  // The value is -1 if the current node does not follow any node.
   std::vector<int> follow_idx;
 
-  std::vector<std::pair<int, int>> to_merge_pairs;
+  // Save the destination of merged nodes.
+  absl::flat_hash_map<int, int> merged_to_;
+  // Save pairs that need to be merged.
+  std::vector<std::pair<int, int>> to_merge_pairs_;
 };
 
 // Serialize parameters of the ILP problem as numpy arrays and call the python
@@ -2050,9 +2021,11 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
 // Set the HloSharding for all instructions according to the ILP solution.
 void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
                     const CostGraph& cost_graph,
-                    const std::vector<int64> s_val) {
+                    const std::vector<int64> s_val,
+                    const ClusterEnvironment& cluster_env) {
   HloComputation* entry = module->entry_computation();
 
+  // Set the HloSharding for every instruction
   for (HloInstruction* inst : entry->instructions()) {
     auto iter = strategy_map.find(inst);
     if (iter != strategy_map.end()) {
@@ -2092,6 +2065,51 @@ void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
           continue;
         }
         inst->set_sharding(sharding_spec);
+      }
+    }
+  }
+
+  // Post process: fix some corner cases.
+  for (HloInstruction* inst : entry->instructions()) {
+    if (inst->opcode() == HloOpcode::kDot) {
+     // For some dot instructions, our formulation think they are valid.
+     // But the the spmd partitioner cannot cover these strange cases and
+     // generates bad fallback code. Here we update the annotations to make
+     // them compatible with the spmd partitioner
+
+      HloInstruction* lhs = inst->mutable_operand(0);
+      HloInstruction* rhs = inst->mutable_operand(1);
+      const HloSharding& lhs_sharding = lhs->sharding();
+      const HloSharding& rhs_sharding = rhs->sharding();
+      const HloSharding& output_sharding = inst->sharding();
+
+      if (lhs_sharding.IsReplicated() && rhs_sharding.ReplicateOnLastTileDim()
+          && output_sharding.ReplicateOnLastTileDim()) {
+        const StrategyVector* strategies = strategy_map.at(inst).get();
+        int ins_idx = strategies->id;
+        int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
+        const std::string& name = strategies->leaf_vector[stra_idx].name;
+
+        const DotDimensionNumbers& dot_dnums = inst->dot_dimension_numbers();
+        std::vector<int64> lhs_space_dims, rhs_space_dims;
+        std::tie(lhs_space_dims, rhs_space_dims) =
+            GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
+        const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
+        const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
+
+        if (name == "SR = SS x SR @ {0, 1} (allreduce @ 1)") {
+          lhs->set_sharding(Tile(lhs->shape(),
+              {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1}, cluster_env));
+        } else if (name == "SR = SS x SR @ {1, 0} (allreduce @ 0)") {
+          lhs->set_sharding(Tile(lhs->shape(),
+              {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0}, cluster_env));
+        }
+      }
+    } else if (inst->opcode() == HloOpcode::kIota) {
+      if (inst->sharding().IsReplicated()) {
+        // For fully replicated iota, leave its sharding annotation to the
+        // ShardingPropagation pass, which can typically do a better job.
+        inst->clear_sharding();
       }
     }
   }
@@ -2291,7 +2309,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       BuildStrategyAndCost(sequence, ins_depth_map, cluster_env, solver_option);
   AliasSet alias_set =
       BuildAliasSet(module, alias_analysis->dataflow_analysis(), strategy_map);
-  // std::cerr << PrintStrategyMap(strategy_map, sequence);
+  //std::cerr << PrintStrategyMap(strategy_map, sequence);
 
   // ----- Build cost graph and merge unimporant nodes -----
   CostGraph cost_graph(leaf_strategies);
@@ -2312,7 +2330,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   }
 
   // ----- Set Sharding -----
-  SetHloSharding(module, strategy_map, cost_graph, s_val);
+  SetHloSharding(module, strategy_map, cost_graph, s_val, cluster_env);
 
   // std::cerr << "===== Exit AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();
@@ -2321,5 +2339,5 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   return true;
 }
 
-}  // namespace gpu
+}  // namespace spmd
 }  // namespace xla

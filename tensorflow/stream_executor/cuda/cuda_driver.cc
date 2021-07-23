@@ -294,7 +294,7 @@ static port::Status InternalInit() {
   // due to its non-symetric GPU connection topology.
   bool remap_device_id = true;
   tensorflow::ReadBoolFromEnvVar("TF_CUDA_REMAP_DEVICE_ID",
-                                  /*default_val=*/true,
+                                  /*default_val=*/false,
                                   &remap_device_id);
   int delta = remap_device_id ? 1 : 0;
   RETURN_IF_CUDA_RES_ERROR(cuDeviceGet(device, (device_ordinal + delta) % GetDeviceCount()),

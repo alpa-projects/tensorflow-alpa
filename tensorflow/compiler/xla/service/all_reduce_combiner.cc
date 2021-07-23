@@ -35,6 +35,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/hlo_query.h"
 #include "tensorflow/compiler/xla/service/hlo_reachability.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/shape_inference.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/status_macros.h"
@@ -104,6 +105,79 @@ Status CombineAllReduces(absl::Span<HloInstruction* const> to_combine) {
   }
   return Status::OK();
 }
+
+// Combines the elements of to_combine into a single AllReduce op. All
+// entries in to_combine must be AllReduce ops with exactly one operand
+// and the same reduction operation.
+// Different from the above implementation. This implementation do
+// the combined all-reduce in a continous buffer.
+Status CombineAllReducesContinuousBuffer(absl::Span<HloInstruction* const> to_combine) {
+  if (to_combine.size() < 2) {
+    return Status::OK();
+  }
+  VLOG(1) << "Combined " << to_combine.size() << " CRS ops";
+
+  HloComputation& computation = *to_combine.back()->parent();
+  HloComputation* reduction = to_combine[0]->to_apply();
+  const HloOpcode type = reduction->root_instruction()->opcode();
+
+  // Create a single bigger AllReduce of the operands of the smaller
+  // AllReduces.
+  std::vector<HloInstruction*> operands;
+  VLOG(1) << "Combining set";
+  for (HloInstruction* hlo : to_combine) {
+    VLOG(1) << "Set element: " << hlo->ToString();
+    TF_RET_CHECK(hlo->opcode() == HloOpcode::kAllReduce);
+    TF_RET_CHECK(hlo->operands().size() == 1);
+    TF_RET_CHECK(hlo->to_apply() == reduction ||
+                 (hlo->to_apply()->instruction_count() == 3 &&
+                  hlo->to_apply()->num_parameters() == 2 &&
+                  hlo->to_apply()->root_instruction()->opcode() == type));
+    TF_RET_CHECK(hlo->shape().IsArray());
+    for (HloInstruction* operand : hlo->operands()) {
+      operands.push_back(operand);
+    }
+  }
+
+  // Flatten and concatenate all buffers
+  std::vector<HloInstruction*> flattens;
+  int64 total_count = 0;
+  for (HloInstruction* hlo : operands) {
+    int64 count = ShapeUtil::ElementsIn(hlo->shape());
+	Shape shape = ShapeUtil::MakeShape(hlo->shape().element_type(), {count});
+    flattens.push_back(computation.AddInstruction(
+      HloInstruction::CreateReshape(shape, hlo)
+    ));
+    total_count += count;
+  }
+  Shape flatten_shape = ShapeUtil::MakeShape(flattens[0]->shape().element_type(), {total_count});
+  HloInstruction* concat = computation.AddInstruction(
+    HloInstruction::CreateConcatenate(flatten_shape, flattens, /*dimension=*/0));
+
+  // Do a combined all-reduce
+  HloInstruction* combined = computation.AddInstruction(HloInstruction::CreateAllReduce(
+      flatten_shape, {concat}, reduction,
+      to_combine.front()->replica_groups(),
+      /*constrain_layout=*/false, to_combine.front()->channel_id(),
+      Cast<HloAllReduceInstruction>(to_combine.front())->use_global_device_ids()));
+
+  // Slice results and reshape to their origial shapes
+  int64 pt = 0;
+  for (int64 i = 0; i < to_combine.size(); ++i) {
+    int64 count = ShapeUtil::ElementsIn(flattens[i]->shape());
+    HloInstruction* res = computation.AddInstruction(
+      HloInstruction::CreateSlice(
+       flattens[i]->shape(), combined,
+       /*start_indices=*/{pt}, /*limit_indices=*/{pt + count}, /*strides=*/{1}));
+    auto replace_with = HloInstruction::CreateReshape(
+        to_combine[i]->shape(), res);
+    TF_RETURN_IF_ERROR(computation.ReplaceWithNewInstruction(
+        to_combine[i], std::move(replace_with)));
+    pt += count;
+  }
+  return Status::OK();
+}
+
 }  // namespace
 
 AllReduceCombiner::AllReduceCombiner(int64_t combine_threshold_in_bytes,
@@ -142,7 +216,9 @@ StatusOr<bool> AllReduceCombiner::Run(HloModule* module) {
     TF_ASSIGN_OR_RETURN(
         bool computation_changed,
         CombineInstructionsByKey<AllReduceKey>(
-            computation, key_fn, &CombineAllReduces,
+            computation, key_fn,
+            pass_context::GetBool("combiner::use_continuous_buffer", false) ?
+              &CombineAllReducesContinuousBuffer: &CombineAllReduces,
             combine_threshold_in_bytes_, combine_threshold_count_));
     changed |= computation_changed;
   }

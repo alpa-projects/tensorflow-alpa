@@ -476,6 +476,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           py::arg("options") = HloPrintOptions())
       .def("as_serialized_hlo_module_proto", &GetHloModuleSerializedProto)
       .def("from_serialized_hlo_module_proto", &HloModuleFromSerializedProto)
+      .def("has_schedule", &HloModule::has_schedule)
       .def("spmd_output_sharding", &HloModule::spmd_output_sharding)
       .def("spmd_parameters_shardings", &HloModule::spmd_parameters_shardings)
       .def("parameter_shapes", [](const HloModule& hlo_module) -> std::vector<Shape>{

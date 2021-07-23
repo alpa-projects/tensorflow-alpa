@@ -5,7 +5,7 @@
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
 
 namespace xla {
-namespace gpu {
+namespace spmd {
 
 struct AutoShardingOption {
   bool force_data_parallel;
@@ -23,7 +23,7 @@ class AutoSharding : public HloModulePass {
   StatusOr<bool> Run(HloModule* module) override;
 };
 
-}  // namespace gpu
+}  // namespace spmd
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING

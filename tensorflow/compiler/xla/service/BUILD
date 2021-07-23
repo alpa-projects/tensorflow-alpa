@@ -2533,6 +2533,7 @@ cc_library(
         ":hlo_pass",
         ":hlo_query",
         ":hlo_reachability",
+        ":pass_context",
         ":shape_inference",
         "//tensorflow/compiler/xla:array2d",
         "//tensorflow/compiler/xla:literal",

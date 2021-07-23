@@ -35,6 +35,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/hlo_query.h"
 #include "tensorflow/compiler/xla/service/hlo_reachability.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/shape_inference.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/status_macros.h"
@@ -216,7 +217,9 @@ StatusOr<bool> AllReduceCombiner::Run(HloModule* module) {
     TF_ASSIGN_OR_RETURN(
         bool computation_changed,
         CombineInstructionsByKey<AllReduceKey>(
-            computation, key_fn, &CombineAllReducesContinuousBuffer,
+            computation, key_fn,
+            pass_context::GetBool("combiner::use_continuous_buffer", false) ?
+              &CombineAllReducesContinuousBuffer: &CombineAllReduces,
             combine_threshold_in_bytes_, combine_threshold_count_));
     changed |= computation_changed;
   }

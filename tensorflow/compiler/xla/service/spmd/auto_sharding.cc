@@ -561,35 +561,37 @@ InstructionDepthMap BuildInstructionDepthMap(
     CHECK(!current_frontier.empty());
     next_frontier.clear();
     for (const HloInstruction* inst : current_frontier) {
-      int delta = 0;
-
-      // Heavy operators have more weight (distance).
-      switch (inst->opcode()) {
-        case HloOpcode::kConstant:
-        case HloOpcode::kBroadcast:
-          delta = 0;
-          break;
-        case HloOpcode::kDot:
-        case HloOpcode::kConvolution:
-          delta = 1000;
-          break;
-        // A temporary hack here: reduce ops will generate replicated sharding.
-        // We do not want the later broadcast and elementwise ops to follow it.
-        // So we give reduce ops some penalty and let the elementwise ops to
-        // follow other operands.
-        // TODO(lmzheng): remove this hack by correctly registering strategies
-        // for broadcast.
-        case HloOpcode::kReduce:
-          delta = -10;
-          break;
-        default:
-          delta = 1;
-          break;
-      }
-
       for (const HloInstruction* node : edge_dict[inst]) {
         int now_degree = --degree_dict[node];
         if (now_degree == 0) {
+          int delta = 0;
+
+          // Heavy operators have more weight (distance).
+          switch (node->opcode()) {
+            case HloOpcode::kDot:
+            case HloOpcode::kConvolution:
+              delta = 1000;
+              break;
+            case HloOpcode::kBroadcast:
+              delta = -3;
+              break;
+            // A temporary hack here: reduce ops will generate replicated sharding.
+            // We do not want the later broadcast and elementwise ops to follow it.
+            // So we give reduce ops some penalty and let the elementwise ops to
+            // follow other operands.
+            // TODO(lmzheng): remove this hack by correctly registering strategies
+            // for broadcast.
+            case HloOpcode::kReduce:
+              delta = -10;
+              break;
+            case HloOpcode::kConstant:
+              delta = 0;
+              break;
+            default:
+              delta = 1;
+              break;
+          }
+
           next_frontier.push_back(node);
           depth_map[node] = depth_map[inst] + delta;
           collected += 1;
@@ -1030,36 +1032,10 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
           }
         }
         CHECK_GE(follow_idx, 0);
-        const StrategyVector* src_strategies = strategy_map.at(
-          ins->operand(follow_idx)).get();
-
-        // Peer Propagation: if the strategies of some operands are undefined,
-        // let the undefined operands follow the deepest operand.
-        // Currently, we only enable this for HloOpcode::kIota.
-        for (int64 i = 0; i < ins->operand_count(); ++i) {
-          const HloInstruction* operand = ins->operand(i);
-          if (undefined_set.count(operand) && operand->opcode() == HloOpcode::kIota) {
-            undefined_set.erase(operand);
-            StrategyVector* operand_strategies = strategy_map.at(operand).get();
-            operand_strategies->leaf_vector.clear();
-            operand_strategies->following = strategies.get();
-
-            for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
-              HloSharding output_spec = src_strategies->leaf_vector[sid].output_sharding;
-
-              std::string name = SimpleToString(output_spec);
-              double compute_cost = 0, communication_cost = 0;
-              double memory_cost = GetBytes(operand->shape()) / output_spec.NumTiles();
-              // iota does not have any operand
-              std::vector<std::vector<double>> resharding_costs;
-              operand_strategies->leaf_vector.push_back(ShardingStrategy(
-                  {name, output_spec, compute_cost, communication_cost, memory_cost,
-                   resharding_costs}));
-            }
-          }
-        }
 
         // Create follow strategies
+        const StrategyVector* src_strategies = strategy_map.at(
+          ins->operand(follow_idx)).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
 
@@ -1459,9 +1435,38 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
       }
       case HloOpcode::kIota: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
-        // Enumerating all possible strategies for iota on a 2-d mesh is too tedious,
-        // so we leave it as undefined. Its strategies will be defined by
-        // "Peer Propagation" when it is used for the first time.
+
+        // Fully tile the buffer to 2-d mesh
+        for (int64 i = 0; i < ins->shape().rank(); ++i) {
+          for (int64 j = 0; j < ins->shape().rank(); ++j) {
+            if (i == j) {
+              continue;
+            }
+
+            if (ins->shape().dimensions(i) < device_mesh.dim(0) ||
+                ins->shape().dimensions(j) < device_mesh.dim(1)) {
+              continue;
+            }
+
+            std::string name =
+                "S{" + std::to_string(i) + "," + std::to_string(j) + "} @ {0,1}";
+            HloSharding output_spec = Tile(ins->shape(), {i, j}, {0, 1}, cluster_env);
+            double compute_cost = 0, communication_cost = 0;
+            double memory_cost =
+                GetBytes(ins->shape()) / output_spec.NumTiles();
+            strategies->leaf_vector.push_back(
+                ShardingStrategy({name,
+                                  output_spec,
+                                  compute_cost,
+                                  communication_cost,
+                                  memory_cost,
+                                  {}}));
+          }
+        }
+
+        // Replicate
+        strategies->leaf_vector.push_back(ShardingStrategy(
+            {"R", HloSharding::Replicate(), 4, 0, GetBytes(ins->shape()), {}}));
         break;
       }
       case HloOpcode::kGetTupleElement: {
@@ -2016,9 +2021,11 @@ std::pair<std::vector<int64>, std::vector<int64>> CallSolver(
 // Set the HloSharding for all instructions according to the ILP solution.
 void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
                     const CostGraph& cost_graph,
-                    const std::vector<int64> s_val) {
+                    const std::vector<int64> s_val,
+                    const ClusterEnvironment& cluster_env) {
   HloComputation* entry = module->entry_computation();
 
+  // Set the HloSharding for every instruction
   for (HloInstruction* inst : entry->instructions()) {
     auto iter = strategy_map.find(inst);
     if (iter != strategy_map.end()) {
@@ -2058,6 +2065,51 @@ void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
           continue;
         }
         inst->set_sharding(sharding_spec);
+      }
+    }
+  }
+
+  // Post process: fix some corner cases.
+  for (HloInstruction* inst : entry->instructions()) {
+    if (inst->opcode() == HloOpcode::kDot) {
+     // For some dot instructions, our formulation think they are valid.
+     // But the the spmd partitioner cannot cover these strange cases and
+     // generates bad fallback code. Here we update the annotations to make
+     // them compatible with the spmd partitioner
+
+      HloInstruction* lhs = inst->mutable_operand(0);
+      HloInstruction* rhs = inst->mutable_operand(1);
+      const HloSharding& lhs_sharding = lhs->sharding();
+      const HloSharding& rhs_sharding = rhs->sharding();
+      const HloSharding& output_sharding = inst->sharding();
+
+      if (lhs_sharding.IsReplicated() && rhs_sharding.ReplicateOnLastTileDim()
+          && output_sharding.ReplicateOnLastTileDim()) {
+        const StrategyVector* strategies = strategy_map.at(inst).get();
+        int ins_idx = strategies->id;
+        int stra_idx = cost_graph.RemapIndex(ins_idx, s_val[ins_idx]);
+        const std::string& name = strategies->leaf_vector[stra_idx].name;
+
+        const DotDimensionNumbers& dot_dnums = inst->dot_dimension_numbers();
+        std::vector<int64> lhs_space_dims, rhs_space_dims;
+        std::tie(lhs_space_dims, rhs_space_dims) =
+            GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
+        const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
+        const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
+
+        if (name == "SR = SS x SR @ {0, 1} (allreduce @ 1)") {
+          lhs->set_sharding(Tile(lhs->shape(),
+              {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1}, cluster_env));
+        } else if (name == "SR = SS x SR @ {1, 0} (allreduce @ 0)") {
+          lhs->set_sharding(Tile(lhs->shape(),
+              {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0}, cluster_env));
+        }
+      }
+    } else if (inst->opcode() == HloOpcode::kIota) {
+      if (inst->sharding().IsReplicated()) {
+        // For fully replicated iota, leave its sharding annotation to the
+        // ShardingPropagation pass, which can typically do a better job.
+        inst->clear_sharding();
       }
     }
   }
@@ -2278,7 +2330,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   }
 
   // ----- Set Sharding -----
-  SetHloSharding(module, strategy_map, cost_graph, s_val);
+  SetHloSharding(module, strategy_map, cost_graph, s_val, cluster_env);
 
   // std::cerr << "===== Exit AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();

@@ -55,6 +55,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/python/lib/core/bfloat16.h"
+#include "tensorflow/stream_executor/tf_allocator_adapter.h"
 
 // TODO(phawkins): remove host_id properties after JAX is update to avoid them.
 
@@ -301,6 +302,23 @@ PYBIND11_MODULE(xla_extension, m) {
 
   TF_CHECK_OK(PyBuffer::RegisterTypes(m));
 
+  py::class_<tensorflow::AllocatorStats,
+             std::shared_ptr<tensorflow::AllocatorStats>>
+      allocator_stats(m, "AllocatorStats");
+  allocator_stats
+      .def_readonly("num_allocs", &tensorflow::AllocatorStats::num_allocs)
+      .def_readonly("bytes_in_use", &tensorflow::AllocatorStats::bytes_in_use)
+      .def_readonly("peak_bytes_in_use",
+                    &tensorflow::AllocatorStats::peak_bytes_in_use)
+      .def_readonly("largest_alloc_size",
+                    &tensorflow::AllocatorStats::largest_alloc_size)
+      .def_readonly("bytes_reserved",
+                    &tensorflow::AllocatorStats::bytes_reserved)
+      .def_readonly("peak_bytes_reserved",
+                    &tensorflow::AllocatorStats::peak_bytes_reserved)
+      .def_readonly("largest_free_block_bytes",
+                    &tensorflow::AllocatorStats::largest_free_block_bytes);
+
   py::class_<PyExecutable, std::shared_ptr<PyExecutable>> executable(
       m, "Executable");
   executable.def_property_readonly("client", &PyExecutable::client)
@@ -341,6 +359,21 @@ PYBIND11_MODULE(xla_extension, m) {
              Executable* executable = local_executables[0]->executable();
              return executable->TotalAllocationSize();
            })
+      .def("gpu_stream_executor_alloc_stats",
+           [](PyExecutable* exec) {
+             namespace se = ::stream_executor;
+             const PjRtExecutable* pjrt_executable = &exec->pjrt_executable();
+             const PjRtStreamExecutorExecutable* stream_executable =
+                 dynamic_cast<const PjRtStreamExecutorExecutable*>(
+                     pjrt_executable);
+             const se::MultiDeviceAdapter* allocator =
+                 dynamic_cast<const se::MultiDeviceAdapter*>(
+                     stream_executable->client()->allocator());
+             if (allocator) {
+               return allocator->GetStats();
+             }
+             return py::none();
+           })
       .def_property_readonly("traceback", &PyExecutable::traceback);
 
   m.def("buffer_to_dlpack_managed_tensor", BufferToDLPackManagedTensor,
@@ -375,8 +408,8 @@ PYBIND11_MODULE(xla_extension, m) {
   distributed_runtime_client.def("connect", &DistributedRuntimeClient::Connect)
       .def("shutdown", &DistributedRuntimeClient::Shutdown);
 
-  //m.def("get_distributed_runtime_service", &GetDistributedRuntimeService);
-  //m.def("get_distributed_runtime_client", &GetDistributedRuntimeClient);
+  // m.def("get_distributed_runtime_service", &GetDistributedRuntimeService);
+  // m.def("get_distributed_runtime_client", &GetDistributedRuntimeClient);
 
   m.def("get_distributed_runtime_service", [](std::string address, int num_nodes) {
     DistributedRuntimeServiceImpl::Options service_options;

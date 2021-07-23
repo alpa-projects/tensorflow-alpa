@@ -105,6 +105,13 @@ class MultiDeviceAdapter : public DeviceMemoryAllocator {
     return per_device_allocators_[device_ordinal].GetStream(device_ordinal);
   }
 
+  absl::optional<tensorflow::AllocatorStats> GetStats() const{
+    if (tf_allocators_.size() == 0) {
+      return absl::nullopt;
+    }
+    return tf_allocators_[0]->GetStats();
+  }
+
  private:
   std::vector<TfAllocatorAdapter> per_device_allocators_;
   // The wrapped TF allocators backing per_device_allocators_

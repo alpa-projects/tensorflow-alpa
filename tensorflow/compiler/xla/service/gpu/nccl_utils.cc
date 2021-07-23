@@ -201,7 +201,7 @@ StatusOr<std::unique_ptr<NcclClique>> CreateNcclClique(
   // due to its non-symetric GPU connection topology.
   bool remap_device_id = true;
   tensorflow::ReadBoolFromEnvVar("TF_CUDA_REMAP_DEVICE_ID",
-                                  /*default_val=*/true,
+                                  /*default_val=*/false,
                                   &remap_device_id);
   int delta = remap_device_id ? 1 : 0;
   int process_device_count;

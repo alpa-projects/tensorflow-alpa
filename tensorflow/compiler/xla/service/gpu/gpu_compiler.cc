@@ -476,11 +476,11 @@ Status GpuCompiler::OptimizeHloModule(
         /*combine_threshold_count=*/256);
     pipeline.AddPass<AllReduceCombiner>(
         /*combine_threshold_in_bytes=*/
-        pass_context::GetInt("combiner::all_reduce_threshold", 512 * 1024 * 1024),
+        pass_context::GetInt("combiner::all_reduce_threshold", 30 * 1024 * 1024),
         /*combine_threshold_count=*/256);
     pipeline.AddPass<ReduceScatterCombiner>(
         /*combine_threshold_in_bytes=*/
-        pass_context::GetInt("combiner::all_reduce_threshold", 512 * 1024 * 1024),
+        pass_context::GetInt("combiner::all_reduce_threshold", 30 * 1024 * 1024),
         /*combine_threshold_count=*/256);
 
     if (hlo_module->config()

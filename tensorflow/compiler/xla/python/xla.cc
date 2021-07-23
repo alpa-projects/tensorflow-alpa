@@ -55,7 +55,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/python/lib/core/bfloat16.h"
-#include "tensorflow/stream_executor/tf_allocator_adapter.h"
 
 // TODO(phawkins): remove host_id properties after JAX is update to avoid them.
 
@@ -302,23 +301,6 @@ PYBIND11_MODULE(xla_extension, m) {
 
   TF_CHECK_OK(PyBuffer::RegisterTypes(m));
 
-  py::class_<tensorflow::AllocatorStats,
-             std::shared_ptr<tensorflow::AllocatorStats>>
-      allocator_stats(m, "AllocatorStats");
-  allocator_stats
-      .def_readonly("num_allocs", &tensorflow::AllocatorStats::num_allocs)
-      .def_readonly("bytes_in_use", &tensorflow::AllocatorStats::bytes_in_use)
-      .def_readonly("peak_bytes_in_use",
-                    &tensorflow::AllocatorStats::peak_bytes_in_use)
-      .def_readonly("largest_alloc_size",
-                    &tensorflow::AllocatorStats::largest_alloc_size)
-      .def_readonly("bytes_reserved",
-                    &tensorflow::AllocatorStats::bytes_reserved)
-      .def_readonly("peak_bytes_reserved",
-                    &tensorflow::AllocatorStats::peak_bytes_reserved)
-      .def_readonly("largest_free_block_bytes",
-                    &tensorflow::AllocatorStats::largest_free_block_bytes);
-
   py::class_<PyExecutable, std::shared_ptr<PyExecutable>> executable(
       m, "Executable");
   executable.def_property_readonly("client", &PyExecutable::client)
@@ -359,20 +341,30 @@ PYBIND11_MODULE(xla_extension, m) {
              Executable* executable = local_executables[0]->executable();
              return executable->TotalAllocationSize();
            })
-      .def("gpu_stream_executor_alloc_stats",
+      /* To use it, it's like: 
+       * cost0 = compiled_computation.stream_executor_used()
+       * # cost0 is like the memory for tensorflow
+       * compiled_computation.execute(device_input)
+       * # this execution can repeat any times
+       * cost1 = compiled_computation.stream_executor_used()
+       * # the result is cost1 - cost0
+       */
+      .def("stream_executor_used",
            [](PyExecutable* exec) {
              namespace se = ::stream_executor;
              const PjRtExecutable* pjrt_executable = &exec->pjrt_executable();
              const PjRtStreamExecutorExecutable* stream_executable =
                  dynamic_cast<const PjRtStreamExecutorExecutable*>(
                      pjrt_executable);
-             const se::MultiDeviceAdapter* allocator =
-                 dynamic_cast<const se::MultiDeviceAdapter*>(
-                     stream_executable->client()->allocator());
-             if (allocator) {
-               return allocator->GetStats();
+             const PjRtStreamExecutorDevice* device = 
+                 tensorflow::down_cast<PjRtStreamExecutorDevice*>(
+                     stream_executable->client()->addressable_devices()[0]);
+             int64 free, total;
+             if (device->local_device_state()->executor()->DeviceMemoryUsage(
+                     &free, &total)) {
+               return total - free;
              }
-             return py::none();
+             return int64(-1);
            })
       .def_property_readonly("traceback", &PyExecutable::traceback);
 

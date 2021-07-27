@@ -77,7 +77,7 @@ class ExecutableBuildOptions {
 
   // The random seed for compilation.
   int seed() const { return seed_; };
-  int set_seed(int seed) { seed_ = seed; }
+  void set_seed(int seed) { seed_ = seed; }
 
   // The number of replicas of this computation that are to be executed.
   // Defaults to 1.

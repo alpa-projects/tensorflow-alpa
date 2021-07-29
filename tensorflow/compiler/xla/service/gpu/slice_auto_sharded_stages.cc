@@ -184,6 +184,10 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
     }
   }
 
+  if (pipeline_stages.empty()) {
+    return pipeline_stages;
+  }
+
   // ----- Put the sharded HLO module back to Python -----
   HloModuleProto module_proto = module->ToProto();
   std::string serilaized_module_proto;

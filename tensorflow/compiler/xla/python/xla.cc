@@ -129,6 +129,21 @@ PYBIND11_MODULE(xla_extension, m) {
       .def_property_readonly(
           "client",
           [](const ClientAndPtr<PjRtDevice>& device) { return device.client; })
+      .def_property_readonly(
+          "device_memory_usage",
+          [](const PjRtDevice& device) {
+            const PjRtStreamExecutorDevice* stream_device =
+                dynamic_cast<const PjRtStreamExecutorDevice*>(&device);
+            CHECK_NE(stream_device, nullptr);
+            LocalDeviceState* local_device =
+                stream_device->GetLocalDeviceState().ValueOrDie();
+            int64 free, total;
+            if (local_device->executor()->DeviceMemoryUsage(&free, &total)) {
+              return std::make_pair(free, total);
+            };
+            const int64 invalid = -1;
+            return std::make_pair(invalid, invalid);
+          })
       .def("__str__", &PjRtDevice::DebugString)
       .def("synchronize_all_activity", [](PjRtDevice& device) {
              PjRtStreamExecutorDevice* stream_device =
@@ -375,8 +390,8 @@ PYBIND11_MODULE(xla_extension, m) {
   distributed_runtime_client.def("connect", &DistributedRuntimeClient::Connect)
       .def("shutdown", &DistributedRuntimeClient::Shutdown);
 
-  //m.def("get_distributed_runtime_service", &GetDistributedRuntimeService);
-  //m.def("get_distributed_runtime_client", &GetDistributedRuntimeClient);
+  // m.def("get_distributed_runtime_service", &GetDistributedRuntimeService);
+  // m.def("get_distributed_runtime_client", &GetDistributedRuntimeClient);
 
   m.def("get_distributed_runtime_service", [](std::string address, int num_nodes) {
     DistributedRuntimeServiceImpl::Options service_options;

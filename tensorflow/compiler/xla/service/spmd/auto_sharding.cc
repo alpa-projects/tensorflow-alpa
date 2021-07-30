@@ -79,7 +79,7 @@ HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
 }
 
 // Depth analysis (breadth first search).
-// A heavey operator (e.g., dot, convolution) has a much larger distance.
+// We also assign a much larger distance to heavey operators (e.g., dot, convolution).
 InstructionDepthMap BuildInstructionDepthMap(
     const HloInstructionSequence& sequence) {
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
@@ -124,9 +124,6 @@ InstructionDepthMap BuildInstructionDepthMap(
             case HloOpcode::kConvolution:
               delta = 1000;
               break;
-            case HloOpcode::kBroadcast:
-              delta = -3;
-              break;
             // A temporary hack here: reduce ops will generate replicated sharding.
             // We do not want the later broadcast and elementwise ops to follow it.
             // So we give reduce ops some penalty and let the elementwise ops to
@@ -135,6 +132,10 @@ InstructionDepthMap BuildInstructionDepthMap(
             // for broadcast.
             case HloOpcode::kReduce:
               delta = -10;
+              break;
+            // For similar reasons mentioned above, we give some penalty to broadcast.
+            case HloOpcode::kBroadcast:
+              delta = -3;
               break;
             case HloOpcode::kConstant:
               delta = 0;
@@ -179,6 +180,7 @@ std::vector<double> FollowInsCostVector(int64 source_len, int64 index) {
   return ret;
 }
 
+// Factory functions for StrategyVector
 std::unique_ptr<StrategyVector> CreateLeafStrategyVector(
     size_t instruction_id, LeafStrategies& leaf_strategies) {
   std::unique_ptr<StrategyVector> strategies =
@@ -1409,8 +1411,8 @@ void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
   for (HloInstruction* inst : entry->instructions()) {
     if (inst->opcode() == HloOpcode::kDot) {
      // For some dot instructions, our formulation think they are valid.
-     // But the the spmd partitioner cannot cover these strange cases and
-     // generates bad fallback code. Here we update the annotations to make
+     // But the the spmd partitioner cannot cover these strange cases and it will
+     // generate bad fallback code. Here we update the annotations to make
      // them compatible with the spmd partitioner
 
       HloInstruction* lhs = inst->mutable_operand(0);

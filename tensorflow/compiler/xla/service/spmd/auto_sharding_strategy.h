@@ -467,6 +467,7 @@ class ClusterEnvironment {
 };
 
 // Function declarations
+// Their comments can be found in their definition in *.cc files.
 HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
                  const std::vector<int64> mesh_dims,
                  const ClusterEnvironment& cluster_env);

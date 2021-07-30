@@ -129,6 +129,21 @@ PYBIND11_MODULE(xla_extension, m) {
       .def_property_readonly(
           "client",
           [](const ClientAndPtr<PjRtDevice>& device) { return device.client; })
+      .def_property_readonly(
+          "device_memory_usage",
+          [](const PjRtDevice& device) {
+            const PjRtStreamExecutorDevice* stream_device =
+                dynamic_cast<const PjRtStreamExecutorDevice*>(&device);
+            CHECK_NE(stream_device, nullptr);
+            LocalDeviceState* local_device =
+                stream_device->GetLocalDeviceState().ValueOrDie();
+            int64 free, total;
+            if (local_device->executor()->DeviceMemoryUsage(&free, &total)) {
+              return std::make_pair(free, total);
+            };
+            const int64 invalid = -1;
+            return std::make_pair(invalid, invalid);
+          })
       .def("__str__", &PjRtDevice::DebugString)
       .def("synchronize_all_activity", [](PjRtDevice& device) {
              PjRtStreamExecutorDevice* stream_device =
@@ -340,31 +355,6 @@ PYBIND11_MODULE(xla_extension, m) {
                  stream_executable->executables();
              Executable* executable = local_executables[0]->executable();
              return executable->TotalAllocationSize();
-           })
-      /* To use it, it's like: 
-       * cost0 = compiled_computation.stream_executor_used()
-       * # cost0 is like the memory for tensorflow
-       * compiled_computation.execute(device_input)
-       * # this execution can repeat any times
-       * cost1 = compiled_computation.stream_executor_used()
-       * # the result is cost1 - cost0
-       */
-      .def("stream_executor_used",
-           [](PyExecutable* exec) {
-             namespace se = ::stream_executor;
-             const PjRtExecutable* pjrt_executable = &exec->pjrt_executable();
-             const PjRtStreamExecutorExecutable* stream_executable =
-                 dynamic_cast<const PjRtStreamExecutorExecutable*>(
-                     pjrt_executable);
-             const PjRtStreamExecutorDevice* device = 
-                 tensorflow::down_cast<PjRtStreamExecutorDevice*>(
-                     stream_executable->client()->addressable_devices()[0]);
-             int64 free, total;
-             if (device->local_device_state()->executor()->DeviceMemoryUsage(
-                     &free, &total)) {
-               return total - free;
-             }
-             return int64(-1);
            })
       .def_property_readonly("traceback", &PyExecutable::traceback);
 

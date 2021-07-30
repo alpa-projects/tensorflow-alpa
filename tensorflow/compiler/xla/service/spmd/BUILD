@@ -148,8 +148,8 @@ cc_library(
 
 cc_library(
     name = "auto_sharding",
-    srcs = ["auto_sharding.cc"],
-    hdrs = ["auto_sharding.h", "auto_sharding_util.h"],
+    srcs = ["auto_sharding.cc", "auto_sharding_util.cc", "auto_sharding_dot_handler.cc"],
+    hdrs = ["auto_sharding.h", "auto_sharding_strategy.h", "auto_sharding_util.h"],
     deps = [
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla/service:dump",

@@ -7,13 +7,6 @@
 namespace xla {
 namespace spmd {
 
-struct AutoShardingOption {
-  bool force_data_parallel;
-  int64 forward_backward_sep_id;
-  int64 force_all_reduce_cost{-1};
-  int64 force_reduce_scatter_cost{-1};
-};
-
 class AutoSharding : public HloModulePass {
  public:
   AutoSharding() = default;

@@ -11,11 +11,13 @@ class DotHandler {
   DotHandler(std::unique_ptr<StrategyVector>& strategies,
              StrategyMap& strategy_map,
              const HloInstruction* ins,
-             const ClusterEnvironment& cluster_env) :
+             const ClusterEnvironment& cluster_env,
+             const AutoShardingSolverOption& solver_option) :
       strategies(strategies),
       strategy_map(strategy_map),
       ins(ins),
       cluster_env(cluster_env),
+      solver_option(solver_option),
       device_mesh(cluster_env.device_mesh),
       lhs(ins->operand(0)),
       rhs(ins->operand(1)),
@@ -61,15 +63,32 @@ class DotHandler {
 
   void SplitLhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
     if (device_mesh.dim(mesh_dim1) > 1) {
-      HloSharding output_spec =
-          Tile(ins->shape(), {space_base_dim}, {mesh_dim0}, cluster_env);
-      double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+      HloSharding output_spec = Undefined();
+      std::string name;
+      double communication_cost;
+      double memory_cost;
+
+      if (solver_option.prefer_reduce_scatter) {
+        name = absl::StrFormat("SS = SS x SR @ {%d,%d} (reduce-scatter @ %d)",
+                               mesh_dim0, mesh_dim1, mesh_dim1);
+        output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim+1},
+                           {mesh_dim0, mesh_dim1}, cluster_env);
+        memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+        communication_cost = cluster_env.ReduceScatterCost(
+            memory_cost * device_mesh.dim(mesh_dim1), mesh_dim1);
+      } else {
+        name = absl::StrFormat("SR = SS x SR @ {%d,%d} (allreduce @ %d)",
+                               mesh_dim0, mesh_dim1, mesh_dim1);
+        output_spec = Tile(ins->shape(), {space_base_dim}, {mesh_dim0}, cluster_env);
+        memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+        communication_cost = cluster_env.AllReduceCost(memory_cost, mesh_dim1);
+      }
+
       strategies->leaf_vector.push_back(ShardingStrategy(
-          {absl::StrFormat("SR = SS x SR @ {%d,%d} (allreduce @ %d)",
-                           mesh_dim0, mesh_dim1, mesh_dim1),
+          {name,
            output_spec,
            0,
-           cluster_env.AllReduceCost(memory_cost, mesh_dim1),
+           communication_cost,
            memory_cost,
            {
                ReshardingCostVector(
@@ -87,15 +106,32 @@ class DotHandler {
 
   void SplitRhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
     if (device_mesh.dim(mesh_dim0) > 1 && device_mesh.dim(mesh_dim1) > 1) {
-      HloSharding output_spec =
-          Tile(ins->shape(), {space_base_dim + 1}, {mesh_dim1}, cluster_env);
-      double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+      HloSharding output_spec = Undefined();
+      std::string name;
+      double communication_cost;
+      double memory_cost;
+
+      if (solver_option.prefer_reduce_scatter) {
+        name = absl::StrFormat("SS = RS x SS @ {%d,%d} (reduce-scatter @ %d)",
+                                mesh_dim0, mesh_dim1, mesh_dim0),
+        output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
+                           {mesh_dim0, mesh_dim1}, cluster_env);
+        memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+        communication_cost = cluster_env.ReduceScatterCost(
+            memory_cost * device_mesh.dim(mesh_dim0), mesh_dim0);
+      } else {
+        name = absl::StrFormat("RS = RS x SS @ {%d,%d} (allreduce @ %d)",
+                                mesh_dim0, mesh_dim1, mesh_dim0),
+        output_spec = Tile(ins->shape(), {space_base_dim + 1}, {mesh_dim1}, cluster_env);
+        memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+        communication_cost = cluster_env.AllReduceCost(memory_cost, mesh_dim0);
+      }
+
       strategies->leaf_vector.push_back(ShardingStrategy(
-          {absl::StrFormat("RS = RS x SS @ {%d,%d} (allreduce @ %d)",
-                            mesh_dim0, mesh_dim1, mesh_dim0),
+          {name,
            output_spec,
            0,
-           cluster_env.AllReduceCost(memory_cost, mesh_dim0),
+           communication_cost,
            memory_cost,
            {
                ReshardingCostVector(
@@ -230,6 +266,7 @@ class DotHandler {
   StrategyMap& strategy_map;
   const HloInstruction* ins;
   const ClusterEnvironment& cluster_env;
+  const AutoShardingSolverOption& solver_option;
 
   const Array<int64>& device_mesh;
   const HloInstruction* lhs;
@@ -250,11 +287,12 @@ void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                StrategyMap& strategy_map,
                const HloInstruction* ins,
                size_t instruction_id,
-               const ClusterEnvironment& cluster_env) {
+               const ClusterEnvironment& cluster_env,
+               const AutoShardingSolverOption& solver_option) {
   strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
   SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-  DotHandler handler(strategies, strategy_map, ins, cluster_env);
+  DotHandler handler(strategies, strategy_map, ins, cluster_env, solver_option);
   handler.RegisterStrategies();
 }
 

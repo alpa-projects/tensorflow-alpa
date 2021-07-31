@@ -16,20 +16,28 @@ constexpr double INFINITY_COST = 1e10;
 // Options for the auto-sharding solver.
 struct AutoShardingSolverOption {
   bool force_batch_dim_to_mesh_dim;
-  int64 forward_backward_sep_id;
 
+  // If true, override the cost of all-gather with the given value.
   bool override_all_gather_cost;
   double all_gather_cost;
 
+  // If true, override the cost of all-reduce with the given value.
   bool override_all_reduce_cost;
   double all_reduce_cost;
 
+  // If true, override the cost of reduce-scatter with the given value.
   bool override_reduce_scatter_cost;
   double reduce_scatter_cost;
 
+  // If true, prefer reduce-scatter + all-gather over all-reduce
+  bool prefer_reduce_scatter;
+
+  // If ture, allow strategies that recompute heavy operators (e.g., dot)
+  // to reduce communication.
   bool allow_recompute_heavy_op;
 
-  bool load_strategy;
+  // If true, load solution vector from PassContext
+  bool load_solution_vector;
 };
 
 // One sharding strategy
@@ -397,35 +405,33 @@ class ClusterEnvironment {
     std::vector<int> dst_tensor_dim_to_mesh_dim =
         GetTensorDimToMeshDim(shape, dst_spec);
 
-    // Do not allow switch the split axis when both src and dst are partial replicated
-    size_t src_partial = 0, dst_partial = 0;
-    for (int64 i = 0; i < shape.rank(); ++i) {
-      if (src_tensor_dim_to_mesh_dim[i] == -1 && dst_tensor_dim_to_mesh_dim[i] != -1) {
-        src_partial++;
-      }
-      if (dst_tensor_dim_to_mesh_dim[i] == -1 && src_tensor_dim_to_mesh_dim[i] != -1) {
-        dst_partial++;
-      }
-    }
-    if (src_partial >= 1 && dst_partial >= 1) {
-      return INFINITY_COST;
-    }
+    int n_slice = 0;
+    int n_all_gather = 0;
 
-    // Compute the resharding cost for all-gather based resharding
+    double bytes = GetBytes(shape) / src_spec.NumTiles();
     double cost = 0.0;
     for (int64 i = 0; i < shape.rank(); ++i) {
       int src_mesh_dim = src_tensor_dim_to_mesh_dim[i];
-      if (src_mesh_dim == -1) {
-        continue;
-      }
       if (src_mesh_dim == dst_tensor_dim_to_mesh_dim[i]) {
         continue;
       }
-      if (dst_tensor_dim_to_mesh_dim[i] == -1) {
-        cost += AllGatherCost(GetBytes(shape), src_mesh_dim);
+      if (src_mesh_dim == -1) {
+        n_slice++;
         continue;
       }
-      // do not allow other re-sharding strategies
+      if (dst_tensor_dim_to_mesh_dim[i] == -1) {
+        n_all_gather++;
+        bytes *= device_mesh.dim(src_mesh_dim);
+        cost += AllGatherCost(bytes, src_mesh_dim);
+        //cost += AllGatherCost(GetBytes(shape), src_mesh_dim);
+        continue;
+      }
+      // Do not allow other re-sharding patterns.
+      return INFINITY_COST;
+    }
+
+    if (n_slice >= 1 && n_all_gather >= 1) {
+      // Do not allow some strange re-sharding patterns.
       return INFINITY_COST;
     }
 
@@ -486,7 +492,8 @@ void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                StrategyMap& strategy_map,
                const HloInstruction* ins,
                size_t instruction_id,
-               const ClusterEnvironment& cluster_env);
+               const ClusterEnvironment& cluster_env,
+               const AutoShardingSolverOption& solver_option);
 
 }  // namespace spmd
 }  // namespace xla

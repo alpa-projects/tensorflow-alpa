@@ -1435,10 +1435,10 @@ void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
         const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
         const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
 
-        if (name == "SR = SS x SR @ {0, 1} (allreduce @ 1)") {
+        if (name == "SR = SS x SR @ {0,1} (allreduce @ 1)") {
           lhs->set_sharding(Tile(lhs->shape(),
               {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1}, cluster_env));
-        } else if (name == "SR = SS x SR @ {1, 0} (allreduce @ 0)") {
+        } else if (name == "SR = SS x SR @ {1,0} (allreduce @ 0)") {
           lhs->set_sharding(Tile(lhs->shape(),
               {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0}, cluster_env));
         }

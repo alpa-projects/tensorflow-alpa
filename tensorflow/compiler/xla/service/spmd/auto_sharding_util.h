@@ -9,6 +9,8 @@
 namespace xla {
 namespace spmd {
 
+#define CHECK_FLOAT_EQ(a, b) CHECK_LE(std::abs((a) - (b)), 1e-6)
+
 /*
  * Array/Vector Utility
  */

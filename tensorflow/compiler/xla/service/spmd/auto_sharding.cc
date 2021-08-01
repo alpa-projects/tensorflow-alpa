@@ -263,7 +263,7 @@ std::vector<ShardingStrategy> FilterStrategy(
 }
 
 // Build possible sharding strategies and their costs for all instructions
-std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
+std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCost(
     const HloInstructionSequence& sequence,
     const InstructionDepthMap& depth_map,
     const AliasMap& alias_map,
@@ -272,6 +272,7 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
   const Array<int64>& device_mesh = cluster_env.device_mesh;
   StrategyMap strategy_map;
   LeafStrategies leaf_strategies;
+  AssociativeDotPairs associative_dot_pairs;
   absl::flat_hash_set<const HloInstruction*> undefined_set;
   absl::flat_hash_map<const HloInstruction*, int64> num_consumers;
 
@@ -680,6 +681,22 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
                 GetBytes(ins->shape()), resharding_costs}));
           break;
         }
+
+        if (ins->opcode() == HloOpcode::kAdd) {
+          // Adjust the resharding costs for AllReduceReassociate pass.
+          // The AllReduceReassociate pass can simplify
+          // allreduce(x) + allreduce(y) to allreduce(x + y),
+          // so we adjust the resharidng costs to reflect this optimization.
+
+          // TODO(lmzheng): The current implementation only works for
+          // x = a + b. We also need to cover cases where there are
+          // more than two operands (i.e., x = a + b + c).
+          if (ins->operand(0)->opcode() == HloOpcode::kDot &&
+              ins->operand(1)->opcode() == HloOpcode::kDot) {
+            associative_dot_pairs.push_back(
+              {strategy_map.at(ins->operand(0)).get(), strategy_map.at(ins->operand(1)).get()});
+          }
+        }
         break;
       }
       case HloOpcode::kReduce: {
@@ -897,7 +914,8 @@ std::pair<StrategyMap, LeafStrategies> BuildStrategyAndCost(
     strategy_map[ins] = std::move(strategies);
   }
 
-  return std::make_pair(std::move(strategy_map), std::move(leaf_strategies));
+  return std::make_tuple(std::move(strategy_map), std::move(leaf_strategies),
+                         std::move(associative_dot_pairs));
 }
 
 // Note for dealing with alias:
@@ -981,10 +999,12 @@ AliasSet BuildAliasSet(const HloModule* module,
 // It merges nodes and does path compression.
 class CostGraph {
  public:
-  CostGraph(const LeafStrategies& leaf_strategies) {
+  CostGraph(const LeafStrategies& leaf_strategies,
+            const AssociativeDotPairs& associative_dot_pairs) {
     node_lens.reserve(leaf_strategies.size());
     adjacency.assign(leaf_strategies.size(), absl::flat_hash_set<int>());
 
+    // Build the cost graph
     for (const auto& strategies : leaf_strategies) {
       node_lens.push_back(strategies->leaf_vector.size());
 
@@ -1010,6 +1030,24 @@ class CostGraph {
       if (strategies->following) {
         to_merge_pairs_.push_back({strategies->id, strategies->following->id});
       }
+    }
+
+    // Adjust the edge costs for dot pairs that can be optimized by AllReduceReassociate
+    for (const auto& pair : associative_dot_pairs) {
+      size_t src_idx = pair.first->id;
+      size_t dst_idx = pair.second->id;
+
+      CHECK_EQ(node_lens[src_idx], node_lens[dst_idx]);
+
+      Matrix edge_cost(node_lens[src_idx], node_lens[dst_idx]);
+      for (size_t i = 0; i < node_lens[src_idx]; ++i) {
+        if (leaf_strategies[src_idx]->leaf_vector[i].communication_cost > 0) {
+          CHECK_FLOAT_EQ(leaf_strategies[src_idx]->leaf_vector[i].communication_cost,
+                         leaf_strategies[dst_idx]->leaf_vector[i].communication_cost);
+          edge_cost(i, i) = -leaf_strategies[src_idx]->leaf_vector[i].communication_cost;
+        }
+      }
+      AddEdgeCost(src_idx, dst_idx, edge_cost);
     }
   }
 
@@ -1411,6 +1449,17 @@ std::tuple<std::vector<int64>, std::vector<int64>, double> CallSolver(
   return std::make_tuple(std::move(s_val), std::move(e_val), objective);
 }
 
+// Insert a copy of the operand to force the sharding of the operand
+void ForceOperandSharding(HloInstruction* inst,
+                          int operand_num,
+                          const HloSharding& sharding) {
+  HloInstruction* operand = inst->mutable_operand(operand_num);
+  HloInstruction* replace_with = inst->parent()->AddInstruction(
+    HloInstruction::CreateBitcast(operand->shape(), operand));
+  replace_with->set_sharding(sharding);
+  inst->ReplaceOperandWith(operand_num, replace_with);
+}
+
 // Set the HloSharding for all instructions according to the ILP solution.
 void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
                     const CostGraph& cost_graph,
@@ -1465,13 +1514,13 @@ void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
   // Post process: fix some corner cases.
   for (HloInstruction* inst : entry->instructions()) {
     if (inst->opcode() == HloOpcode::kDot) {
-     // For some dot instructions, our formulation think they are valid.
-     // But the the spmd partitioner cannot cover these strange cases and it will
-     // generate bad fallback code. Here we update the annotations to make
-     // them compatible with the spmd partitioner
+      // For some dot instructions, our formulation think they are valid.
+      // But the the spmd partitioner cannot cover these strange cases and it will
+      // generate bad fallback code. Here we insert some extra annotated copy
+      // instructions to help the spmd partitioner generate correct code.
 
-      HloInstruction* lhs = inst->mutable_operand(0);
-      HloInstruction* rhs = inst->mutable_operand(1);
+      const HloInstruction* lhs = inst->operand(0);
+      const HloInstruction* rhs = inst->operand(1);
       const HloSharding& lhs_sharding = lhs->sharding();
       const HloSharding& rhs_sharding = rhs->sharding();
       const HloSharding& output_sharding = inst->sharding();
@@ -1490,12 +1539,16 @@ void SetHloSharding(HloModule* module, const StrategyMap& strategy_map,
         const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
         const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
 
+        // TODO(lmzheng): cover more cases.
         if (name == "SR = SS x SR @ {0,1} (allreduce @ 1)") {
-          lhs->set_sharding(Tile(lhs->shape(),
+          ForceOperandSharding(inst, 0, Tile(lhs->shape(),
               {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1}, cluster_env));
         } else if (name == "SR = SS x SR @ {1,0} (allreduce @ 0)") {
-          lhs->set_sharding(Tile(lhs->shape(),
+          ForceOperandSharding(inst, 0, Tile(lhs->shape(),
               {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0}, cluster_env));
+        } else if (name == "RS = RS x SS @ {0,1} (allreduce @ 0)") {
+          ForceOperandSharding(inst, 0, Tile(lhs->shape(),
+              {lhs_con_dims[0]}, {0}, cluster_env));
         }
       }
     } else if (inst->opcode() == HloOpcode::kIota) {
@@ -1724,16 +1777,17 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   // ----- Build strategies and costs -----
   StrategyMap strategy_map;
   LeafStrategies leaf_strategies;
+  AssociativeDotPairs associative_dot_pairs;
 
   AliasMap alias_map = BuildAliasMap(module, alias_analysis->dataflow_analysis());
-  std::tie(strategy_map, leaf_strategies) = BuildStrategyAndCost(
+  std::tie(strategy_map, leaf_strategies, associative_dot_pairs) = BuildStrategyAndCost(
       sequence, ins_depth_map, alias_map, cluster_env, solver_option);
   AliasSet alias_set =
       BuildAliasSet(module, alias_analysis->dataflow_analysis(), strategy_map);
   //std::cerr << PrintStrategyMap(strategy_map, sequence);
 
   // ----- Build cost graph and merge unimporant nodes -----
-  CostGraph cost_graph(leaf_strategies);
+  CostGraph cost_graph(leaf_strategies, associative_dot_pairs);
   cost_graph.Simplify();
 
   // ----- Call the ILP Solver -----

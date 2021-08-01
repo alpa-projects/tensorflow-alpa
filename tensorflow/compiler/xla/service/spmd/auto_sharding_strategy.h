@@ -71,11 +71,19 @@ struct StrategyVector {
 
 // Type aliases.
 using LivenessSet = std::vector<std::vector<const HloValue*>>;
+// Map an instruction to its strategy vector.
 using StrategyMap =
     absl::flat_hash_map<const HloInstruction*, std::unique_ptr<StrategyVector>>;
+// The list of all leaf strategies.
 using LeafStrategies = std::vector<StrategyVector*>;
+// The list of all dot instruction pairs that can be optimized by AllReduceReassociate pass.
+using AssociativeDotPairs =
+    std::vector<std::pair<const StrategyVector*, const StrategyVector*>>;
+// Map an instruction to its depth.
 using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64>;
+// Map an instruction to its alias source parameter.
 using AliasMap = absl::flat_hash_map<const HloInstruction*, const HloInstruction*>;
+// The set of all alias pairs
 using AliasSet = absl::flat_hash_set<std::pair<int64, int64>>;
 
 // Store the profiling results of communication and computation.

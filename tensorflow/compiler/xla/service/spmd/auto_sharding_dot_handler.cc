@@ -68,7 +68,7 @@ class DotHandler {
       double communication_cost;
       double memory_cost;
 
-      if (solver_option.prefer_reduce_scatter) {
+      if (false && solver_option.prefer_reduce_scatter) {  // Deprecated branch
         name = absl::StrFormat("SS = SS x SR @ {%d,%d} (reduce-scatter @ %d)",
                                mesh_dim0, mesh_dim1, mesh_dim1);
         output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim+1},
@@ -111,7 +111,7 @@ class DotHandler {
       double communication_cost;
       double memory_cost;
 
-      if (solver_option.prefer_reduce_scatter) {
+      if (false && solver_option.prefer_reduce_scatter) {  // Deprecated branch
         name = absl::StrFormat("SS = RS x SS @ {%d,%d} (reduce-scatter @ %d)",
                                 mesh_dim0, mesh_dim1, mesh_dim0),
         output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim + 1},

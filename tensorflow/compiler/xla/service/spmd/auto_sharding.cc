@@ -1430,6 +1430,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       if (strategy.name.find("allreduce") != std::string::npos) {
         absl::flat_hash_set<HloInstruction*> replicated_set;
         absl::flat_hash_set<HloInstruction*> boundary_set;
+        absl::flat_hash_set<HloInstruction*> consumer_set;
         absl::flat_hash_set<const HloInstruction*> visited;
 
         // Use DFS to find the replicated set.
@@ -1442,12 +1443,14 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           for (HloInstruction* consumer : consumer_map.at(cur)) {
             if (replicated_set.count(consumer) || IsAlwaysReplicated(consumer) ||
                 consumer == output ||
-                GetShardingStrategy(consumer, strategy_map, cost_graph, s_val).output_sharding
-                    == strategy.output_sharding) {
+                (GetShardingStrategy(consumer, strategy_map, cost_graph, s_val).output_sharding
+                    == strategy.output_sharding &&
+                Shape::Equal().IgnoreLayout()(consumer->shape(), inst->shape()))) {
               continue;
             }
-            is_boundary = true;
-            break;
+
+            boundary_set.insert(cur);
+            return;
           }
 
           for (size_t i = 0; i < cur->operand_count(); ++i) {
@@ -1455,30 +1458,30 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             if (replicated_set.count(operand) || IsAlwaysReplicated(operand) ||
                 operand == output ||
                (GetShardingStrategy(operand, strategy_map, cost_graph, s_val).output_sharding
-                    == strategy.output_sharding && consumer_map.at(operand).size() == 1)) {
+                    == strategy.output_sharding &&
+                Shape::Equal().IgnoreLayout()(operand->shape(), inst->shape()) &&
+                consumer_map.at(operand).size() == 1)) {
               continue;
             }
-            is_boundary = true;
-            break;
+
+            boundary_set.insert(cur);
+            return;
           }
 
           // If this node is not a boundary node, propagate from this node.
-          if (is_boundary) {
-            boundary_set.insert(cur);
-          } else {
-            replicated_set.insert(cur);
-            for (HloInstruction* consumer : consumer_map.at(cur)) {
-              if (!visited.count(consumer) && !IsAlwaysReplicated(consumer) &&
-                  consumer != output) {
-                find_replicated_set(consumer);
-              }
+          replicated_set.insert(cur);
+          for (HloInstruction* consumer : consumer_map.at(cur)) {
+            if (!visited.count(consumer) && !IsAlwaysReplicated(consumer) &&
+                consumer != output) {
+              consumer_set.insert(consumer);
+              find_replicated_set(consumer);
             }
-            for (size_t i = 0; i < cur->operand_count(); ++i) {
-              HloInstruction* operand = cur->mutable_operand(i);
-              if (!visited.count(operand) && !IsAlwaysReplicated(operand) &&
-                  operand != output) {
-                find_replicated_set(operand);
-              }
+          }
+          for (size_t i = 0; i < cur->operand_count(); ++i) {
+            HloInstruction* operand = cur->mutable_operand(i);
+            if (!visited.count(operand) && !IsAlwaysReplicated(operand) &&
+                operand != output) {
+              find_replicated_set(operand);
             }
           }
         };
@@ -1490,20 +1493,37 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           find_replicated_set(consumer);
         }
 
-        // Print replicated set and boundary set
-        // std::cerr << inst->ToString(HloPrintOptions::ShortParsable()) << "\n";
-        // std::cerr << "replicated set:\n";
-        // for (auto x : replicated_set) {
-        //   std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable()) << "\n";
-        // }
-        // std::cerr << "boundary set:\n";
-        // for (auto x : boundary_set) {
-        //   std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable()) << "\n";
-        // }
-        // std::cerr << "-----------------------\n" << std::endl;
+        // Analyze the statistics of boundary set and replicated set.
+        int num_incompatible_nodes = 0;
+        for (const HloInstruction* node : boundary_set) {
+          if (consumer_set.count(node)) {
+            num_incompatible_nodes++;
+          }
+        }
 
-        // Set sharding
-        if (replicated_set.size() > 3 && boundary_set.size() == 1) {
+        int num_replicated_parameters = 0;
+        for (const HloInstruction* node : replicated_set) {
+          if (node->opcode() == HloOpcode::kParameter) {
+            num_replicated_parameters++;
+          }
+        }
+
+        // Print replicated set and boundary set
+        //std::cerr << inst->ToString(HloPrintOptions::ShortParsable()) << "\n";
+        //std::cerr << "replicated set (#parameter: " << num_replicated_parameters << "):\n";
+        //for (auto x : replicated_set) {
+        //  std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable()) << "\n";
+        //}
+        //std::cerr << "boundary set (#incompatible: " << num_incompatible_nodes << "):\n";
+        //for (auto x : boundary_set) {
+        //  std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable())
+        //            << " " << consumer_set.count(x) << "\n";
+        //}
+        //std::cerr << "-----------------------\n" << std::endl;
+
+        // If applicable, replace all-reduce with reduce-scatter by
+        // setting instructions' sharding.
+        if (num_replicated_parameters >= 1 && num_incompatible_nodes <= 1) {
           HloSharding output_spec = GetReduceScatterOutput(inst, strategy, cluster_env);
 
           for (HloInstruction* to_split : replicated_set) {

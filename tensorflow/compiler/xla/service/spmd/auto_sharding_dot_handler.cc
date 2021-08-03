@@ -71,7 +71,7 @@ class DotHandler {
       if (false && solver_option.prefer_reduce_scatter) {  // Deprecated branch
         name = absl::StrFormat("SS = SS x SR @ {%d,%d} (reduce-scatter @ %d)",
                                mesh_dim0, mesh_dim1, mesh_dim1);
-        output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim+1},
+        output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
                            {mesh_dim0, mesh_dim1}, cluster_env);
         memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
         communication_cost = cluster_env.ReduceScatterCost(
@@ -282,6 +282,7 @@ class DotHandler {
   const tensorflow::protobuf::RepeatedField<int64>& rhs_batch_dims;
 };
 
+// Register strategies for dot instructions.
 void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                LeafStrategies& leaf_strategies,
                StrategyMap& strategy_map,
@@ -294,6 +295,26 @@ void HandleDot(std::unique_ptr<StrategyVector>& strategies,
 
   DotHandler handler(strategies, strategy_map, ins, cluster_env, solver_option);
   handler.RegisterStrategies();
+}
+
+// Return the output sharding of the reduce-scatter variant of a given strategy.
+HloSharding GetReduceScatterOutput(const HloInstruction* ins,
+                                   const ShardingStrategy& strategy,
+                                   const ClusterEnvironment& cluster_env) {
+  CHECK_EQ(ins->opcode(), HloOpcode::kDot);
+
+  const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
+  int64 space_base_dim = dot_dnums.lhs_batch_dimensions_size();
+
+  int mesh_dim0, mesh_dim1;
+  if (strategy.name.find("{0,1}") != std::string::npos) {
+    mesh_dim0 = 0; mesh_dim1 = 1;
+  } else {
+    mesh_dim0 = 1; mesh_dim1 = 0;
+  }
+
+  return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
+             {mesh_dim0, mesh_dim1}, cluster_env);
 }
 
 }  // namespace spmd

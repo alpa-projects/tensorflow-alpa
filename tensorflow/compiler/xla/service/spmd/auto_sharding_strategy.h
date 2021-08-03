@@ -81,6 +81,9 @@ using AssociativeDotPairs =
     std::vector<std::pair<const StrategyVector*, const StrategyVector*>>;
 // Map an instruction to its depth.
 using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64>;
+// Map an instruction to its consumers.
+using ConsumerMap = absl::flat_hash_map<const HloInstruction*,
+  absl::flat_hash_set<HloInstruction*>>;
 // Map an instruction to its alias source parameter.
 using AliasMap = absl::flat_hash_map<const HloInstruction*, const HloInstruction*>;
 // The set of all alias pairs
@@ -431,7 +434,6 @@ class ClusterEnvironment {
         n_all_gather++;
         bytes *= device_mesh.dim(src_mesh_dim);
         cost += AllGatherCost(bytes, src_mesh_dim);
-        //cost += AllGatherCost(GetBytes(shape), src_mesh_dim);
         continue;
       }
       // Do not allow other re-sharding patterns.
@@ -481,20 +483,25 @@ class ClusterEnvironment {
 };
 
 // Function declarations
-// Their comments can be found in their definition in *.cc files.
+// Their comments can be found in their definitions in *.cc files.
 HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
                  const std::vector<int64> mesh_dims,
                  const ClusterEnvironment& cluster_env);
+
 std::vector<double> ReshardingCostVector(
     const StrategyVector* strategies, const Shape& shape,
     const HloSharding& required_sharding,
     const ClusterEnvironment& cluster_env);
+
 std::vector<double> FollowInsCostVector(int64 source_len, int64 index);
+
 std::unique_ptr<StrategyVector> CreateLeafStrategyVector(
     size_t instruction_id, LeafStrategies& leaf_strategies);
+
 void SetInNodesWithInstruction(std::unique_ptr<StrategyVector>& strategies,
                                const HloInstruction* ins,
                                const StrategyMap& strategy_map);
+
 void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                LeafStrategies& leaf_strategies,
                StrategyMap& strategy_map,
@@ -502,6 +509,10 @@ void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                size_t instruction_id,
                const ClusterEnvironment& cluster_env,
                const AutoShardingSolverOption& solver_option);
+
+HloSharding GetReduceScatterOutput(const HloInstruction* ins,
+                                   const ShardingStrategy& straetgy,
+                                   const ClusterEnvironment& cluster_env);
 
 }  // namespace spmd
 }  // namespace xla

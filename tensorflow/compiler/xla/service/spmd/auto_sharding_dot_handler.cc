@@ -62,7 +62,7 @@ class DotHandler {
   }
 
   void SplitLhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
-    if (device_mesh.dim(mesh_dim1) > 1) {
+    if (device_mesh.dim(mesh_dim0) > 1 && device_mesh.dim(mesh_dim1) > 1) {
       HloSharding output_spec = Undefined();
       std::string name;
       double communication_cost;
@@ -105,7 +105,7 @@ class DotHandler {
   }
 
   void SplitRhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
-    if (device_mesh.dim(mesh_dim0) > 1 && device_mesh.dim(mesh_dim1) > 1) {
+    if (device_mesh.dim(mesh_dim0) > 1) {
       HloSharding output_spec = Undefined();
       std::string name;
       double communication_cost;
@@ -295,26 +295,6 @@ void HandleDot(std::unique_ptr<StrategyVector>& strategies,
 
   DotHandler handler(strategies, strategy_map, ins, cluster_env, solver_option);
   handler.RegisterStrategies();
-}
-
-// Return the output sharding of the reduce-scatter variant of a given strategy.
-HloSharding GetReduceScatterOutput(const HloInstruction* ins,
-                                   const ShardingStrategy& strategy,
-                                   const ClusterEnvironment& cluster_env) {
-  CHECK_EQ(ins->opcode(), HloOpcode::kDot);
-
-  const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
-  int64 space_base_dim = dot_dnums.lhs_batch_dimensions_size();
-
-  int mesh_dim0, mesh_dim1;
-  if (strategy.name.find("{0,1}") != std::string::npos) {
-    mesh_dim0 = 0; mesh_dim1 = 1;
-  } else {
-    mesh_dim0 = 1; mesh_dim1 = 0;
-  }
-
-  return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
-             {mesh_dim0, mesh_dim1}, cluster_env);
 }
 
 }  // namespace spmd

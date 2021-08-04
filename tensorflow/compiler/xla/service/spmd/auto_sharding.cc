@@ -74,8 +74,8 @@ HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
   Array<int64> tile_assignment(tile_assignment_dimensions);
   tile_assignment.SetValues(tile_assignment_devices);
 
-  return replicate_on_last_tile_dim ? HloSharding::PartialTile(tile_assignment)
-                                    : HloSharding::Tile(tile_assignment);
+  return replicate_on_last_tile_dim ? HloSharding::PartialTile(std::move(tile_assignment))
+                                    : HloSharding::Tile(std::move(tile_assignment));
 }
 
 // Depth analysis (breadth first search).
@@ -1401,15 +1401,93 @@ std::tuple<std::vector<int64>, std::vector<int64>, double> CallSolver(
 }
 
 // Get the final sharding strategy according to the ilp solution.
-const ShardingStrategy& GetShardingStrategy(const HloInstruction* inst,
-                                            const StrategyMap& strategy_map,
-                                            const CostGraph& cost_graph,
-                                            const std::vector<int64>& s_val) {
+const ShardingStrategy& GetShardingStrategy_(const HloInstruction* inst,
+                                             const StrategyMap& strategy_map,
+                                             const CostGraph& cost_graph,
+                                             const std::vector<int64>& s_val) {
   const StrategyVector* strategies = strategy_map.at(inst).get();
   CHECK(!strategies->is_tuple);
   int node_idx = strategies->id;
   int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
   return strategies->leaf_vector[stra_idx];
+}
+
+#define GetShardingStrategy(inst) \
+    GetShardingStrategy_((inst), strategy_map, cost_graph, s_val)
+
+// Return the output sharding of the reduce-scatter variant of a given strategy.
+HloSharding GetReduceScatterOutput(const HloInstruction* ins,
+                                   const ShardingStrategy& strategy,
+                                   const ClusterEnvironment& cluster_env) {
+  if (ins->opcode() == HloOpcode::kDot) {
+    const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
+    int64 space_base_dim = dot_dnums.lhs_batch_dimensions_size();
+
+    if (StrStartsWith(strategy.name, "RR = RS x SR")) {
+      int mesh_dim;
+      if (strategy.name.find("{0}") != std::string::npos) {
+        mesh_dim = 0;
+      } else {
+        mesh_dim = 1;
+      }
+      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, cluster_env);
+    } else {
+      int mesh_dim0, mesh_dim1;
+      if (strategy.name.find("{0,1}") != std::string::npos) {
+        mesh_dim0 = 0; mesh_dim1 = 1;
+      } else {
+        mesh_dim0 = 1; mesh_dim1 = 0;
+      }
+
+      if (ins->shape().dimensions(space_base_dim) < cluster_env.device_mesh.dim(mesh_dim0) ||
+          ins->shape().dimensions(space_base_dim + 1) < cluster_env.device_mesh.dim(mesh_dim1)) {
+        return Undefined();
+      }
+
+      return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
+                 {mesh_dim0, mesh_dim1}, cluster_env);
+    }
+  } else if (ins->opcode() == HloOpcode::kReduce) {
+    // TODO(lmzheng): support more cases.
+    CHECK_EQ(ins->shape().rank(), 1);
+
+    int mesh_dim;
+    if (strategy.name.find("[0]") != std::string::npos) {
+      mesh_dim = 0;
+    } else {
+      mesh_dim = 1;
+    }
+
+    if (strategy.output_sharding.IsReplicated()) {
+      return Tile(ins->shape(), {0}, {mesh_dim}, cluster_env);
+    } else {
+      Array<int64> tile_assignment = strategy.output_sharding.tile_assignment();
+      tile_assignment.Reshape({cluster_env.total_devices});
+      return HloSharding::Tile(std::move(tile_assignment));
+    }
+  } else {
+    LOG(FATAL) << "Invalid instruction: " << ins->ToString();
+  }
+}
+
+// Return whether an instruction has the opportunity to generate redcue-scatter.
+bool HasReduceScatterOpportunity(const HloInstruction* inst,
+                                 const StrategyMap& strategy_map,
+                                 const CostGraph& cost_graph,
+                                 const std::vector<int64>& s_val) {
+  if (inst->opcode() == HloOpcode::kReduce && inst->shape().rank() == 1) {
+    return true;
+  }
+  if (inst->opcode() == HloOpcode::kDot) {
+    if (GetShardingStrategy(inst->operand(0)).output_sharding.IsReplicated() &&
+        GetShardingStrategy(inst->operand(1)).output_sharding.IsReplicated()) {
+      // This dot is replicated on all devices. Do not split it.
+      return false;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 // Substitute all-reduce strategies with their reduce-scatter variants.
@@ -1423,9 +1501,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   const HloInstruction* output = instructions.back();
 
   for (HloInstruction* inst : instructions) {
-    if (inst->opcode() == HloOpcode::kDot) {
-      const ShardingStrategy& strategy = GetShardingStrategy(
-          inst, strategy_map, cost_graph, s_val);
+    if (HasReduceScatterOpportunity(inst, strategy_map, cost_graph, s_val)) {
+      const ShardingStrategy& strategy = GetShardingStrategy(inst);
 
       if (strategy.name.find("allreduce") != std::string::npos) {
         absl::flat_hash_set<HloInstruction*> replicated_set;
@@ -1443,9 +1520,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           for (HloInstruction* consumer : consumer_map.at(cur)) {
             if (replicated_set.count(consumer) || IsAlwaysReplicated(consumer) ||
                 consumer == output ||
-                (GetShardingStrategy(consumer, strategy_map, cost_graph, s_val).output_sharding
-                    == strategy.output_sharding &&
-                Shape::Equal().IgnoreLayout()(consumer->shape(), inst->shape()))) {
+                (GetShardingStrategy(consumer).output_sharding == strategy.output_sharding &&
+                 DimensionsEqual(consumer->shape(), inst->shape()))) {
               continue;
             }
 
@@ -1457,10 +1533,9 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             HloInstruction* operand = cur->mutable_operand(i);
             if (replicated_set.count(operand) || IsAlwaysReplicated(operand) ||
                 operand == output ||
-               (GetShardingStrategy(operand, strategy_map, cost_graph, s_val).output_sharding
-                    == strategy.output_sharding &&
-                Shape::Equal().IgnoreLayout()(operand->shape(), inst->shape()) &&
-                consumer_map.at(operand).size() == 1)) {
+                (GetShardingStrategy(operand).output_sharding == strategy.output_sharding &&
+                 DimensionsEqual(operand->shape(), inst->shape()) &&
+                 consumer_map.at(operand).size() == 1)) {
               continue;
             }
 
@@ -1519,17 +1594,27 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         //  std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable())
         //            << " " << consumer_set.count(x) << "\n";
         //}
-        //std::cerr << "-----------------------\n" << std::endl;
 
         // If applicable, replace all-reduce with reduce-scatter by
         // setting instructions' sharding.
         if (num_replicated_parameters >= 1 && num_incompatible_nodes <= 1) {
           HloSharding output_spec = GetReduceScatterOutput(inst, strategy, cluster_env);
+          //std::cerr << "SET:  " << output_spec.ToString() << std::endl;
 
-          for (HloInstruction* to_split : replicated_set) {
-            to_split->set_sharding(output_spec);
+          if (StrStartsWith(strategy.name, "RR = RS x SR")) {
+            // If set the sharding for this dot instruction, the SPMD
+            // partitioner will generate bad fallback code.
+            replicated_set.erase(inst);
+          }
+
+          if (!IsUndefined(output_spec)) {
+            for (HloInstruction* to_split : replicated_set) {
+              to_split->set_sharding(output_spec);
+            }
           }
         }
+
+        //std::cerr << "-----------------------\n" << std::endl;
       }
     }
   }
@@ -1596,7 +1681,7 @@ void SetHloSharding(const HloInstructionSequence& sequence,
         inst->set_sharding(HloSharding::Tuple(tuple_sharding));
       } else {
         const HloSharding& sharding_spec =
-            GetShardingStrategy(inst, strategy_map, cost_graph, s_val).output_sharding;
+            GetShardingStrategy(inst).output_sharding;
         if (IsUndefined(sharding_spec)) {
           continue;
         }

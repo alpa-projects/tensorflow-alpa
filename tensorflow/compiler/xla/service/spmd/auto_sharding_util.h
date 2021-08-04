@@ -184,6 +184,12 @@ inline double GetBytes(const Shape& shape) {
   return ShapeUtil::ByteSizeOf(shape, /*pointer_size=*/8);
 };
 
+// Return whether two shapes are equal in dimension.
+// The element type and layout are ignored.
+inline bool DimensionsEqual(const Shape& a, const Shape& b) {
+  return Shape::Equal().IgnoreLayout().IgnoreElementType()(a, b);
+}
+
 /*
  * HloInstruction Utility
  */

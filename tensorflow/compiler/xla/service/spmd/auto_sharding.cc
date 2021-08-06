@@ -871,8 +871,7 @@ AliasMap BuildAliasMap(const HloModule* module,
 
   alias_config.ForEachAlias([&](const ShapeIndex& output_index,
                                 const HloInputOutputAliasConfig::Alias& alias) {
-    const HloInstruction* src_ins =
-        parameter_instructions[alias.parameter_number];
+    HloInstruction* src_ins = parameter_instructions[alias.parameter_number];
     CHECK_EQ(alias.parameter_index.size(), 0) << "Do not support tuple alias";
     const HloInstruction* dst_ins =
         dataflow_analysis.GetUniqueValueAt(output_tuple, output_index)
@@ -1473,8 +1472,20 @@ bool HasReduceScatterOpportunity(const HloInstruction* inst,
   return false;
 }
 
+// Return the users of an instruction and its alias.
+std::vector<HloInstruction*> UsersWithAlias(const HloInstruction* inst,
+                                            const AliasMap& alias_map) {
+  std::vector<HloInstruction*> users(inst->users().begin(), inst->users().end());
+  auto iter = alias_map.find(inst);
+  if (iter != alias_map.end()) {
+    users.insert(users.end(), iter->second->users().begin(), iter->second->users().end());
+  }
+  return users;
+}
+
 // Substitute all-reduce strategies with their reduce-scatter variants.
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
+                           const AliasMap& alias_map,
                            const StrategyMap& strategy_map,
                            const CostGraph& cost_graph,
                            const std::vector<int64>& s_val,
@@ -1499,37 +1510,21 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
           // Check whether the node is a boundary node.
           bool is_boundary = false;
-          for (HloInstruction* consumer : cur->users()) {
-            if (replicated_set.count(consumer) || IsAlwaysReplicated(consumer) ||
-                consumer == output ||
-                (GetShardingStrategy(consumer).output_sharding == strategy.output_sharding &&
-                 DimensionsEqual(consumer->shape(), inst->shape()))) {
-              continue;
+          std::vector<HloInstruction*> users = UsersWithAlias(cur, alias_map);
+
+          for (HloInstruction* consumer : users) {
+            if (consumer != output &&
+                (GetShardingStrategy(consumer).output_sharding != strategy.output_sharding ||
+                 !DimensionsEqual(consumer->shape(), inst->shape()))) {
+              boundary_set.insert(cur);
+              return;
             }
-
-            boundary_set.insert(cur);
-            return;
-          }
-
-          for (size_t i = 0; i < cur->operand_count(); ++i) {
-            HloInstruction* operand = cur->mutable_operand(i);
-            if (replicated_set.count(operand) || IsAlwaysReplicated(operand) ||
-                operand == output ||
-                (GetShardingStrategy(operand).output_sharding == strategy.output_sharding &&
-                 DimensionsEqual(operand->shape(), inst->shape()) &&
-                 NumNonOutputUsers(operand, output) == 1)) {
-              continue;
-            }
-
-            boundary_set.insert(cur);
-            return;
           }
 
           // If this node is not a boundary node, propagate from this node.
           replicated_set.insert(cur);
-          for (HloInstruction* consumer : cur->users()) {
-            if (!visited.count(consumer) && !IsAlwaysReplicated(consumer) &&
-                consumer != output) {
+          for (HloInstruction* consumer : users) {
+            if (!visited.count(consumer)) {
               consumer_set.insert(consumer);
               find_replicated_set(consumer);
             }
@@ -1537,7 +1532,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           for (size_t i = 0; i < cur->operand_count(); ++i) {
             HloInstruction* operand = cur->mutable_operand(i);
             if (!visited.count(operand) && !IsAlwaysReplicated(operand) &&
-                operand != output) {
+                GetShardingStrategy(operand).output_sharding == strategy.output_sharding &&
+                DimensionsEqual(operand->shape(), inst->shape())) {
               find_replicated_set(operand);
             }
           }
@@ -1545,8 +1541,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
         // Find the replicated set starting from the dot instruction.
         replicated_set.insert(inst);
-        visited.insert(inst);
-        for (HloInstruction* consumer : inst->users()) {
+        visited.insert(inst); visited.insert(output);
+        for (HloInstruction* consumer : UsersWithAlias(inst, alias_map)) {
           find_replicated_set(consumer);
         }
 
@@ -1954,7 +1950,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   // ----- Substitute all-reduce with reduce-scatter -----
   if (solver_option.prefer_reduce_scatter) {
-    GenerateReduceScatter(sequence, strategy_map,
+    GenerateReduceScatter(sequence, alias_map, strategy_map,
                           cost_graph, s_val, cluster_env);
   }
 

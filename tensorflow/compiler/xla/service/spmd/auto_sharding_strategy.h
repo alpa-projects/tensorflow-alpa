@@ -82,7 +82,7 @@ using AssociativeDotPairs =
 // Map an instruction to its depth.
 using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64>;
 // Map an instruction to its alias source parameter.
-using AliasMap = absl::flat_hash_map<const HloInstruction*, const HloInstruction*>;
+using AliasMap = absl::flat_hash_map<const HloInstruction*, HloInstruction*>;
 // The set of all alias pairs
 using AliasSet = absl::flat_hash_set<std::pair<int64, int64>>;
 

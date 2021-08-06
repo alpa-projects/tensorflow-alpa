@@ -224,6 +224,17 @@ inline std::pair<std::vector<int64>, std::vector<int64>> GetSpaceDims(
 // (e.g., constant, broadcasted constant, scalar)
 bool IsAlwaysReplicated(const HloInstruction* inst);
 
+// Return the number of users and exclude the output instruction.
+inline int NumNonOutputUsers(const HloInstruction* inst, const HloInstruction* output) {
+  int ret = 0;
+  for (const auto x : inst->users()) {
+    if (x != output) {
+      ret++;
+    }
+  }
+  return ret;
+}
+
 /*
  * HloSharding Utility
  */

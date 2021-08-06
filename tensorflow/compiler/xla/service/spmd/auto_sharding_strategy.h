@@ -81,9 +81,6 @@ using AssociativeDotPairs =
     std::vector<std::pair<const StrategyVector*, const StrategyVector*>>;
 // Map an instruction to its depth.
 using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64>;
-// Map an instruction to its consumers.
-using ConsumerMap = absl::flat_hash_map<const HloInstruction*,
-  absl::flat_hash_set<HloInstruction*>>;
 // Map an instruction to its alias source parameter.
 using AliasMap = absl::flat_hash_map<const HloInstruction*, const HloInstruction*>;
 // The set of all alias pairs

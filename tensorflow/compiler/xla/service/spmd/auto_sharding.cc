@@ -80,38 +80,21 @@ HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
 
 // Depth analysis (breadth first search).
 // We also assign a much larger distance to heavey operators (e.g., dot, convolution).
-std::pair<InstructionDepthMap, ConsumerMap> BuildInstructionDepthMap(
-    const HloInstructionSequence& sequence) {
+InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& sequence) {
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
 
   InstructionDepthMap depth_map;
-  ConsumerMap consumer_map;
   absl::flat_hash_map<const HloInstruction*, size_t> degree_dict;
-
-  for (HloInstruction* inst : instructions) {
-    if (inst == instructions.back()) {
-      continue;
-    }
-    for (int64 i = 0; i < inst->operand_count(); ++i) {
-      auto& consumers = consumer_map[inst->operand(i)];
-      if (!consumers.count(inst)) {
-        degree_dict[inst] += 1;
-        consumers.insert(inst);
-      }
-    }
-  }
 
   // Init frontier
   size_t collected = 0;
   std::vector<const HloInstruction*> current_frontier;
   for (const HloInstruction* inst : instructions) {
+    degree_dict[inst] = inst->unique_operands().size();
     if (degree_dict[inst] == 0) {
       depth_map[inst] = 0;
       current_frontier.push_back(inst);
       collected++;
-    }
-    if (!consumer_map.count(inst)) {
-      consumer_map[inst] = absl::flat_hash_set<HloInstruction*>();
     }
   }
 
@@ -121,7 +104,7 @@ std::pair<InstructionDepthMap, ConsumerMap> BuildInstructionDepthMap(
     CHECK(!current_frontier.empty());
     next_frontier.clear();
     for (const HloInstruction* inst : current_frontier) {
-      for (const HloInstruction* node : consumer_map[inst]) {
+      for (const HloInstruction* node : inst->users()) {
         int now_degree = --degree_dict[node];
         if (now_degree == 0) {
           int delta = 0;
@@ -163,7 +146,7 @@ std::pair<InstructionDepthMap, ConsumerMap> BuildInstructionDepthMap(
     std::swap(current_frontier, next_frontier);
   }
 
-  return std::make_pair(std::move(depth_map), std::move(consumer_map));
+  return depth_map;
 }
 
 // Compute the resharding cost vector from multiple possible strategies
@@ -1493,7 +1476,6 @@ bool HasReduceScatterOpportunity(const HloInstruction* inst,
 // Substitute all-reduce strategies with their reduce-scatter variants.
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const StrategyMap& strategy_map,
-                           const ConsumerMap& consumer_map,
                            const CostGraph& cost_graph,
                            const std::vector<int64>& s_val,
                            const ClusterEnvironment& cluster_env) {
@@ -1517,7 +1499,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
           // Check whether the node is a boundary node.
           bool is_boundary = false;
-          for (HloInstruction* consumer : consumer_map.at(cur)) {
+          for (HloInstruction* consumer : cur->users()) {
             if (replicated_set.count(consumer) || IsAlwaysReplicated(consumer) ||
                 consumer == output ||
                 (GetShardingStrategy(consumer).output_sharding == strategy.output_sharding &&
@@ -1535,7 +1517,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
                 operand == output ||
                 (GetShardingStrategy(operand).output_sharding == strategy.output_sharding &&
                  DimensionsEqual(operand->shape(), inst->shape()) &&
-                 consumer_map.at(operand).size() == 1)) {
+                 NumNonOutputUsers(operand, output) == 1)) {
               continue;
             }
 
@@ -1545,7 +1527,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
           // If this node is not a boundary node, propagate from this node.
           replicated_set.insert(cur);
-          for (HloInstruction* consumer : consumer_map.at(cur)) {
+          for (HloInstruction* consumer : cur->users()) {
             if (!visited.count(consumer) && !IsAlwaysReplicated(consumer) &&
                 consumer != output) {
               consumer_set.insert(consumer);
@@ -1564,7 +1546,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         // Find the replicated set starting from the dot instruction.
         replicated_set.insert(inst);
         visited.insert(inst);
-        for (HloInstruction* consumer : consumer_map.at(inst)) {
+        for (HloInstruction* consumer : inst->users()) {
           find_replicated_set(consumer);
         }
 
@@ -1924,8 +1906,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   const HloInstructionSequence& sequence =
       hlo_live_range->flattened_instruction_sequence();
   InstructionDepthMap ins_depth_map;
-  ConsumerMap consumer_map;
-  std::tie(ins_depth_map, consumer_map) = BuildInstructionDepthMap(sequence);
+  ins_depth_map = BuildInstructionDepthMap(sequence);
 
   // ----- Read parameters of device mesh -----
   Array<int64> device_mesh(
@@ -1973,7 +1954,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   // ----- Substitute all-reduce with reduce-scatter -----
   if (solver_option.prefer_reduce_scatter) {
-    GenerateReduceScatter(sequence, strategy_map, consumer_map,
+    GenerateReduceScatter(sequence, strategy_map,
                           cost_graph, s_val, cluster_env);
   }
 

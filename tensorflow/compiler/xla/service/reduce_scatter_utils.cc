@@ -157,6 +157,12 @@ bool IsPerIdOffset(const HloInstruction* offset, int64_t shard_size,
     return IsPerIdOffset(offset->operand(1 - const_operand),
                          shard_size / *multiplier, map_id, group_size, ar);
   }
+
+  if (offset->opcode() == HloOpcode::kSubtract) {
+    // TODO(lmzheng): make the condition stronger.
+    return IsTableLookup(offset->operand(0)) && IsTableLookup(offset->operand(1));
+  }
+
   if (shard_size == 1 && iota_group) {
     bool id_mapping_is_identity = true;
     for (int64_t id = 0; id < group_size; ++id) {
@@ -458,7 +464,7 @@ absl::optional<ReduceScatterSpec> MatchReduceScatter(
     if (!IsPerIdOffset(user->operand(spec.split_dim + 1),
                        user->dynamic_slice_sizes()[spec.split_dim], map_id,
                        group_size, ar)) {
-      VLOG(2) << "IsPerIdOffsets() failed " << ar->ToString();
+      VLOG(2) << "IsPerIdOffset() failed " << ar->ToString();
       return absl::nullopt;
     }
   }

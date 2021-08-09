@@ -1566,7 +1566,8 @@ void SetHloSharding(const HloInstructionSequence& sequence,
           }
         } else {
           CHECK(cur->following != nullptr);
-          if (instructions[cur->following->instruction_id]->has_sharding()) {
+          if (!instructions[cur->following->instruction_id]->shape().IsTuple() &&
+              instructions[cur->following->instruction_id]->has_sharding()) {
             // its sharding has been forcibly set
             flattened_shardings.push_back(
                 instructions[cur->following->instruction_id]->sharding());

@@ -15,7 +15,9 @@ constexpr double INFINITY_COST = 1e10;
 
 // Options for the auto-sharding solver.
 struct AutoShardingSolverOption {
-  bool force_batch_dim_to_mesh_dim;
+  // Forcely split the batch dimension and map it to a mesh dimension.
+  // This can force the auto-sharding pass to generate the data parallel startegy.
+  int force_batch_dim_to_mesh_dim;
 
   // If true, override the cost of all-gather with the given value.
   bool override_all_gather_cost;
@@ -79,10 +81,6 @@ using LeafStrategies = std::vector<StrategyVector*>;
 // The list of all dot instruction pairs that can be optimized by AllReduceReassociate pass.
 using AssociativeDotPairs =
     std::vector<std::pair<const StrategyVector*, const StrategyVector*>>;
-// Map an instruction to its depth.
-using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64>;
-// Map an instruction to its alias source parameter.
-using AliasMap = absl::flat_hash_map<const HloInstruction*, HloInstruction*>;
 // The set of all alias pairs
 using AliasSet = absl::flat_hash_set<std::pair<int64, int64>>;
 
@@ -505,6 +503,7 @@ void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                const HloInstruction* ins,
                size_t instruction_id,
                const ClusterEnvironment& cluster_env,
+               const InstructionBatchDimMap& batch_map,
                const AutoShardingSolverOption& solver_option);
 
 HloSharding GetReduceScatterOutput(const HloInstruction* ins,

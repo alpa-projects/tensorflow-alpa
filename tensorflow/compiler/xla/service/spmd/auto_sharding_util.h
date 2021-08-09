@@ -2,9 +2,11 @@
 #define TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_AUTO_SHARDING_UTIL_H_
 
 #include <vector>
+#include <algorithm>
 
 #include "tensorflow/compiler/xla/array.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
+#include "tensorflow/compiler/xla/service/hlo_schedule.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding.h"
 
 namespace xla {
@@ -12,8 +14,16 @@ namespace spmd {
 
 #define CHECK_FLOAT_EQ(a, b) CHECK_LE(std::abs((a) - (b)), 1e-6)
 
+/* Type alias */
+// Map an instruction to its depth.
+using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64>;
+// Map an instruction to its batch dimension.
+using InstructionBatchDimMap = absl::flat_hash_map<const HloInstruction*, int>;
+// Map an instruction to its alias source parameter.
+using AliasMap = absl::flat_hash_map<const HloInstruction*, HloInstruction*>;
+
 /*
- * Array/Vector Utility
+ * Array/Vector/Matrix Utility
  */
 // Append elements of `array` to `result`. The `indices` is a generalized
 // multi-dimensional index that can index a whole row (use -1 to indicate this)
@@ -219,6 +229,21 @@ inline std::pair<std::vector<int64>, std::vector<int64>> GetSpaceDims(
   return std::make_pair(std::move(lhs_space_dims), std::move(rhs_space_dims));
 }
 
+// Return the users of an instruction and its alias, excluding the final output tuple.
+inline absl::flat_hash_set<HloInstruction*> UsersWithAlias(
+    const HloInstruction* inst,
+    const AliasMap& alias_map,
+    const HloInstruction* output) {
+  absl::flat_hash_set<HloInstruction*> users(inst->users().begin(), inst->users().end());
+  auto iter = alias_map.find(inst);
+  if (iter != alias_map.end()) {
+    users.insert(iter->second->users().begin(), iter->second->users().end());
+  }
+
+  users.erase(output);
+
+  return users;
+}
 
 // Return whether the instruction is always replicated.
 // (e.g., constant, broadcasted constant, scalar)
@@ -235,17 +260,16 @@ inline int NumNonOutputUsers(const HloInstruction* inst, const HloInstruction* o
   return ret;
 }
 
+// Depth analysis (breadth first search) that compute the depth of each instruction.
+// We also assign a much larger distance to heavey operators (e.g., dot, convolution).
+InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& sequence);
+
+// Batch dimension analysis that finds the batch dimension of each instruction.
+InstructionBatchDimMap BuildInstructionBatchDimMap(const HloInstructionSequence& sequence);
+
 /*
  * HloSharding Utility
  */
-// Pretty print a HloSharding in a simplified form
-inline std::string SimpleToString(const HloSharding& spec) {
-  if (spec.IsReplicated()) {
-    return "R";
-  }
-  return ToString(spec.tile_assignment().dimensions());
-}
-
 // We reuse "Manual" to represent "Undefined" sharding strategy.
 // If an op has an"Undefined" strategy, it means auto-sharding pass does not
 // decide the sharding strategy for this op. 
@@ -256,6 +280,25 @@ inline HloSharding Undefined() {
 
 inline bool IsUndefined(const HloSharding& hlo_sharding) {
   return hlo_sharding.IsManual();
+}
+
+// Pretty print a HloSharding in a simplified form
+inline std::string SimpleToString(const HloSharding& spec) {
+  if (spec.IsReplicated()) {
+    return "R";
+  }
+  return ToString(spec.tile_assignment().dimensions());
+}
+
+// Insert a copy of the operand to force the sharding of the operand
+inline void ForceOperandSharding(HloInstruction* inst,
+                                 int operand_num,
+                                 const HloSharding& sharding) {
+  HloInstruction* operand = inst->mutable_operand(operand_num);
+  HloInstruction* replace_with = inst->parent()->AddInstruction(
+    HloInstruction::CreateReshape(operand->shape(), operand));
+  replace_with->set_sharding(sharding);
+  inst->ReplaceOperandWith(operand_num, replace_with);
 }
 
 // Propagate sharding for broadcast.

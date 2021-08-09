@@ -1599,41 +1599,33 @@ void SetHloSharding(const HloInstructionSequence& sequence,
   for (HloInstruction* inst : sequence.instructions()) {
     if (inst->opcode() == HloOpcode::kDot) {
       // For some dot instructions, our formulation think they are valid.
-      // But the the spmd partitioner cannot cover these strange cases and it will
-      // generate bad fallback code. Here we insert some extra annotated copy
-      // instructions to help the spmd partitioner generate correct code.
+      // But the the spmd partitioner cannot infer the correct dot algorithms
+      // from the input/output sharding. It then generates bad fallback code.
+      // Here we insert some extra annotated identiy instructions to help the
+      // spmd partitioner generate correct code.
+
+      const ShardingStrategy& stra = GetShardingStrategy(inst);
 
       const HloInstruction* lhs = inst->operand(0);
       const HloInstruction* rhs = inst->operand(1);
       const HloSharding& lhs_sharding = lhs->sharding();
       const HloSharding& rhs_sharding = rhs->sharding();
-      const HloSharding& output_sharding = inst->sharding();
+      const DotDimensionNumbers& dot_dnums = inst->dot_dimension_numbers();
+      std::vector<int64> lhs_space_dims, rhs_space_dims;
+      std::tie(lhs_space_dims, rhs_space_dims) =
+          GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
+      const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
+      const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
 
-      if (lhs_sharding.IsReplicated() && rhs_sharding.ReplicateOnLastTileDim()
-          && output_sharding.ReplicateOnLastTileDim()) {
-        const StrategyVector* strategies = strategy_map.at(inst).get();
-        int node_idx = strategies->id;
-        int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
-        const std::string& name = strategies->leaf_vector[stra_idx].name;
-
-        const DotDimensionNumbers& dot_dnums = inst->dot_dimension_numbers();
-        std::vector<int64> lhs_space_dims, rhs_space_dims;
-        std::tie(lhs_space_dims, rhs_space_dims) =
-            GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
-        const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
-        const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
-
-        // TODO(lmzheng): cover more cases.
-        if (name == "SR = SS x SR @ {0,1} (allreduce @ 1)") {
-          ForceOperandSharding(inst, 0, Tile(lhs->shape(),
-              {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1}, cluster_env));
-        } else if (name == "SR = SS x SR @ {1,0} (allreduce @ 0)") {
-          ForceOperandSharding(inst, 0, Tile(lhs->shape(),
-              {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0}, cluster_env));
-        } else if (name == "RS = RS x SS @ {0,1} (allreduce @ 0)") {
-          ForceOperandSharding(inst, 0, Tile(lhs->shape(),
-              {lhs_con_dims[0]}, {0}, cluster_env));
-        }
+      // TODO(lmzheng): cover more cases.
+      if (stra.name == "SR = SS x SR @ {0,1} (allreduce @ 1)" &&
+          lhs_sharding.IsReplicated()) {
+        ForceOperandSharding(inst, 0, Tile(lhs->shape(),
+            {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1}, cluster_env));
+      } else if (stra.name == "SR = SS x SR @ {1,0} (allreduce @ 0)" &&
+          lhs_sharding.IsReplicated()) {
+        ForceOperandSharding(inst, 0, Tile(lhs->shape(),
+            {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0}, cluster_env));
       }
     } else if (inst->opcode() == HloOpcode::kIota) {
       if (inst->sharding().IsReplicated()) {

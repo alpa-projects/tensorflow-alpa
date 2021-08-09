@@ -12,11 +12,13 @@ class DotHandler {
              StrategyMap& strategy_map,
              const HloInstruction* ins,
              const ClusterEnvironment& cluster_env,
+             const InstructionBatchDimMap& batch_map,
              const AutoShardingSolverOption& solver_option) :
       strategies(strategies),
       strategy_map(strategy_map),
       ins(ins),
       cluster_env(cluster_env),
+      batch_map(batch_map),
       solver_option(solver_option),
       device_mesh(cluster_env.device_mesh),
       lhs(ins->operand(0)),
@@ -62,16 +64,16 @@ class DotHandler {
   }
 
   void SplitLhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
-    if (device_mesh.dim(mesh_dim1) > 1) {
+    if (device_mesh.dim(mesh_dim0) > 1 && device_mesh.dim(mesh_dim1) > 1) {
       HloSharding output_spec = Undefined();
       std::string name;
       double communication_cost;
       double memory_cost;
 
-      if (solver_option.prefer_reduce_scatter) {
+      if (false && solver_option.prefer_reduce_scatter) {  // Deprecated branch
         name = absl::StrFormat("SS = SS x SR @ {%d,%d} (reduce-scatter @ %d)",
                                mesh_dim0, mesh_dim1, mesh_dim1);
-        output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim+1},
+        output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
                            {mesh_dim0, mesh_dim1}, cluster_env);
         memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
         communication_cost = cluster_env.ReduceScatterCost(
@@ -105,13 +107,13 @@ class DotHandler {
   }
 
   void SplitRhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
-    if (device_mesh.dim(mesh_dim0) > 1 && device_mesh.dim(mesh_dim1) > 1) {
+    if (device_mesh.dim(mesh_dim0) > 1) {
       HloSharding output_spec = Undefined();
       std::string name;
       double communication_cost;
       double memory_cost;
 
-      if (solver_option.prefer_reduce_scatter) {
+      if (false && solver_option.prefer_reduce_scatter) {  // Deprecated branch
         name = absl::StrFormat("SS = RS x SS @ {%d,%d} (reduce-scatter @ %d)",
                                 mesh_dim0, mesh_dim1, mesh_dim0),
         output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
@@ -260,12 +262,30 @@ class DotHandler {
     // Sb = Sb x Sb
     // Split batch dims.
     SplitBatchDims();
+
+    // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies.
+    if (solver_option.force_batch_dim_to_mesh_dim >= 0 && batch_map.count(ins)) {
+      int mesh_dim = solver_option.force_batch_dim_to_mesh_dim;
+      int batch_dim = batch_map.at(ins);
+      std::vector<ShardingStrategy> new_leaf_vector;
+
+      for (auto& stra : strategies->leaf_vector) {
+        std::vector<int> tensor_dim_to_mesh_dim = cluster_env.GetTensorDimToMeshDim(
+            ins->shape(), stra.output_sharding);
+        if (tensor_dim_to_mesh_dim[batch_dim] == mesh_dim) {
+          new_leaf_vector.push_back(std::move(stra));
+        }
+      }
+
+      strategies->leaf_vector = std::move(new_leaf_vector);
+    }
   }
 
   std::unique_ptr<StrategyVector>& strategies;
   StrategyMap& strategy_map;
   const HloInstruction* ins;
   const ClusterEnvironment& cluster_env;
+  const InstructionBatchDimMap& batch_map;
   const AutoShardingSolverOption& solver_option;
 
   const Array<int64>& device_mesh;
@@ -282,17 +302,20 @@ class DotHandler {
   const tensorflow::protobuf::RepeatedField<int64>& rhs_batch_dims;
 };
 
+// Register strategies for dot instructions.
 void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                LeafStrategies& leaf_strategies,
                StrategyMap& strategy_map,
                const HloInstruction* ins,
                size_t instruction_id,
                const ClusterEnvironment& cluster_env,
+               const InstructionBatchDimMap& batch_map,
                const AutoShardingSolverOption& solver_option) {
   strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
   SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-  DotHandler handler(strategies, strategy_map, ins, cluster_env, solver_option);
+  DotHandler handler(strategies, strategy_map, ins,
+                     cluster_env, batch_map, solver_option);
   handler.RegisterStrategies();
 }
 

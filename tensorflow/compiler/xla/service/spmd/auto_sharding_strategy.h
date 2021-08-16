@@ -31,8 +31,15 @@ struct AutoShardingSolverOption {
   bool override_reduce_scatter_cost;
   double reduce_scatter_cost;
 
+  // If true, override the cost of reduce-scatter with the given value.
+  bool override_all_to_all_cost;
+  double all_to_all_cost;
+
   // If true, prefer reduce-scatter + all-gather over all-reduce
   bool prefer_reduce_scatter;
+
+  // If true, the batch matmul can only be parallelized on the batch dim.
+  bool batch_matmul_always_split_batch;
 
   // If ture, allow strategies that recompute heavy operators (e.g., dot)
   // to reduce communication.
@@ -148,6 +155,12 @@ class ProfilingResult {
                             reduce_scatter_cost_dict_) -
            EstimateInternal(replica_groups, 0, dtype,
                             reduce_scatter_cost_dict_);
+  }
+
+  double EstimateAllToAllCost(
+      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      std::string dtype) const {
+    return EstimateAllGatherCost(replica_groups, size / replica_groups.front().size(), dtype);
   }
 
   std::string ToString() {
@@ -349,6 +362,22 @@ class ClusterEnvironment {
             0.001);
   }
 
+  double AllToAllCost(double num_bytes, int mesh_dim) const {
+    if (solver_option.override_all_to_all_cost) {
+      return solver_option.all_to_all_cost;
+    }
+
+    if (prof_result.Enabled()) {
+      return prof_result.EstimateAllToAllCost(cached_replica_groups[mesh_dim],
+                                              num_bytes / 4, "float32");
+    }
+
+    int64 num_devices = device_mesh.dim(mesh_dim);
+    return (mesh_alpha[mesh_dim] +
+            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices / num_devices * num_bytes +
+            0.001);
+  }
+
   double DotCost(const Shape& lhs_shape, const Shape& rhs_shape,
                  const DotDimensionNumbers& dot_dnums) const {
     if (!solver_option.allow_recompute_heavy_op) {
@@ -356,7 +385,7 @@ class ClusterEnvironment {
     }
 
     // TODO(lmzheng): When profiling data is not available, it is not easy to align the
-    // scale of compute cost and communication cost. Here we just use some
+    // scale of compute cost and communication cost. Here we just use
     // a simple heurstic to compute the compute cost with communication cost.
     double num_bytes = GetBytes(lhs_shape) + GetBytes(rhs_shape);
     return AllReduceCost(num_bytes, 0) + AllReduceCost(num_bytes, 1);
@@ -411,35 +440,60 @@ class ClusterEnvironment {
     std::vector<int> dst_tensor_dim_to_mesh_dim =
         GetTensorDimToMeshDim(shape, dst_spec);
 
-    int n_slice = 0;
-    int n_all_gather = 0;
+    bool has_replicated = false;
+    if (src_spec.IsReplicated() || src_spec.ReplicateOnLastTileDim() ||
+        dst_spec.IsReplicated() || dst_spec.ReplicateOnLastTileDim()) {
+      has_replicated = true;
+    }
 
-    double bytes = GetBytes(shape) / src_spec.NumTiles();
-    double cost = 0.0;
+    // Analyze the dims that need to dynamic-sliced or all-gather.
+    std::vector<int> slice_dims;
+    std::vector<int> all_gather_dims;
     for (int64 i = 0; i < shape.rank(); ++i) {
       int src_mesh_dim = src_tensor_dim_to_mesh_dim[i];
-      if (src_mesh_dim == dst_tensor_dim_to_mesh_dim[i]) {
+      int dst_mesh_dim = dst_tensor_dim_to_mesh_dim[i];
+      if (src_mesh_dim == dst_mesh_dim) {
         continue;
       }
       if (src_mesh_dim == -1) {
-        n_slice++;
+        slice_dims.push_back(src_mesh_dim);
         continue;
       }
-      if (dst_tensor_dim_to_mesh_dim[i] == -1) {
-        n_all_gather++;
-        bytes *= device_mesh.dim(src_mesh_dim);
-        cost += AllGatherCost(bytes, src_mesh_dim);
+      if (dst_mesh_dim == -1) {
+        all_gather_dims.push_back(src_mesh_dim);
         continue;
       }
-      // Do not allow other re-sharding patterns.
+      // Do not allow other re-sharding patterns. (e.g., collective-permute)
       return INFINITY_COST;
     }
 
-    if (n_slice >= 1 && n_all_gather >= 1) {
-      // Do not allow some strange re-sharding patterns.
+    // Case 1: no communication is required. Only needs dynamic-slice.
+    if (all_gather_dims.size() == 0) {
+      return 0;
+    }
+
+    // Do not allow some strange re-sharding patterns.
+    if (slice_dims.size() > 1 && all_gather_dims.size() > 1) {
       return INFINITY_COST;
     }
 
+    // Case 2: all-to-all
+    if (slice_dims.size() == 1 && all_gather_dims.size() == 1) {
+      if (device_mesh.dim(0) > 1 && device_mesh.dim(1) > 1) {
+        return INFINITY_COST;
+      }
+
+      double bytes = GetBytes(shape);
+      return AllToAllCost(bytes, all_gather_dims.front());
+    }
+
+    // Case 3: all-gather
+    double bytes = GetBytes(shape) / src_spec.NumTiles();
+    double cost = 0.0;
+    for (int dim : all_gather_dims) {
+      bytes *= device_mesh.dim(dim);
+      cost += AllGatherCost(bytes, dim);
+    }
     return cost;
   }
 

@@ -169,6 +169,43 @@ std::unique_ptr<StrategyVector> FollowInsStrategyVector(
   return std::move(strategies);
 }
 
+// Enumerate all 1d partition strategies.
+void EnumerateAll1DPartition(const HloInstruction* ins,
+                      const Array<int64>& device_mesh,
+                      const ClusterEnvironment& cluster_env,
+                      const StrategyMap& strategy_map,
+                      std::unique_ptr<StrategyVector>& strategies) {
+  // Split one dim
+  for (int64 i = 0; i < ins->shape().rank(); ++i) {
+    for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
+      if (device_mesh.dim(j) == 1 ||
+          ins->shape().dimensions(i) < device_mesh.dim(j)) {
+        continue;
+      }
+
+      std::string name = absl::StrFormat("S%d @ %d", i, j);
+      HloSharding output_spec = Tile(ins->shape(), {i}, {j}, cluster_env);
+      double compute_cost = 0, communication_cost = 0;
+      double memory_cost =
+          GetBytes(ins->shape()) / output_spec.NumTiles();
+
+      std::vector<std::vector<double>> resharding_costs;
+      for (int64 k = 0; k < ins->operand_count(); ++k) {
+        resharding_costs.push_back(ReshardingCostVector(
+            strategy_map.at(ins->operand(k)).get(),
+            ins->operand(k)->shape(), output_spec, cluster_env));
+      }
+      strategies->leaf_vector.push_back(
+          ShardingStrategy({name,
+                            output_spec,
+                            compute_cost,
+                            communication_cost,
+                            memory_cost,
+                            resharding_costs}));
+    }
+  }
+}
+
 // Build possible sharding strategies and their costs for all instructions
 std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCost(
     const HloInstructionSequence& sequence,
@@ -205,28 +242,9 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
       case HloOpcode::kParameter: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
 
-        // Split one dim
-        for (int64 i = 0; i < ins->shape().rank(); ++i) {
-          for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
-            if (device_mesh.dim(j) == 1 ||
-                ins->shape().dimensions(i) < device_mesh.dim(j)) {
-              continue;
-            }
-
-            std::string name = absl::StrFormat("S%d @ %d", i, j);
-            HloSharding output_spec = Tile(ins->shape(), {i}, {j}, cluster_env);
-            double compute_cost = 0, communication_cost = 0;
-            double memory_cost =
-                GetBytes(ins->shape()) / output_spec.NumTiles();
-            strategies->leaf_vector.push_back(
-                ShardingStrategy({name,
-                                  output_spec,
-                                  compute_cost,
-                                  communication_cost,
-                                  memory_cost,
-                                  {}}));
-          }
-        }
+        // Split 1 dim
+        EnumerateAll1DPartition(ins, device_mesh, cluster_env,
+                                strategy_map, strategies);
 
         // Replicate
         strategies->leaf_vector.push_back(ShardingStrategy(
@@ -337,28 +355,85 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
 
-        for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
-          absl::optional<HloSharding> output_spec =
-              hlo_sharding_util::ReshapeSharding(
-                  operand->shape(), ins->shape(),
-                  src_strategies->leaf_vector[sid].output_sharding);
+        if (ins->users().size() == 1 || true) {
+          for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
+            absl::optional<HloSharding> output_spec =
+                hlo_sharding_util::ReshapeSharding(
+                    operand->shape(), ins->shape(),
+                    src_strategies->leaf_vector[sid].output_sharding);
 
-          if (!output_spec.has_value()) {
-            continue;
+            if (!output_spec.has_value()) {
+              continue;
+            }
+
+            std::string name = SimpleToString(*output_spec);
+            double compute_cost = 0, communication_cost = 0;
+            double memory_cost = GetBytes(ins->shape()) / output_spec->NumTiles();
+            strategies->leaf_vector.push_back(ShardingStrategy(
+                {name,
+                 *output_spec,
+                 compute_cost,
+                 communication_cost,
+                 memory_cost,
+                 {FollowInsCostVector(src_strategies->leaf_vector.size(),
+                                      sid)}}));
+          }
+        }
+
+        // Fail to create follow strategies, enumerate all possible cases
+        if (strategies->leaf_vector.empty()) {
+          strategies->leaf_vector.clear();
+          strategies->following = nullptr;
+
+          // Split one dim
+          for (int64 i = 0; i < ins->shape().rank(); ++i) {
+            for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
+              if (device_mesh.dim(j) == 1 ||
+                  ins->shape().dimensions(i) < device_mesh.dim(j)) {
+                continue;
+              }
+              HloSharding output_spec = Tile(ins->shape(), {i}, {j}, cluster_env);
+
+              absl::optional<HloSharding> input_spec =
+                  hlo_sharding_util::ReshapeSharding(
+                      ins->shape(), operand->shape(), output_spec);
+              if (!input_spec.has_value()) {  // invalid reshape
+                continue;
+              }
+
+              std::string name = absl::StrFormat("S%d @ %d", i, j);
+              double compute_cost = 0, communication_cost = 0;
+              double memory_cost =
+                  GetBytes(ins->shape()) / output_spec.NumTiles();
+
+              std::vector<std::vector<double>> resharding_costs{
+                ReshardingCostVector(strategy_map.at(ins->operand(0)).get(),
+                    ins->operand(0)->shape(), *input_spec, cluster_env)};
+              strategies->leaf_vector.push_back(
+                  ShardingStrategy({name,
+                                    output_spec,
+                                    compute_cost,
+                                    communication_cost,
+                                    memory_cost,
+                                    resharding_costs}));
+            }
           }
 
-          std::string name = SimpleToString(*output_spec);
-          double compute_cost = 0, communication_cost = 0;
-          double memory_cost = GetBytes(ins->shape()) / output_spec->NumTiles();
+          // Replicate
+          HloSharding output_spec = HloSharding::Replicate();
+          std::vector<std::vector<double>> resharding_costs{
+            ReshardingCostVector(strategy_map.at(ins->operand(0)).get(),
+                ins->operand(0)->shape(), output_spec, cluster_env)};
           strategies->leaf_vector.push_back(ShardingStrategy(
-              {name,
-               *output_spec,
-               compute_cost,
-               communication_cost,
-               memory_cost,
-               {FollowInsCostVector(src_strategies->leaf_vector.size(),
-                                    sid)}}));
+              {"R",
+               output_spec,
+               2,
+               0,
+               GetBytes(ins->shape()),
+               resharding_costs}));
         }
+
+        CHECK(!strategies->leaf_vector.empty());
         break;
       }
       case HloOpcode::kTranspose: {
@@ -1772,17 +1847,24 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   solver_option.override_all_gather_cost = false;
   solver_option.override_all_reduce_cost = false;
   solver_option.override_reduce_scatter_cost = false;
+  solver_option.override_all_to_all_cost = false;
 
   if (pass_context::GetBool("auto_sharding::force_all_gather_cost", false)) {
     solver_option.override_all_gather_cost = true;
     solver_option.all_gather_cost =
         pass_context::GetDouble("auto_sharding::all_gather_cost");
   }
-
+  if (pass_context::GetBool("auto_sharding::force_all_to_all_cost", false)) {
+    solver_option.override_all_to_all_cost = true;
+    solver_option.all_to_all_cost =
+        pass_context::GetDouble("auto_sharding::all_to_all_cost");
+  }
   solver_option.force_batch_dim_to_mesh_dim =
       pass_context::GetInt("auto_sharding::force_batch_dim_to_mesh_dim", -1);
   solver_option.prefer_reduce_scatter =
       pass_context::GetBool("auto_sharding::prefer_reduce_scatter", false);
+  solver_option.batch_matmul_always_split_batch =
+     pass_context::GetBool("auto_sharding::batch_matmul_always_split_batch", false);
   solver_option.allow_recompute_heavy_op =
       pass_context::GetBool("auto_sharding::allow_recompute_heavy_op", false);
   solver_option.load_solution_vector =

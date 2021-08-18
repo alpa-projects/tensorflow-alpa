@@ -221,6 +221,14 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
 
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
 
+  // Count the non-one mesh dimension.
+  int mesh_nn_dims = 0;
+  for (int dim : device_mesh.dimensions()) {
+    if (dim > 1) {
+      mesh_nn_dims++;
+    }
+  }
+
   // Analyze the batch dim if we want to forcely use data-parallel
   InstructionBatchDimMap batch_dim_map;
   if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
@@ -355,7 +363,7 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
 
-        if (ins->users().size() == 1 || true) {
+        if (ins->users().size() == 1 || mesh_nn_dims >= 2) {
           for (int64 sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
             absl::optional<HloSharding> output_spec =
                 hlo_sharding_util::ReshapeSharding(
@@ -1827,7 +1835,7 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
       double cost = cost_graph.edge_costs.at({a, b})(s_val[a], s_val[b]);
       if (cost > 1e-6) {
         os << "- edge cost (" << a << ", " << b << "): "
-           << std::fixed << std::setprecision(2) << cost << "\n";
+           << std::fixed << std::setprecision(3) << cost << "\n";
       }
     }
   }

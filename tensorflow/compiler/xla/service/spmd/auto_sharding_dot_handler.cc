@@ -1,6 +1,5 @@
-#include "tensorflow/compiler/xla/service/spmd/auto_sharding_strategy.h"
-
 #include "absl/strings/str_format.h"
+#include "tensorflow/compiler/xla/service/spmd/auto_sharding_strategy.h"
 
 
 namespace xla {
@@ -42,6 +41,11 @@ class DotHandler {
   }
 
   void SplitLhsSpaceRhsSpace(int mesh_dim0, int mesh_dim1) {
+    //if (ins->shape().dimensions(space_base_dim) < device_mesh.dim(mesh_dim0) ||
+    //    ins->shape().dimensions(space_base_dim + 1) < device_mesh.dim(mesh_dim1)) {
+    //  return;  // The dimension length is to small to be parallelzied.
+    //}
+
     HloSharding output_spec =
         Tile(ins->shape(), {space_base_dim, space_base_dim + 1}, {mesh_dim0, mesh_dim1},
              cluster_env);
@@ -64,6 +68,11 @@ class DotHandler {
   }
 
   void SplitLhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
+    //if (lhs->shape().dimensions(lhs_space_dims[0]) < device_mesh.dim(mesh_dim0) ||
+    //    lhs->shape().dimensions(lhs_con_dims[0]) < device_mesh.dim(mesh_dim1)) {
+    //  return;  // The dimension length is to small to be parallelzied.
+    //}
+
     if (device_mesh.dim(mesh_dim0) > 1 && device_mesh.dim(mesh_dim1) > 1) {
       HloSharding output_spec = Undefined();
       std::string name;
@@ -107,6 +116,11 @@ class DotHandler {
   }
 
   void SplitRhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
+    //if (rhs->shape().dimensions(rhs_con_dims[0]) < device_mesh.dim(mesh_dim0) ||
+    //    rhs->shape().dimensions(rhs_space_dims[0]) < device_mesh.dim(mesh_dim1)) {
+    //  return;  // The dimension length is to small to be parallelzied.
+    //}
+
     if (device_mesh.dim(mesh_dim0) > 1) {
       HloSharding output_spec = Undefined();
       std::string name;
@@ -150,6 +164,10 @@ class DotHandler {
   }
 
   void SplitBatchDims() {
+    if (lhs_batch_dims.size() > 0 && solver_option.batch_matmul_always_split_batch) {
+      strategies->leaf_vector.clear();
+    }
+
     // Split one batch dim
     for (int64 i = 0; i < lhs_batch_dims.size(); ++i) {
       for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {

@@ -1352,7 +1352,7 @@ std::tuple<std::vector<int64>, std::vector<int64>, double> CallSolver(
 
   PyGILState_STATE gstate = PyGILState_Ensure();
   {
-    py::object submodule = py::module_::import("parax.auto_sharding");
+    py::object submodule = py::module_::import("parax.shard_parallel.auto_sharding");
     py::object call_solver_serialized_args =
         submodule.attr("call_solver_serialized_args");
     py::object ret = call_solver_serialized_args(

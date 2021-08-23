@@ -790,7 +790,7 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
         break;
       }
       case HloOpcode::kCustomCall: {
-        if (ins->IsCustomCall("xla_pipeline_marker")) {
+        if (ins->IsCustomCall("xla_pipeline_marker") || ins->IsCustomCall("identity")) {
           const HloInstruction* operand = ins->operand(0);
           const StrategyVector* src_strategies = strategy_map.at(operand).get();
           CHECK(src_strategies->is_tuple);

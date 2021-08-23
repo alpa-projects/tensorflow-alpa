@@ -790,7 +790,7 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
         break;
       }
       case HloOpcode::kCustomCall: {
-        if (ins->IsCustomCall("xla_pipeline_marker") || ins->IsCustomCall("identity")) {
+        if (ins->IsCustomCall("xla_pipeline_marker")) {
           const HloInstruction* operand = ins->operand(0);
           const StrategyVector* src_strategies = strategy_map.at(operand).get();
           CHECK(src_strategies->is_tuple);
@@ -799,7 +799,14 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
           strategies = FollowInsStrategyVector(
               src_strategies, ins->shape(), instruction_id,
               /* have_memory_cost= */ true, leaf_strategies);
-        } else {
+        } else if (ins->IsCustomCall("identity")) {
+          const HloInstruction* operand = ins->operand(0);
+          const StrategyVector* src_strategies = strategy_map.at(operand).get();
+          CHECK(src_strategies->is_tuple);
+          strategies = FollowInsStrategyVector(
+              src_strategies, ins->shape(), instruction_id,
+              /* have_memory_cost= */ false, leaf_strategies);
+        } else{
           LOG(FATAL) << "Unknown CustomCall instruction: " + ins->name();
         }
         break;

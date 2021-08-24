@@ -1521,9 +1521,9 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         absl::flat_hash_set<HloInstruction*> users = UsersWithAlias(cur, alias_map, output);
 
         for (HloInstruction* consumer : users) {
-          if (consumer != output &&
-              (GetShardingStrategy(consumer).output_sharding != strategy.output_sharding ||
-               !DimensionsEqual(consumer->shape(), inst->shape()))) {
+          if (consumer->opcode() == HloOpcode::kTuple ||
+              GetShardingStrategy(consumer).output_sharding != strategy.output_sharding ||
+              !DimensionsEqual(consumer->shape(), inst->shape())) {
             boundary_set.insert(cur);
             return;
           }

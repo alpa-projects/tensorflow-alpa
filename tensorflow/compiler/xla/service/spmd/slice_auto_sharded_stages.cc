@@ -1,14 +1,13 @@
-#include "tensorflow/compiler/xla/service/gpu/slice_auto_sharded_stages.h"
+#include "tensorflow/compiler/xla/service/spmd/slice_auto_sharded_stages.h"
 
 #include "pybind11/numpy.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
-#include "tensorflow/compiler/xla/service/pass_context.h"
 
 namespace xla {
-namespace gpu {
+namespace spmd {
 
 namespace py = pybind11;
 
@@ -159,7 +158,6 @@ std::unique_ptr<HloModule> CreateStageModule(
 std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
     HloModule* module) {
   // ----- Slice the hlo module according to the pipeline marker -----
-  // TODO (zhuohan): Move this into a seperate pass
   HloComputation* entry = module->entry_computation();
 
   std::vector<std::unique_ptr<HloModule>> pipeline_stages;
@@ -222,5 +220,5 @@ StatusOr<bool> SliceAutoShardedStages::Run(HloModule* module) {
   return false;
 }
 
-}  // namespace gpu
+}  // namespace spmd
 }  // namespace xla

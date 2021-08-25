@@ -928,14 +928,13 @@ AliasSet BuildAliasSet(const HloModule* module,
   };
   alias_config.ForEachAlias([&](const ShapeIndex& output_index,
                                 const HloInputOutputAliasConfig::Alias& alias) {
-    const HloInstruction* src_ins =
-        parameter_instructions[alias.parameter_number];
     CHECK_EQ(alias.parameter_index.size(), 0) << "Do not support tuple alias";
-    const HloInstruction* dst_ins =
-        dataflow_analysis.GetUniqueValueAt(output_tuple, output_index)
-            .instruction();
+    CHECK_EQ(output_index.size(), 1) << "Do not support tuple alias";
+
+    const HloInstruction* src_ins = parameter_instructions[alias.parameter_number];
+
     traverse_tuple_alias(strategy_map.at(src_ins).get(),
-                         strategy_map.at(dst_ins).get());
+      strategy_map.at(output_tuple).get()->childs[output_index.front()].get());
   });
 
   return alias_set;

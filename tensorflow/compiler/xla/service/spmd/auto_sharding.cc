@@ -799,7 +799,14 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
           strategies = FollowInsStrategyVector(
               src_strategies, ins->shape(), instruction_id,
               /* have_memory_cost= */ true, leaf_strategies);
-        } else {
+        } else if (ins->IsCustomCall("identity")) {
+          const HloInstruction* operand = ins->operand(0);
+          const StrategyVector* src_strategies = strategy_map.at(operand).get();
+          CHECK(src_strategies->is_tuple);
+          strategies = FollowInsStrategyVector(
+              src_strategies, ins->shape(), instruction_id,
+              /* have_memory_cost= */ false, leaf_strategies);
+        } else{
           LOG(FATAL) << "Unknown CustomCall instruction: " + ins->name();
         }
         break;
@@ -1514,9 +1521,9 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         absl::flat_hash_set<HloInstruction*> users = UsersWithAlias(cur, alias_map, output);
 
         for (HloInstruction* consumer : users) {
-          if (consumer != output &&
-              (GetShardingStrategy(consumer).output_sharding != strategy.output_sharding ||
-               !DimensionsEqual(consumer->shape(), inst->shape()))) {
+          if (consumer->opcode() == HloOpcode::kTuple ||
+              GetShardingStrategy(consumer).output_sharding != strategy.output_sharding ||
+              !DimensionsEqual(consumer->shape(), inst->shape())) {
             boundary_set.insert(cur);
             return;
           }

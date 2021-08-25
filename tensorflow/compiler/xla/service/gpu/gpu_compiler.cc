@@ -109,7 +109,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/reduction_dimension_grouper.h"
 #include "tensorflow/compiler/xla/service/gpu/reduction_layout_normalizer.h"
 #include "tensorflow/compiler/xla/service/gpu/reduction_splitter.h"
-#include "tensorflow/compiler/xla/service/gpu/slice_auto_sharded_stages.h"
 #include "tensorflow/compiler/xla/service/gpu/stream_assignment.h"
 #include "tensorflow/compiler/xla/service/gpu/stream_executor_util.h"
 #include "tensorflow/compiler/xla/service/gpu/target_constants.h"
@@ -149,6 +148,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/slow_operation_alarm.h"
 #include "tensorflow/compiler/xla/service/sort_simplifier.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding.h"
+#include "tensorflow/compiler/xla/service/spmd/slice_auto_sharded_stages.h"
 #include "tensorflow/compiler/xla/service/stable_sort_expander.h"
 #include "tensorflow/compiler/xla/service/transpose_folding.h"
 #include "tensorflow/compiler/xla/service/tuple_simplifier.h"
@@ -490,7 +490,7 @@ Status GpuCompiler::OptimizeHloModule(
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
       spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
-      spmd_pipeline.AddPass<SliceAutoShardedStages>();
+      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());

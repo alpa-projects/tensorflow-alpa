@@ -1596,7 +1596,6 @@ cc_library(
         ":reduction_dimension_grouper",
         ":reduction_layout_normalizer",
         ":reduction_splitter",
-        ":slice_auto_sharded_stages",
         ":stream_assignment",
         ":stream_executor_util",
         ":target_constants",
@@ -1690,6 +1689,7 @@ cc_library(
         "//tensorflow/compiler/xla/service/gpu/llvm_gpu_backend",
         "//tensorflow/compiler/xla/service/llvm_ir:llvm_util",
         "//tensorflow/compiler/xla/service/spmd:auto_sharding",
+        "//tensorflow/compiler/xla/service/spmd:slice_auto_sharded_stages",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core/platform:regexp",
@@ -2413,19 +2413,6 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
-    ],
-)
-
-cc_library(
-    name = "slice_auto_sharded_stages",
-    srcs = ["slice_auto_sharded_stages.cc"],
-    hdrs = ["slice_auto_sharded_stages.h"],
-    deps = [
-        "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:hlo_pass",
-        "//tensorflow/compiler/xla/service:pass_context",
-        "@pybind11",
     ],
 )
 

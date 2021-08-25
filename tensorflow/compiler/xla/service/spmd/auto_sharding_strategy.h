@@ -160,7 +160,10 @@ class ProfilingResult {
   double EstimateAllToAllCost(
       const std::vector<std::vector<int>>& replica_groups, int64 size,
       std::string dtype) const {
-    return EstimateAllGatherCost(replica_groups, size / replica_groups.front().size(), dtype);
+    // The 1.5 is a penalty factor to disencourage all-to-all.
+    double penalty_factor = 1.5;
+    return EstimateAllGatherCost(replica_groups, size / replica_groups.front().size(), dtype) *
+           penalty_factor;
   }
 
   std::string ToString() {
@@ -372,10 +375,12 @@ class ClusterEnvironment {
                                               num_bytes / 4, "float32");
     }
 
+    // The 1.5 is a penalty factor to disencourage all-to-all.
     int64 num_devices = device_mesh.dim(mesh_dim);
+    double penalty_factor = 1.5;
     return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices / num_devices * num_bytes +
-            0.001);
+            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices / num_devices * num_bytes
+            * penalty_factor + 0.001);
   }
 
   double DotCost(const Shape& lhs_shape, const Shape& rhs_shape,

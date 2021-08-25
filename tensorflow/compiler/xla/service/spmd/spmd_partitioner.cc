@@ -1546,6 +1546,10 @@ Status SpmdPartitioningVisitor::DefaultAction(HloInstruction* hlo) {
     return HandleElementwise(hlo);
   }
 
+  if (hlo->IsCustomCall("identity")) {
+    return HandleElementwise(hlo);
+  }
+
   if (!hlo->sharding().IsTileMaximal()) {
     VLOG(1) << "Not partitioned in SPMD mode (DefaultAction):"
             << hlo->ToString();

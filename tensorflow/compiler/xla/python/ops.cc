@@ -191,6 +191,23 @@ void BuildOpsSubmodule(py::module* m) {
       py::arg("output_operand_aliasing"), py::arg("literal") = nullptr,
       py::arg("schedule") = CustomCallSchedule::SCHEDULE_NONE,
       py::arg("api_version") = CustomCallApiVersion::API_VERSION_ORIGINAL);
+  ops.def(
+      "CustomCallWithOnlyAliasing",
+      [](XlaBuilder* builder, const py::bytes& call_target_name,
+         absl::Span<const XlaOp> operands, const Shape& shape,
+         const py::bytes& opaque, bool has_side_effect,
+         absl::Span<const std::pair<ShapeIndex, std::pair<int64, ShapeIndex>>>
+             output_operand_aliasing,
+         CustomCallSchedule schedule) -> XlaOp {
+        return CustomCall(builder, call_target_name, operands, shape, opaque,
+                          has_side_effect,
+                          /*output_operand_aliasing=*/output_operand_aliasing,
+                          /*literal=*/nullptr, schedule);
+      },
+      py::arg("builder"), py::arg("call_target_name"), py::arg("operands"),
+      py::arg("shape"), py::arg("opaque") = py::bytes(""),
+      py::arg("has_side_effect") = false, py::arg("output_operand_aliasing"),
+      py::arg("schedule") = CustomCallSchedule::SCHEDULE_NONE);
   ops.def("Dot", &Dot, py::arg("lhs"), py::arg("rhs"),
           py::arg("precision_config") = nullptr,
           py::arg("preferred_element_type") = absl::nullopt);

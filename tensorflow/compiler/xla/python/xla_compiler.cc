@@ -354,7 +354,22 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .def("as_hlo_text", &GetComputationHloText)
       .def("as_hlo_dot_graph", &GetComputationHloDotGraph)
       .def("hash", &HashComputation)
-      .def("as_hlo_module", &GetHloModule);
+      .def("as_hlo_module", &GetHloModule)
+      .def("setup_alias",
+           [](XlaComputation& computation, const std::vector<int64>& output_index,
+              int64 param_number, const std::vector<int64>& param_index) {
+             HloInputOutputAliasProto::AliasEntryProto entry;
+             for (auto i : output_index) {
+                 entry.add_output_shape_index(i);
+             }
+             entry.set_parameter_number(param_number);
+             for (auto i : param_index) {
+                 entry.add_parameter_shape_index(i);
+             }
+             entry.set_kind(Kind::MAY_ALIAS);
+             computation.mutable_proto()->mutable_input_output_alias()
+                                        ->add_entries()->Swap(&entry);
+           });
 
   py::class_<HloPrintOptions> hlo_print_options_class(m, "HloPrintOptions");
   hlo_print_options_class.def(py::init<>())

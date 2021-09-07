@@ -87,9 +87,6 @@ Status RunAllReduce(const NcclAllReduceConfig& config,
     }
     return Status::OK();
   }
-  //if (device_ordinal == 0) {
-  //  std::cerr << "run all-reduce " << config.config.op_id << std::endl;
-  //}
 
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
   for (size_t i = 0; i < buffers.size(); ++i) {

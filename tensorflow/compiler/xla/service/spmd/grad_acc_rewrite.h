@@ -17,6 +17,8 @@ class GradAccRewrite : public HloModulePass {
   StatusOr<bool> Run(HloModule* module) override;
 };
 
+std::string GetGradSyncChannelIds(const HloModule* module);
+
 }  // namespace spmd
 }  // namespace xla
 

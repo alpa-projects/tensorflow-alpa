@@ -527,6 +527,7 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
       case HloOpcode::kCeil:
       case HloOpcode::kClz:
       case HloOpcode::kConvert:
+      case HloOpcode::kBitcast:
       case HloOpcode::kBitcastConvert:
       case HloOpcode::kCopy:
       case HloOpcode::kCos:
@@ -859,6 +860,23 @@ std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs> BuildStrategyAndCos
     CHECK(strategies->is_tuple || !strategies->leaf_vector.empty())
         << ins->ToString() << " does not have any valid strategies.";
     strategy_map[ins] = std::move(strategies);
+  }
+
+  // If gradient accumulation is used, adjust the cost of all-reduce for
+  // gradient synchronization.
+  if (solver_option.grad_acc_num_micro_batches > 1) {
+    // find gradientt-computatin instructions
+    std::vector<const HloInstruction*> grad_insts = GetGradientComputationInstructions(instructions);
+    for (const HloInstruction* inst : grad_insts) {
+      StrategyVector* stra_vector = strategy_map[inst].get();
+      CHECK(!stra_vector->is_tuple);
+
+      for (auto& stra : stra_vector->leaf_vector) {
+        if (stra.name.find("allreduce") != std::string::npos) {
+          stra.communication_cost /= solver_option.grad_acc_num_micro_batches;
+        }
+      }
+    }
   }
 
   return std::make_tuple(std::move(strategy_map), std::move(leaf_strategies),
@@ -1881,6 +1899,9 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
      pass_context::GetBool("auto_sharding::batch_matmul_always_split_batch", false);
   solver_option.allow_recompute_heavy_op =
       pass_context::GetBool("auto_sharding::allow_recompute_heavy_op", false);
+  solver_option.grad_acc_num_micro_batches =
+      pass_context::GetInt("auto_sharding::grad_acc_num_micro_batches", 1);
+
   solver_option.load_solution_vector =
       pass_context::GetBool("auto_sharding::load_solution_vector", false);
 

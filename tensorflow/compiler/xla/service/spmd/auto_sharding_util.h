@@ -317,6 +317,37 @@ absl::optional<HloSharding> PropagateDimwiseSharding(const HloSharding& input_sp
                                                      const Shape& old_shape,
                                                      const Shape& new_shape);
 
+/*
+ * Gradient accumulation
+ */
+// Find all instrctions that compute gradients in gradient accumulation.
+// This is done by using the hint from pipeline_marker (gradient marker).
+inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
+    const std::vector<HloInstruction*>& instructions) {
+  std::vector<const HloInstruction*> ret;
+
+  // Find the second pipeline_marker, which marks all gradient values.
+  int ct = 0;
+  for (size_t i = 0; i < instructions.size(); ++i) {
+    const HloInstruction* ins = instructions[i];
+
+    if (ins->IsCustomCall("xla_pipeline_marker")) {
+      if(++ct == 2) {
+        const HloInstruction* tuple = ins->operand(0);
+
+        for (size_t j = 0; j < tuple->operand_count(); ++j) {
+          const HloInstruction* add = tuple->operand(j);
+          if (add->opcode() == HloOpcode::kAdd) {
+            ret.push_back(add->operand(1));
+          }
+        }
+      }
+    }
+  }
+
+  return ret;
+}
+
 }  // namespace spmd
 }  // namespace xla
 

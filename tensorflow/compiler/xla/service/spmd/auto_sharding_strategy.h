@@ -45,6 +45,11 @@ struct AutoShardingSolverOption {
   // to reduce communication.
   bool allow_recompute_heavy_op;
 
+  // The number of micro batches if gradient accumulation is used.
+  // If this is not 1, the cost of all-reduce for gradient synchronization
+  // is divided by this number.
+  int grad_acc_num_micro_batches;
+
   // If true, load solution vector from PassContext
   bool load_solution_vector;
 };

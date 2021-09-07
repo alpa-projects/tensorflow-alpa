@@ -1,6 +1,7 @@
 #include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
 
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
+#include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/pass_context.h"
 
@@ -11,6 +12,22 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
   if (!pass_context::GetBool("auto_sharding::rewrite_for_grad_acc", false)) {
     return false;
   }
+
+  // Rewrite for gradient accumulation. Note that this pass changes
+  // the semantics of the original HLO. To get correct results, this pass
+  // should be used together with XLA_SKIP_NCCL_COLLECTIVE_IDS.
+  //
+  // Before:
+  // d = dot(...)
+  // a = allreduce(d)
+  // new_grad = add(old_grad, a)
+  // return new_grad
+  //
+  // After:
+  // d = dot(...)
+  // new_grad = add(old_grad, d)
+  // a = allreduce(new_grad)
+  // return a
 
   //std::cerr << "===== Enter GradAccRewrite =====" << std::endl;
   //std::cerr << module->ToString();
@@ -39,6 +56,42 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
   //std::cerr << "=====================================" << std::endl;
 
   return true;
+}
+
+
+void DfsSearch(const HloInstruction* cur, absl::flat_hash_set<int>& ret) {
+  switch (cur->opcode()) {
+    case HloOpcode::kTuple:
+    case HloOpcode::kSlice:
+    case HloOpcode::kBitcast: {
+      for (size_t i = 0; i < cur->operand_count(); ++i) {
+        DfsSearch(cur->operand(i), ret);
+      }
+      break;
+    }
+    case HloOpcode::kAllReduce: {
+      ret.insert(cur->channel_id().value());
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+std::string GetGradSyncChannelIds(const HloModule* module) {
+  // Get the channel ids of grad-sync all-reduce.
+  // Start from output tuple and ends at instructions other than bitcast, slice.
+  absl::flat_hash_set<int> channel_ids;
+
+  HloComputation* entry = module->entry_computation();
+  DfsSearch(entry->root_instruction(), channel_ids);
+
+  std::string ret = ".";
+  for (auto x : channel_ids) {
+    ret += std::to_string(x) + ".";
+  }
+
+  return ret;
 }
 
 }  // namespace spmd

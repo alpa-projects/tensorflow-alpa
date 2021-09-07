@@ -74,24 +74,22 @@ Status RunAllReduce(const NcclAllReduceConfig& config,
           std::cerr << "skip all-reduce " << config.config.op_id << std::endl;
         }
       } else {
-        if (device_ordinal == 0) {
-          std::cerr << "skip-copy all-reduce " << config.config.op_id << std::endl;
-        }
         PrimitiveType element_type = config.config.operand_element_type[i];
-        TF_ASSIGN_OR_RETURN(auto dtype_and_multiplier,
-                            ToNcclDataTypeAndCountMultiplier(element_type));
-        int element_count = buffer.element_count * dtype_and_multiplier.second;
+        int size = buffer.element_count * ShapeUtil::ByteSizeOfPrimitiveType(element_type);
+
+        if (device_ordinal == 0) {
+          std::cerr << "skip-copy all-reduce " << config.config.op_id << ", size: " << size <<  std::endl;
+        }
         XLA_CUDA_RETURN_IF_ERROR(
-          cudaMemcpyAsync(recv_buffer, send_buffer, element_count, cudaMemcpyDeviceToDevice,
+          cudaMemcpyAsync(recv_buffer, send_buffer, size, cudaMemcpyDeviceToDevice,
                          *cu_stream));
       }
     }
     return Status::OK();
   }
-
-  if (device_ordinal == 0) {
-    std::cerr << "run all-reduce " << config.config.op_id << std::endl;
-  }
+  //if (device_ordinal == 0) {
+  //  std::cerr << "run all-reduce " << config.config.op_id << std::endl;
+  //}
 
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
   for (size_t i = 0; i < buffers.size(); ++i) {

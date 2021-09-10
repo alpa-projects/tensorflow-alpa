@@ -70,16 +70,16 @@ Status RunAllReduce(const NcclAllReduceConfig& config,
           buffer_allocations.GetDeviceAddress(buffer.destination_buffer).opaque();
 
       if (send_buffer == recv_buffer) {
-        if (device_ordinal == 0) {
-          std::cerr << "skip all-reduce " << config.config.op_id << std::endl;
-        }
+        //if (device_ordinal == 0) {
+        //  std::cerr << "skip all-reduce " << config.config.op_id << std::endl;
+        //}
       } else {
         PrimitiveType element_type = config.config.operand_element_type[i];
         int size = buffer.element_count * ShapeUtil::ByteSizeOfPrimitiveType(element_type);
 
-        if (device_ordinal == 0) {
-          std::cerr << "skip-copy all-reduce " << config.config.op_id << ", size: " << size <<  std::endl;
-        }
+        //if (device_ordinal == 0) {
+        //  std::cerr << "skip-copy all-reduce " << config.config.op_id << ", size: " << size <<  std::endl;
+        //}
         XLA_CUDA_RETURN_IF_ERROR(
           cudaMemcpyAsync(recv_buffer, send_buffer, size, cudaMemcpyDeviceToDevice,
                          *cu_stream));

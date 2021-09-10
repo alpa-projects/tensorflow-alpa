@@ -232,7 +232,7 @@ GpuCompiler::GpuCompiler(se::Platform::Id platform_id,
 Status GpuCompiler::OptimizeHloModule(
     HloModule* hlo_module, se::StreamExecutor* stream_exec,
     se::DeviceMemoryAllocator* device_allocator) {
-  {
+  if (pass_context::GetBool("build_option::run_hlo_optimization_pipeline", true)) {
     HloPassPipeline pipeline("optimization");
     pipeline.AddInvariantChecker<HloVerifier>(/*layout_sensitive=*/false,
                                               /*allow_mixed_precision=*/false);
@@ -644,7 +644,7 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
-  if (pass_context::GetBool("build_option::skip_hlo_passes", false)) {
+  if (!pass_context::GetBool("build_option::run_hlo_passes", true)) {
     // Do no run the HLO optimization passes. Assume the input HloModule
     // has already been optimized.
     return std::move(module);
@@ -1023,7 +1023,7 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
 StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
-  if (pass_context::GetBool("build_option::skip_backend_codegen", false)) {
+  if (!pass_context::GetBool("build_option::run_backend_codegen", true)) {
     // Do no run backend code generation. Return a dummy executable.
     GpuExecutable::Params params;
     params.debug_module = std::move(module);

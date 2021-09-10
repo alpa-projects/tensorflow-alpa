@@ -1459,7 +1459,7 @@ Status SpmdPartitioningVisitor::DefaultAction(HloInstruction* hlo) {
     return HandleElementwise(hlo);
   }
 
-  if (hlo->IsCustomCall("identity")) {
+  if (hlo->IsCustomCall("identity") || hlo->IsCustomCall("xla_pipeline_marker")) {
     return HandleElementwise(hlo);
   }
 

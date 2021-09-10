@@ -20,4 +20,3 @@ class AutoSharding : public HloModulePass {
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING
-

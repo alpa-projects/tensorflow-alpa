@@ -1749,6 +1749,7 @@ cc_library(
         "//tensorflow/compiler/xla/service/gpu/llvm_gpu_backend",
         "//tensorflow/compiler/xla/service/llvm_ir:llvm_util",
         "//tensorflow/compiler/xla/service/spmd:auto_sharding",
+        "//tensorflow/compiler/xla/service/spmd:grad_acc_rewrite",
         "//tensorflow/compiler/xla/service/spmd:slice_auto_sharded_stages",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",

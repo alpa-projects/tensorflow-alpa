@@ -16,7 +16,8 @@ constexpr double INFINITY_COST = 1e10;
 // Options for the auto-sharding solver.
 struct AutoShardingSolverOption {
   // Forcely split the batch dimension and map it to a mesh dimension.
-  // This can force the auto-sharding pass to generate the data parallel startegy.
+  // This can force the auto-sharding pass to generate the data parallel
+  // startegy.
   int force_batch_dim_to_mesh_dim;
 
   // If true, override the cost of all-gather with the given value.
@@ -44,6 +45,11 @@ struct AutoShardingSolverOption {
   // If ture, allow strategies that recompute heavy operators (e.g., dot)
   // to reduce communication.
   bool allow_recompute_heavy_op;
+
+  // The number of micro batches if gradient accumulation is used.
+  // If this is not 1, the cost of all-reduce for gradient synchronization
+  // is divided by this number.
+  int grad_acc_num_micro_batches;
 
   // If true, load solution vector from PassContext
   bool load_solution_vector;
@@ -85,7 +91,8 @@ using StrategyMap =
     absl::flat_hash_map<const HloInstruction*, std::unique_ptr<StrategyVector>>;
 // The list of all leaf strategies.
 using LeafStrategies = std::vector<StrategyVector*>;
-// The list of all dot instruction pairs that can be optimized by AllReduceReassociate pass.
+// The list of all dot instruction pairs that can be optimized by
+// AllReduceReassociate pass.
 using AssociativeDotPairs =
     std::vector<std::pair<const StrategyVector*, const StrategyVector*>>;
 // The set of all alias pairs
@@ -162,7 +169,8 @@ class ProfilingResult {
       std::string dtype) const {
     // The 1.5 is a penalty factor to disencourage all-to-all.
     double penalty_factor = 1.5;
-    return EstimateAllGatherCost(replica_groups, size / replica_groups.front().size(), dtype) *
+    return EstimateAllGatherCost(replica_groups,
+                                 size / replica_groups.front().size(), dtype) *
            penalty_factor;
   }
 
@@ -379,8 +387,9 @@ class ClusterEnvironment {
     int64 num_devices = device_mesh.dim(mesh_dim);
     double penalty_factor = 1.5;
     return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices / num_devices * num_bytes
-            * penalty_factor + 0.001);
+            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
+                num_devices * num_bytes * penalty_factor +
+            0.001);
   }
 
   double DotCost(const Shape& lhs_shape, const Shape& rhs_shape,
@@ -389,8 +398,8 @@ class ClusterEnvironment {
       return INFINITY_COST;
     }
 
-    // TODO(lmzheng): When profiling data is not available, it is not easy to align the
-    // scale of compute cost and communication cost. Here we just use
+    // TODO(lmzheng): When profiling data is not available, it is not easy to
+    // align the scale of compute cost and communication cost. Here we just use
     // a simple heurstic to compute the compute cost with communication cost.
     double num_bytes = GetBytes(lhs_shape) + GetBytes(rhs_shape);
     return AllReduceCost(num_bytes, 0) + AllReduceCost(num_bytes, 1);
@@ -542,10 +551,10 @@ HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
                  const std::vector<int64> mesh_dims,
                  const ClusterEnvironment& cluster_env);
 
-std::vector<double> ReshardingCostVector(
-    const StrategyVector* strategies, const Shape& shape,
-    const HloSharding& required_sharding,
-    const ClusterEnvironment& cluster_env);
+std::vector<double> ReshardingCostVector(const StrategyVector* strategies,
+                                         const Shape& shape,
+                                         const HloSharding& required_sharding,
+                                         const ClusterEnvironment& cluster_env);
 
 std::vector<double> FollowInsCostVector(int64 source_len, int64 index);
 
@@ -557,10 +566,8 @@ void SetInNodesWithInstruction(std::unique_ptr<StrategyVector>& strategies,
                                const StrategyMap& strategy_map);
 
 void HandleDot(std::unique_ptr<StrategyVector>& strategies,
-               LeafStrategies& leaf_strategies,
-               StrategyMap& strategy_map,
-               const HloInstruction* ins,
-               size_t instruction_id,
+               LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
+               const HloInstruction* ins, size_t instruction_id,
                const ClusterEnvironment& cluster_env,
                const InstructionBatchDimMap& batch_map,
                const AutoShardingSolverOption& solver_option);

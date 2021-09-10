@@ -1763,13 +1763,19 @@ void SetHloSharding(const HloInstructionSequence& sequence,
 
       // TODO(lmzheng): cover more cases.
       if (stra.name == "SR = SS x SR @ {0,1} (allreduce @ 1)" &&
-          !IsFullyTiled(lhs_sharding)) {
+          !IsFullyTiled(lhs_sharding) && !rhs_sharding.IsReplicated()) {
+        // Note:
+        // the condition !rhs_sharding->IsReplicated() is required for
+        // the cases where we allow recomputation of dot instructions.
+        // In these cases, we can generate fake "allreduce" which will
+        // be simplified by SPMD partitioner later. We do not want to
+        // do ForceOperandSharding which disables the simplification.
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1},
                  cluster_env));
       } else if (stra.name == "SR = SS x SR @ {1,0} (allreduce @ 0)" &&
-                 !IsFullyTiled(lhs_sharding)) {
+          !IsFullyTiled(lhs_sharding) && !rhs_sharding.IsReplicated()) {
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0},

@@ -45,6 +45,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/name_uniquer.h"
 #include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/platform_util.h"
+#include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/statusor.h"
@@ -677,6 +678,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
 
   m.def("set_pass_context", &pass_context::SetPassContext);
   m.def("clear_pass_context", &pass_context::ClearPassContext);
+  m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds);
 
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)

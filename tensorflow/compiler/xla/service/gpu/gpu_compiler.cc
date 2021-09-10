@@ -150,7 +150,13 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/slice_sinker.h"
 #include "tensorflow/compiler/xla/service/slow_operation_alarm.h"
 #include "tensorflow/compiler/xla/service/sort_simplifier.h"
+<<<<<<< HEAD
 #include "tensorflow/compiler/xla/service/spmd/stateful_rng_spmd_partitioner.h"
+=======
+#include "tensorflow/compiler/xla/service/spmd/auto_sharding.h"
+#include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
+#include "tensorflow/compiler/xla/service/spmd/slice_auto_sharded_stages.h"
+>>>>>>> Gradient Accumulation - Part 3 (Skip unnecessary allreduce) (#35)
 #include "tensorflow/compiler/xla/service/stable_sort_expander.h"
 #include "tensorflow/compiler/xla/service/transpose_folding.h"
 #include "tensorflow/compiler/xla/service/tuple_simplifier.h"
@@ -350,7 +356,7 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
   }
 
-  {
+  if (pass_context::GetBool("build_option::run_hlo_optimization_pipeline", true)) {
     HloPassPipeline pipeline("optimization");
     pipeline.AddInvariantChecker<HloVerifier>(/*layout_sensitive=*/false,
                                               /*allow_mixed_precision=*/false);
@@ -508,6 +514,7 @@ Status GpuCompiler::OptimizeHloModule(
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
+      spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
     } else {
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
@@ -787,7 +794,7 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
-  if (pass_context::GetBool("build_option::skip_hlo_passes", false)) {
+  if (!pass_context::GetBool("build_option::run_hlo_passes", true)) {
     // Do no run the HLO optimization passes. Assume the input HloModule
     // has already been optimized.
     return std::move(module);

@@ -40,6 +40,16 @@ namespace xla {
 namespace gpu {
 namespace {
 
+bool IsSkipped(const int64 op_id) {
+  // Return whether this op should be skipped.
+  const char* env = getenv("XLA_SKIP_NCCL_COLLECTIVE_IDS");
+  if (env == nullptr) {
+    return false;
+  }
+  std::string key = absl::StrFormat(".%d.", op_id);
+  return strstr(env, key.c_str()) != nullptr;
+}
+
 Status RunAllReduce(const NcclAllReduceConfig& config,
                     const std::vector<NcclCollectiveThunk::Buffer>& buffers,
                     const BufferAllocations& buffer_allocations,
@@ -51,6 +61,35 @@ Status RunAllReduce(const NcclAllReduceConfig& config,
   ncclRedOp_t reduce_op = ToNcclReduction(config.reduction_kind);
 
   se::gpu::GpuStreamHandle gpu_stream = se::gpu::AsGpuStreamValue(&stream);
+
+  bool skip = IsSkipped(config.config.op_id);
+
+  if (skip) {
+    for (size_t i = 0; i < buffers.size(); ++i) {
+      const NcclCollectiveThunk::Buffer& buffer = buffers[i];
+      const void* send_buffer =
+          buffer_allocations.GetDeviceAddress(buffer.source_buffer).opaque();
+      void* recv_buffer =
+          buffer_allocations.GetDeviceAddress(buffer.destination_buffer).opaque();
+
+      if (send_buffer == recv_buffer) {
+        //if (device_ordinal == 0) {
+        //  std::cerr << "skip all-reduce " << config.config.op_id << std::endl;
+        //}
+      } else {
+        PrimitiveType element_type = config.config.operand_element_type[i];
+        int size = buffer.element_count * ShapeUtil::ByteSizeOfPrimitiveType(element_type);
+
+        //if (device_ordinal == 0) {
+        //  std::cerr << "skip-copy all-reduce " << config.config.op_id << ", size: " << size <<  std::endl;
+        //}
+        XLA_CUDA_RETURN_IF_ERROR(
+          cudaMemcpyAsync(recv_buffer, send_buffer, size, cudaMemcpyDeviceToDevice,
+                         *cu_stream));
+      }
+    }
+    return Status::OK();
+  }
 
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
   for (size_t i = 0; i < buffers.size(); ++i) {

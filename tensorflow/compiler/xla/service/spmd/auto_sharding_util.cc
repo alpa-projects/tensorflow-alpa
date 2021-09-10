@@ -50,18 +50,18 @@ HloSharding BroadcastSharding(const HloSharding& input_spec,
   Array<int64> new_tile_assignment = input_spec.tile_assignment();
   new_tile_assignment.Reshape(target_tile_assignment_dimensions);
 
-  return input_spec.ReplicateOnLastTileDim() ?
-    HloSharding::PartialTile(new_tile_assignment):
-    HloSharding::Tile(new_tile_assignment);
+  return input_spec.ReplicateOnLastTileDim()
+             ? HloSharding::PartialTile(new_tile_assignment)
+             : HloSharding::Tile(new_tile_assignment);
 }
 
 // Propagate sharding for dim-wise operations (e.g., slice, pad) which works
 // independently on each dimension.
 // The sharding can successfully propagate if the operation only happends on
 // tensor dimentions that are not tiled.
-absl::optional<HloSharding> PropagateDimwiseSharding(const HloSharding& input_spec,
-                                                     const Shape& old_shape,
-                                                     const Shape& new_shape) {
+absl::optional<HloSharding> PropagateDimwiseSharding(
+    const HloSharding& input_spec, const Shape& old_shape,
+    const Shape& new_shape) {
   if (input_spec.IsReplicated()) {
     return input_spec;
   }
@@ -80,8 +80,10 @@ absl::optional<HloSharding> PropagateDimwiseSharding(const HloSharding& input_sp
 }
 
 // Depth analysis (breadth first search).
-// We also assign a much larger distance to heavey operators (e.g., dot, convolution).
-InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& sequence) {
+// We also assign a much larger distance to heavey operators (e.g., dot,
+// convolution).
+InstructionDepthMap BuildInstructionDepthMap(
+    const HloInstructionSequence& sequence) {
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
 
   InstructionDepthMap depth_map;
@@ -116,21 +118,28 @@ InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& seque
             case HloOpcode::kConvolution:
               delta = 1000;
               break;
-            // A temporary hack here: reduce ops will generate replicated sharding.
-            // We do not want the later broadcast and elementwise ops to follow it.
-            // So we give reduce ops some penalty and let the elementwise ops to
-            // follow other operands.
-            // TODO(lmzheng): remove this hack by correctly registering strategies
-            // for broadcast.
+            // A temporary hack here: reduce ops will generate replicated
+            // sharding. We do not want the later broadcast and elementwise ops
+            // to follow it. So we give reduce ops some penalty and let the
+            // elementwise ops to follow other operands.
+            // TODO(lmzheng): remove this hack by correctly registering
+            // strategies for broadcast.
             case HloOpcode::kReduce:
               delta = -10;
               break;
-            // For similar reasons mentioned above, we give some penalty to broadcast.
+            // For similar reasons mentioned above, we give some penalty to
+            // broadcast.
             case HloOpcode::kBroadcast:
               delta = -3;
               break;
             case HloOpcode::kConstant:
               delta = 0;
+              break;
+            case HloOpcode::kGetTupleElement:
+            case HloOpcode::kTuple:
+            case HloOpcode::kCustomCall:  // Mainly for pipeline_marker
+              // Skip these useless instructions.
+              delta = -1;
               break;
             default:
               delta = 1;
@@ -150,9 +159,9 @@ InstructionDepthMap BuildInstructionDepthMap(const HloInstructionSequence& seque
   return depth_map;
 }
 
-
 // Batch dimension analysis that finds the batch dimension of each instruction.
-InstructionBatchDimMap BuildInstructionBatchDimMap(const HloInstructionSequence& sequence) {
+InstructionBatchDimMap BuildInstructionBatchDimMap(
+    const HloInstructionSequence& sequence) {
   InstructionBatchDimMap batch_map;
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
 
@@ -171,10 +180,12 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(const HloInstructionSequence&
 
         const HloInstruction* lhs = ins->operand(0);
         const HloInstruction* rhs = ins->operand(1);
-        const auto& dot_dnums =  ins->dot_dimension_numbers();
+        const auto& dot_dnums = ins->dot_dimension_numbers();
         int64 space_base_dim = dot_dnums.lhs_batch_dimensions_size();
-        const auto& lhs_batch_dims = ins->dot_dimension_numbers().lhs_batch_dimensions();
-        const auto& rhs_batch_dims = ins->dot_dimension_numbers().rhs_batch_dimensions();
+        const auto& lhs_batch_dims =
+            ins->dot_dimension_numbers().lhs_batch_dimensions();
+        const auto& rhs_batch_dims =
+            ins->dot_dimension_numbers().rhs_batch_dimensions();
         std::vector<int64> lhs_space_dims, rhs_space_dims;
         std::tie(lhs_space_dims, rhs_space_dims) =
             GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
@@ -314,15 +325,16 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(const HloInstructionSequence&
         break;
       }
 
-      default: break;
+      default:
+        break;
     }
   }
 
-  //for (auto iter : batch_map) {
+  // for (auto iter : batch_map) {
   //  std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << " "
   //            << iter.second << std::endl;
   //}
-  //exit(0);
+  // exit(0);
 
   return batch_map;
 }

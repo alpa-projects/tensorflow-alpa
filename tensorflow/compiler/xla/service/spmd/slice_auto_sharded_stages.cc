@@ -91,7 +91,7 @@ std::unique_ptr<HloModule> CreateStageModule(
     // std::cerr << ins->ToString() << std::endl;
     if (ins->opcode() == HloOpcode::kGetTupleElement &&
         ins->operand(0) == stage_start_instruction) {
-      int64 param_no = ins->tuple_index();
+      int64_t param_no = ins->tuple_index();
       context->MapInstruction(ins, parameters[param_no]);
     } else {
       CHECK_NE(ins->opcode(), HloOpcode::kParameter)

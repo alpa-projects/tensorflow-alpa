@@ -17,7 +17,6 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_SWAP_THUNK_H_
 
 #include "tensorflow/compiler/xla/service/gpu/buffer_allocations.h"
-#include "tensorflow/compiler/xla/service/gpu/hlo_execution_profiler.h"
 #include "tensorflow/compiler/xla/service/gpu/thunk.h"
 
 namespace xla {
@@ -39,7 +38,7 @@ class SwapOutThunk : public SwapThunk {
  public:
   SwapOutThunk(ThunkInfo thunk_info,
                std::vector<BufferAllocation::Slice> operands,
-               std::vector<int64> byte_sizes);
+               std::vector<int64_t> byte_sizes);
 
   Status Initialize(const GpuExecutable& executable,
                     se::StreamExecutor* executor) override;
@@ -52,7 +51,7 @@ class SwapOutThunk : public SwapThunk {
 
  private:
   const std::vector<BufferAllocation::Slice> operands_;
-  const std::vector<int64> byte_sizes_;
+  const std::vector<int64_t> byte_sizes_;
   se::StreamExecutor* executor_ = nullptr;
   std::vector<void*> address_list_;
 };
@@ -62,7 +61,7 @@ class SwapInThunk : public SwapThunk {
  public:
   SwapInThunk(ThunkInfo thunk_info,
               std::vector<BufferAllocation::Slice> results,
-              std::vector<int64> byte_sizes, SwapOutThunk* memory_ref,
+              std::vector<int64_t> byte_sizes, SwapOutThunk* memory_ref,
               absl::InlinedVector<const SwapThunk*, 3> waits_for);
 
   Status Initialize(const GpuExecutable& executable,
@@ -72,7 +71,7 @@ class SwapInThunk : public SwapThunk {
 
  private:
   const std::vector<BufferAllocation::Slice> results_;
-  const std::vector<int64> byte_sizes_;
+  const std::vector<int64_t> byte_sizes_;
   const absl::InlinedVector<const SwapThunk*, 3> waits_for_;
   const SwapOutThunk* memory_ref_;
 };

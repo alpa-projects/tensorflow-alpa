@@ -16,9 +16,9 @@
 namespace xla {
 class HloSwapInsertion : public HloModulePass {
  public:
-  using ShapeSizeFunction = std::function<int64(const Shape&)>;
+  using ShapeSizeFunction = std::function<int64_t(const Shape&)>;
   explicit HloSwapInsertion(const ShapeSizeFunction& size_function,
-                            int64 memory_limit_bytes)
+                            int64_t memory_limit_bytes)
       : size_function_(size_function),
         memory_limit_bytes_(memory_limit_bytes) {}
 
@@ -31,18 +31,18 @@ class HloSwapInsertion : public HloModulePass {
  private:
   virtual StatusOr<bool> SwapInsertionComputation(HloComputation* computation,
                                                   HloSchedule* schedule,
-                                                  int64 memory_limit_bytes);
+                                                  int64_t memory_limit_bytes);
 
   // Computes and returns the peak memory used by the given computation. The
   // peak memory is the maximum total size of all live HLO instruction values at
   // any program point. 'order' is the order in which the HLO instructions will
   // be emitted which is used to determine lifespans of HLO values.
-  StatusOr<int64> ComputePeakMemory(HloComputation* computation,
+  StatusOr<int64_t> ComputePeakMemory(HloComputation* computation,
                                     const HloInstructionSequence& order) const;
 
   // Returns the peak memory usage of the called computations for the given
   // instruction. Zero is returned if the instruction calls no computations.
-  StatusOr<int64> CalledComputationsMemoryUsage(
+  StatusOr<int64_t> CalledComputationsMemoryUsage(
       const HloInstruction* instruction) const;
 
   // Call graph of the hlo_module.
@@ -50,11 +50,11 @@ class HloSwapInsertion : public HloModulePass {
 
   const ShapeSizeFunction size_function_;
 
-  int64 memory_limit_bytes_;
+  int64_t memory_limit_bytes_;
 
   std::unique_ptr<TuplePointsToAnalysis> points_to_analysis_;
 
-  absl::flat_hash_map<const HloComputation*, int64> computation_peak_memory_;
+  absl::flat_hash_map<const HloComputation*, int64_t> computation_peak_memory_;
 };
 
 };  // namespace xla

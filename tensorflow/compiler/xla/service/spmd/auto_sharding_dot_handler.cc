@@ -176,8 +176,8 @@ class DotHandler {
     }
 
     // Split one batch dim
-    for (int64 i = 0; i < lhs_batch_dims.size(); ++i) {
-      for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
+    for (int64_t i = 0; i < lhs_batch_dims.size(); ++i) {
+      for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
         if (device_mesh.dim(j) == 1 ||
             ins->shape().dimensions(i) < device_mesh.dim(j)) {
           continue;
@@ -311,18 +311,18 @@ class DotHandler {
   const InstructionBatchDimMap& batch_map;
   const AutoShardingSolverOption& solver_option;
 
-  const Array<int64>& device_mesh;
+  const Array<int64_t>& device_mesh;
   const HloInstruction* lhs;
   const HloInstruction* rhs;
 
   // Dimension information
   const DotDimensionNumbers& dot_dnums;
-  int64 space_base_dim;
-  std::vector<int64> lhs_space_dims, rhs_space_dims;
-  const tensorflow::protobuf::RepeatedField<int64>& lhs_con_dims;
-  const tensorflow::protobuf::RepeatedField<int64>& rhs_con_dims;
-  const tensorflow::protobuf::RepeatedField<int64>& lhs_batch_dims;
-  const tensorflow::protobuf::RepeatedField<int64>& rhs_batch_dims;
+  int64_t space_base_dim;
+  std::vector<int64_t> lhs_space_dims, rhs_space_dims;
+  const tensorflow::protobuf::RepeatedField<int64_t>& lhs_con_dims;
+  const tensorflow::protobuf::RepeatedField<int64_t>& rhs_con_dims;
+  const tensorflow::protobuf::RepeatedField<int64_t>& lhs_batch_dims;
+  const tensorflow::protobuf::RepeatedField<int64_t>& rhs_batch_dims;
 };
 
 // Register strategies for dot instructions.

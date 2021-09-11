@@ -19,7 +19,7 @@ se::Event* SwapThunk::DoneEvent(int device_ordinal) const {
 
 SwapOutThunk::SwapOutThunk(ThunkInfo thunk_info,
                            std::vector<BufferAllocation::Slice> operands,
-                           std::vector<int64> byte_sizes)
+                           std::vector<int64_t> byte_sizes)
     : SwapThunk(Thunk::kSwapOut, thunk_info),
       operands_(std::move(operands)),
       byte_sizes_(std::move(byte_sizes)) {}
@@ -50,7 +50,7 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   if (address_list_.empty()) {
     // alloc memory for the first time. todo: will this influence profile?
     executor_ = params.async_comms_stream->parent();
-    for (int64 byte_size : byte_sizes_) {
+    for (int64_t byte_size : byte_sizes_) {
       address_list_.push_back(executor_->HostMemoryAllocate(byte_size));
     }
     // todo: GpuExecutor's HostMemoryAllocate is simply a new char[]. It does
@@ -91,7 +91,7 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
 
 SwapInThunk::SwapInThunk(ThunkInfo thunk_info,
                          std::vector<BufferAllocation::Slice> results,
-                         std::vector<int64> byte_sizes,
+                         std::vector<int64_t> byte_sizes,
                          SwapOutThunk* memory_ref,
                          absl::InlinedVector<const SwapThunk*, 3> waits_for)
     : SwapThunk(Thunk::kSwapIn, thunk_info),

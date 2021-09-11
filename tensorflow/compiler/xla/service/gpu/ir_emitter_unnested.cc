@@ -1541,7 +1541,7 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
            llvm::zip(op_to_target_mapping, operands)) {
         mlir::Attribute index_attr = std::get<0>(index_and_value_it);
         mlir::Value value = std::get<1>(index_and_value_it);
-        int64 index = index_attr.cast<mlir::IntegerAttr>().getInt();
+        int64_t index = index_attr.cast<mlir::IntegerAttr>().getInt();
         TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
                             GetAllocationSlice(value));
         slices[index] = slice;
@@ -1575,12 +1575,12 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
     TF_ASSIGN_OR_RETURN(results, values_to_slices(custom_call.output()));
   }
 
-  std::vector<int64> byte_sizes;
+  std::vector<int64_t> byte_sizes;
   std::vector<std::string> keys =
       absl::StrSplit(custom_call.backend_config().str(), ";");
-  int64 key = std::stoll(keys[0]);
-  int64 event_key = std::stoll(keys[1]);
-  static absl::flat_hash_map<int64, SwapOutThunk*> swap_address_map_;
+  int64_t key = std::stoll(keys[0]);
+  int64_t event_key = std::stoll(keys[1]);
+  static absl::flat_hash_map<int64_t, SwapOutThunk*> swap_address_map_;
   if (call_target_name == kBuiltinSwapOutTarget) {
     // CHECK(results.size() == 0)
     //     << "builtinSwapOut meets " << results.size() << " result(s)";
@@ -1625,7 +1625,7 @@ Status IrEmitterUnnested::EmitSwapDoneThunk(mlir::Operation* op) {
   auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
   const std::string call_target_name = custom_call.call_target_name().str();
 
-  int64 event_key = std::stoll(custom_call.backend_config().str());
+  int64_t event_key = std::stoll(custom_call.backend_config().str());
   AddThunkToThunkSequence(absl::make_unique<SwapDoneThunk>(
       GetThunkInfo(op), swap_event_map_.at(event_key)));
 

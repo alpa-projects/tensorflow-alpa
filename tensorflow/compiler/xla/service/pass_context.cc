@@ -22,7 +22,7 @@ void SetPassContext(py::dict dict) {
     if (py::isinstance<py::bool_>(item.second)) {
       obj = absl::any(py::cast<bool>(item.second));
     } else if (py::isinstance<py::int_>(item.second)) {
-      obj = absl::any(py::cast<int64>(item.second));
+      obj = absl::any(py::cast<int64_t>(item.second));
     } else if (py::isinstance<py::float_>(item.second)) {
       obj = absl::any(py::cast<double>(item.second));
     } else if (py::isinstance<py::str>(item.second)) {
@@ -31,14 +31,15 @@ void SetPassContext(py::dict dict) {
                py::isinstance<py::tuple>(item.second)) {
       auto tuple_val = py::cast<py::tuple>(item.second);
       // Infer the type according to the first element of the tuple.
-      if (!tuple_val.empty() &&  py::isinstance<py::int_>(tuple_val[0])) {
-        std::vector<int64> int_vector;
+      if (!tuple_val.empty() && py::isinstance<py::int_>(tuple_val[0])) {
+        std::vector<int64_t> int_vector;
         int_vector.reserve(tuple_val.size());
         for (size_t i = 0; i < tuple_val.size(); ++i) {
-          int_vector.push_back(py::cast<int64>(tuple_val[i]));
+          int_vector.push_back(py::cast<int64_t>(tuple_val[i]));
         }
         obj = absl::any(std::move(int_vector));
-      } else if (!tuple_val.empty() && py::isinstance<py::float_>(tuple_val[0])) {
+      } else if (!tuple_val.empty() &&
+                 py::isinstance<py::float_>(tuple_val[0])) {
         std::vector<double> double_vector;
         double_vector.reserve(tuple_val.size());
         for (size_t i = 0; i < tuple_val.size(); ++i) {
@@ -63,9 +64,7 @@ void SetPassContext(py::dict dict) {
   }
 }
 
-void ClearPassContext() {
-  current_context.clear();
-}
+void ClearPassContext() { current_context.clear(); }
 
 template <typename T>
 T GetWithDefaultValue(const std::string& name, const T& default_value) {
@@ -75,7 +74,7 @@ T GetWithDefaultValue(const std::string& name, const T& default_value) {
   } else {
     try {
       return absl::any_cast<T>(iter->second);
-    } catch(const absl::bad_any_cast& e) {
+    } catch (const absl::bad_any_cast& e) {
       LOG(FATAL) << "Bad cast of '" << name;
     }
   }
@@ -89,14 +88,14 @@ T GetWithoutDefaultValue(const std::string& name) {
   } else {
     try {
       return absl::any_cast<T>(iter->second);
-    } catch(const absl::bad_any_cast& e) {
+    } catch (const absl::bad_any_cast& e) {
       LOG(FATAL) << "Bad cast of '" << name;
     }
   }
 }
 
-int64 GetInt(const std::string& name, int64 default_value) {
-  return GetWithDefaultValue<int64>(name, default_value);
+int64_t GetInt(const std::string& name, int64_t default_value) {
+  return GetWithDefaultValue<int64_t>(name, default_value);
 }
 
 bool GetBool(const std::string& name, bool default_value) {
@@ -107,12 +106,13 @@ double GetDouble(const std::string& name) {
   return GetWithoutDefaultValue<double>(name);
 }
 
-std::string GetString(const std::string& name, const std::string& default_value) {
+std::string GetString(const std::string& name,
+                      const std::string& default_value) {
   return GetWithDefaultValue<std::string>(name, default_value);
 }
 
-std::vector<int64> GetIntVector(const std::string& name) {
-  return GetWithoutDefaultValue<std::vector<int64>>(name);
+std::vector<int64_t> GetIntVector(const std::string& name) {
+  return GetWithoutDefaultValue<std::vector<int64_t>>(name);
 }
 
 std::vector<double> GetDoubleVector(const std::string& name) {

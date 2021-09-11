@@ -726,7 +726,7 @@ class IrEmitterUnnested : public IrEmitter {
       all_reduce_start_thunks_;
 
   // Maps done event keys of swap ops to their thunks
-  absl::flat_hash_map<int64, SwapThunk*> swap_event_map_;
+  absl::flat_hash_map<int64_t, SwapThunk*> swap_event_map_;
 
   // Begin optional members for XLA HLO -> LMHLO:
   absl::flat_hash_map<const mlir::Region*, std::unique_ptr<HloModule>>

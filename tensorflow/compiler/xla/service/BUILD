@@ -4526,7 +4526,6 @@ cc_library(
         ":call_graph",
         ":flatten_call_graph",
         ":hlo",
-        ":hlo_casting_utils",
         ":hlo_dce",
         ":hlo_memory_scheduler",
         ":hlo_ordering",

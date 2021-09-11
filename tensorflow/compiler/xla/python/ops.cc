@@ -206,7 +206,7 @@ void BuildOpsSubmodule(py::module* m) {
       [](XlaBuilder* builder, const py::bytes& call_target_name,
          absl::Span<const XlaOp> operands, const Shape& shape,
          const py::bytes& opaque, bool has_side_effect,
-         absl::Span<const std::pair<ShapeIndex, std::pair<int64, ShapeIndex>>>
+         absl::Span<const std::pair<ShapeIndex, std::pair<int64_t, ShapeIndex>>>
              output_operand_aliasing,
          CustomCallSchedule schedule) -> XlaOp {
         return CustomCall(builder, call_target_name, operands, shape, opaque,

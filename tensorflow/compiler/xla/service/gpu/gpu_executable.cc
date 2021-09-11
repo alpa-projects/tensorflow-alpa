@@ -968,8 +968,8 @@ GetOutputInfo(const HloModule& hlo_module, const BufferAssignment& assignment) {
   return output;
 }
 
-int64 GpuExecutable::TotalAllocationSize() const {
-  int64 total_size = 0;
+int64_t GpuExecutable::TotalAllocationSize() const {
+  int64_t total_size = 0;
   for (const BufferAllocation& allocation : allocations_) {
     //std::cerr << allocation.ToString();
     total_size += allocation.size();

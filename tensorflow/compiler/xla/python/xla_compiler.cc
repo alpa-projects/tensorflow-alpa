@@ -393,8 +393,8 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .def("hash", &HashComputation)
       .def("as_hlo_module", &GetHloModule)
       .def("setup_alias",
-           [](XlaComputation& computation, const std::vector<int64>& output_index,
-              int64 param_number, const std::vector<int64>& param_index) {
+           [](XlaComputation& computation, const std::vector<int64_t>& output_index,
+              int64_t param_number, const std::vector<int64_t>& param_index) {
              HloInputOutputAliasProto::AliasEntryProto entry;
              for (auto i : output_index) {
                  entry.add_output_shape_index(i);

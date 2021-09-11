@@ -142,9 +142,9 @@ Status CombineAllReducesContinuousBuffer(absl::Span<HloInstruction* const> to_co
 
   // Flatten and concatenate all buffers
   std::vector<HloInstruction*> flattens;
-  int64 total_count = 0;
+  int64_t total_count = 0;
   for (HloInstruction* hlo : operands) {
-    int64 count = ShapeUtil::ElementsIn(hlo->shape());
+    int64_t count = ShapeUtil::ElementsIn(hlo->shape());
 	Shape shape = ShapeUtil::MakeShape(hlo->shape().element_type(), {count});
     flattens.push_back(computation.AddInstruction(
       HloInstruction::CreateReshape(shape, hlo)
@@ -163,9 +163,9 @@ Status CombineAllReducesContinuousBuffer(absl::Span<HloInstruction* const> to_co
       Cast<HloAllReduceInstruction>(to_combine.front())->use_global_device_ids()));
 
   // Slice results and reshape to their origial shapes
-  int64 pt = 0;
-  for (int64 i = 0; i < to_combine.size(); ++i) {
-    int64 count = ShapeUtil::ElementsIn(flattens[i]->shape());
+  int64_t pt = 0;
+  for (int64_t i = 0; i < to_combine.size(); ++i) {
+    int64_t count = ShapeUtil::ElementsIn(flattens[i]->shape());
     HloInstruction* res = computation.AddInstruction(
       HloInstruction::CreateSlice(
        flattens[i]->shape(), combined,

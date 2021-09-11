@@ -71,7 +71,7 @@ struct ShardingStrategy {
 struct StrategyVector {
   bool is_tuple;
   // the index used in the solver. For non-leaf nodes, this is set to -1.
-  int64 id;
+  int64_t id;
   // the index of the HLO instruction that generates this strategy vector.
   size_t instruction_id;
   // the conneced nodes used for resharding costs;
@@ -96,7 +96,7 @@ using LeafStrategies = std::vector<StrategyVector*>;
 using AssociativeDotPairs =
     std::vector<std::pair<const StrategyVector*, const StrategyVector*>>;
 // The set of all alias pairs
-using AliasSet = absl::flat_hash_set<std::pair<int64, int64>>;
+using AliasSet = absl::flat_hash_set<std::pair<int64_t, int64_t>>;
 
 // Store the profiling results of communication and computation.
 class ProfilingResult {
@@ -130,7 +130,7 @@ class ProfilingResult {
   bool Enabled() const { return enabled_; }
 
   double EstimateAllGatherCost(
-      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      const std::vector<std::vector<int>>& replica_groups, int64_t size,
       std::string dtype) const {
     if (all_gather_cost_dict_.empty()) {
       // Use all-reduce to approximate all-gather.
@@ -143,7 +143,7 @@ class ProfilingResult {
   }
 
   double EstimateAllReduceCost(
-      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      const std::vector<std::vector<int>>& replica_groups, int64_t size,
       std::string dtype) const {
     return EstimateInternal(replica_groups, size, dtype,
                             all_reduce_cost_dict_) -
@@ -151,7 +151,7 @@ class ProfilingResult {
   }
 
   double EstimateReduceScatterCost(
-      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      const std::vector<std::vector<int>>& replica_groups, int64_t size,
       std::string dtype) const {
     if (reduce_scatter_cost_dict_.empty()) {
       // Use all-reduce to approximate all-gather.
@@ -165,7 +165,7 @@ class ProfilingResult {
   }
 
   double EstimateAllToAllCost(
-      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      const std::vector<std::vector<int>>& replica_groups, int64_t size,
       std::string dtype) const {
     // The 1.5 is a penalty factor to disencourage all-to-all.
     double penalty_factor = 1.5;
@@ -186,11 +186,11 @@ class ProfilingResult {
   // pair<group, dtype>
   using Key = std::pair<std::string, std::string>;
   // vector<pair<size, time>>
-  using Value = std::vector<std::pair<int64, double>>;
+  using Value = std::vector<std::pair<int64_t, double>>;
 
   // Estimate the cost by linear interpolation bewteen the two closest points.
   double EstimateInternal(
-      const std::vector<std::vector<int>>& replica_groups, int64 size,
+      const std::vector<std::vector<int>>& replica_groups, int64_t size,
       const std::string& dtype,
       const absl::flat_hash_map<Key, Value>& cost_dict) const {
     Key key(Group2Str(replica_groups), dtype);
@@ -211,9 +211,9 @@ class ProfilingResult {
       }
     }
 
-    int64 left_size = cost_list[i].first;
+    int64_t left_size = cost_list[i].first;
     double left_cost = cost_list[i].second;
-    int64 right_size = cost_list[i + 1].first;
+    int64_t right_size = cost_list[i + 1].first;
     double right_cost = cost_list[i + 1].second;
 
     return 1.0 * (size - left_size) / (right_size - left_size) *
@@ -233,7 +233,7 @@ class ProfilingResult {
       py::list list_val = py::cast<py::list>(item.second);
       for (const auto x : list_val) {
         py::tuple tuple_val = py::cast<py::tuple>(x);
-        cpp_dict[key].push_back(std::make_pair(py::cast<int64>(tuple_val[0]),
+        cpp_dict[key].push_back(std::make_pair(py::cast<int64_t>(tuple_val[0]),
                                                py::cast<double>(tuple_val[1])));
       }
     }
@@ -246,7 +246,7 @@ class ProfilingResult {
     for (const auto& group : replica_groups) {
       os << "(";
       for (const auto& id : py::cast<py::tuple>(group)) {
-        os << py::cast<int64>(id) << ",";
+        os << py::cast<int64_t>(id) << ",";
       }
       os << "),";
     }
@@ -286,7 +286,7 @@ class ProfilingResult {
 // the real profiling result.
 class ClusterEnvironment {
  public:
-  ClusterEnvironment(const Array<int64>& device_mesh,
+  ClusterEnvironment(const Array<int64_t>& device_mesh,
                      const std::vector<double>& mesh_alpha,
                      const std::vector<double>& mesh_beta,
                      const ProfilingResult& prof_result,
@@ -333,7 +333,7 @@ class ClusterEnvironment {
                                                num_bytes / 4, "float32");
     }
 
-    int64 num_devices = device_mesh.dim(mesh_dim);
+    int64_t num_devices = device_mesh.dim(mesh_dim);
     return (mesh_alpha[mesh_dim] +
             mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes +
             0.1);
@@ -350,7 +350,7 @@ class ClusterEnvironment {
                                                num_bytes / 4, "float32");
     }
 
-    int64 num_devices = device_mesh.dim(mesh_dim);
+    int64_t num_devices = device_mesh.dim(mesh_dim);
     return (mesh_alpha[mesh_dim] +
             mesh_beta[mesh_dim] * 2 * (num_devices - 1) / num_devices *
                 num_bytes +
@@ -367,7 +367,7 @@ class ClusterEnvironment {
           cached_replica_groups[mesh_dim], num_bytes / 4, "float32");
     }
 
-    int64 num_devices = device_mesh.dim(mesh_dim);
+    int64_t num_devices = device_mesh.dim(mesh_dim);
     return (mesh_alpha[mesh_dim] +
             mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes +
             0.001);
@@ -384,7 +384,7 @@ class ClusterEnvironment {
     }
 
     // The 1.5 is a penalty factor to disencourage all-to-all.
-    int64 num_devices = device_mesh.dim(mesh_dim);
+    int64_t num_devices = device_mesh.dim(mesh_dim);
     double penalty_factor = 1.5;
     return (mesh_alpha[mesh_dim] +
             mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
@@ -417,19 +417,19 @@ class ClusterEnvironment {
     }
 
     std::vector<int> tensor_dim_vals(shape.rank(), 0);
-    for (int64 i = 0; i < shape.rank(); ++i) {
+    for (int64_t i = 0; i < shape.rank(); ++i) {
       tensor_dim_vals[i] = GetDimLastValue(spec.tile_assignment(), i);
     }
 
     std::vector<int> mesh_dim_vals(device_mesh.num_dimensions(), 0);
-    for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
+    for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
       mesh_dim_vals[j] = GetDimLastValue(device_mesh, j);
     }
 
     std::vector<int> ret(shape.rank(), -1);
-    for (int64 i = 0; i < shape.rank(); ++i) {
+    for (int64_t i = 0; i < shape.rank(); ++i) {
       if (spec.tile_assignment().dim(i) != 1) {
-        for (int64 j = 0; j < device_mesh.num_dimensions(); ++j) {
+        for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
           if (tensor_dim_vals[i] == mesh_dim_vals[j]) {
             ret[i] = j;
           }
@@ -463,7 +463,7 @@ class ClusterEnvironment {
     // Analyze the dims that need to dynamic-sliced or all-gather.
     std::vector<int> slice_dims;
     std::vector<int> all_gather_dims;
-    for (int64 i = 0; i < shape.rank(); ++i) {
+    for (int64_t i = 0; i < shape.rank(); ++i) {
       int src_mesh_dim = src_tensor_dim_to_mesh_dim[i];
       int dst_mesh_dim = dst_tensor_dim_to_mesh_dim[i];
       if (src_mesh_dim == dst_mesh_dim) {
@@ -529,7 +529,7 @@ class ClusterEnvironment {
   }
 
   // Shape and bandwidth of the device mesh
-  const Array<int64> device_mesh;
+  const Array<int64_t> device_mesh;
   const int total_devices;
   const std::vector<double> mesh_alpha;
   const std::vector<double> mesh_beta;
@@ -547,8 +547,8 @@ class ClusterEnvironment {
 
 // Function declarations
 // Their comments can be found in their definitions in *.cc files.
-HloSharding Tile(const Shape& shape, const std::vector<int64> tensor_dims,
-                 const std::vector<int64> mesh_dims,
+HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
+                 const std::vector<int64_t> mesh_dims,
                  const ClusterEnvironment& cluster_env);
 
 std::vector<double> ReshardingCostVector(const StrategyVector* strategies,
@@ -556,7 +556,7 @@ std::vector<double> ReshardingCostVector(const StrategyVector* strategies,
                                          const HloSharding& required_sharding,
                                          const ClusterEnvironment& cluster_env);
 
-std::vector<double> FollowInsCostVector(int64 source_len, int64 index);
+std::vector<double> FollowInsCostVector(int64_t source_len, int64_t index);
 
 std::unique_ptr<StrategyVector> CreateLeafStrategyVector(
     size_t instruction_id, LeafStrategies& leaf_strategies);

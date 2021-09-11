@@ -331,7 +331,7 @@ StatusOr<std::unique_ptr<GpuHloSchedule>> GpuHloSchedule::Build(
             ComputationSchedulerToModuleScheduler(
                 DefaultMemoryScheduler,
                 PostprocessorToScheduleAsEarlyOrLateAsPossible)));
-    module->set_schedule(sequences);
+    //module->set_schedule(sequences);
     schedule->thunk_launch_order_ =
         sequences.sequence(entry_computation).instructions();
     schedule->hlo_ordering_ =

@@ -369,7 +369,7 @@ class Executable {
   virtual int64_t SizeOfGeneratedCodeInBytes() const;
 
   // Return the total size of allocated buffers in bytes. This is GPU only.
-  virtual int64 TotalAllocationSize() const { return -1; }
+  virtual int64_t TotalAllocationSize() const { return -1; }
 
   // Dumping helpers.
   void set_hlo_proto(std::unique_ptr<xla::HloProto> hlo_proto) {

@@ -26,19 +26,19 @@ bool IsAlwaysReplicated(const HloInstruction* inst) {
 // non-tiled.
 HloSharding BroadcastSharding(const HloSharding& input_spec,
                               const Shape& new_shape,
-                              const std::vector<int64>& dimensions) {
+                              const std::vector<int64_t>& dimensions) {
   if (input_spec.IsReplicated()) {
     return input_spec;
   }
   CHECK(new_shape.IsArray());
 
-  std::vector<int64> target_tile_assignment_dimensions;
-  for (int64 i = 0; i < new_shape.rank(); ++i) {
+  std::vector<int64_t> target_tile_assignment_dimensions;
+  for (int64_t i = 0; i < new_shape.rank(); ++i) {
     auto it = absl::c_find(dimensions, i);
     if (it == dimensions.end()) {
       target_tile_assignment_dimensions.push_back(1);
     } else {
-      const int64 source_dim = std::distance(dimensions.begin(), it);
+      const int64_t source_dim = std::distance(dimensions.begin(), it);
       target_tile_assignment_dimensions.push_back(
           input_spec.tile_assignment().dim(source_dim));
     }
@@ -47,7 +47,7 @@ HloSharding BroadcastSharding(const HloSharding& input_spec,
     target_tile_assignment_dimensions.push_back(
         input_spec.tile_assignment().dimensions().back());
   }
-  Array<int64> new_tile_assignment = input_spec.tile_assignment();
+  Array<int64_t> new_tile_assignment = input_spec.tile_assignment();
   new_tile_assignment.Reshape(target_tile_assignment_dimensions);
 
   return input_spec.ReplicateOnLastTileDim()
@@ -69,7 +69,7 @@ absl::optional<HloSharding> PropagateDimwiseSharding(
   CHECK(old_shape.IsArray());
 
   const auto& tile_assignment = input_spec.tile_assignment();
-  for (int64 i = 0; i < old_shape.rank(); ++i) {
+  for (int64_t i = 0; i < old_shape.rank(); ++i) {
     if (tile_assignment.dim(i) > 1 &&
         new_shape.dimensions(i) != old_shape.dimensions(i)) {
       return absl::nullopt;
@@ -181,12 +181,12 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         const HloInstruction* lhs = ins->operand(0);
         const HloInstruction* rhs = ins->operand(1);
         const auto& dot_dnums = ins->dot_dimension_numbers();
-        int64 space_base_dim = dot_dnums.lhs_batch_dimensions_size();
+        int64_t space_base_dim = dot_dnums.lhs_batch_dimensions_size();
         const auto& lhs_batch_dims =
             ins->dot_dimension_numbers().lhs_batch_dimensions();
         const auto& rhs_batch_dims =
             ins->dot_dimension_numbers().rhs_batch_dimensions();
-        std::vector<int64> lhs_space_dims, rhs_space_dims;
+        std::vector<int64_t> lhs_space_dims, rhs_space_dims;
         std::tie(lhs_space_dims, rhs_space_dims) =
             GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
 

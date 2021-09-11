@@ -138,11 +138,11 @@ PYBIND11_MODULE(xla_extension, m) {
             CHECK_NE(stream_device, nullptr);
             LocalDeviceState* local_device =
                 stream_device->GetLocalDeviceState().ValueOrDie();
-            int64 free, total;
+            int64_t free, total;
             if (local_device->executor()->DeviceMemoryUsage(&free, &total)) {
               return std::make_pair(free, total);
             };
-            const int64 invalid = -1;
+            const int64_t invalid = -1;
             return std::make_pair(invalid, invalid);
           })
       .def("__str__", &PjRtDevice::DebugString)

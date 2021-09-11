@@ -43,16 +43,16 @@ namespace {
 const char* const kBuiltinSwapOutTarget = "__builtin$SwapOut";
 const char* const kBuiltinSwapInTarget = "__builtin$SwapIn";
 const char* const kBuiltinSwapDoneTarget = "__builtin$SwapDone";
-int64 SwapKey = 0;
-int64 SwapDoneEventKey = 100;
+int64_t SwapKey = 0;
+int64_t SwapDoneEventKey = 100;
 const Shape FormalShape = ShapeUtil::MakeNil();
 
 using ::tensorflow::strings::HumanReadableNumBytes;
 
-using BufferId = int64;
+using BufferId = int64_t;
 const BufferId kInvalidBufferId = -1;
-const int64 InfiniteMemory = -1;
-const int64 kInvalidPosition = INT64_MAX;
+const int64_t InfiniteMemory = -1;
+const int64_t kInvalidPosition = INT64_MAX;
 
 // Shape GetShardedBufferShape(const Shape& shape, const HloInstruction* inst) {
 //   if (inst->has_sharding()) {
@@ -64,7 +64,7 @@ const int64 kInvalidPosition = INT64_MAX;
 
 struct Operand {
   BufferId bid;
-  int64 size;
+  int64_t size;
   HloInstruction* instruction;
 
   bool operator==(const Operand& other) const {
@@ -74,12 +74,12 @@ struct Operand {
 
 using BufferIdList = absl::InlinedVector<BufferId, 3>;
 using OperandList = absl::InlinedVector<Operand, 3>;
-using UsesList = absl::InlinedVector<int64, 3>;
+using UsesList = absl::InlinedVector<int64_t, 3>;
 
 class Item {
  public:
   HloInstruction* instruction;
-  int64 position = kInvalidPosition;
+  int64_t position = kInvalidPosition;
   OperandList buffers_used;
   BufferIdList buffers_defined;
   bool is_swap = false;
@@ -98,7 +98,7 @@ class Item {
 
  private:
   friend class InstructionList;
-  int64 should_before = kInvalidPosition, should_after = -1;
+  int64_t should_before = kInvalidPosition, should_after = -1;
   Item* next;
 };
 
@@ -120,7 +120,7 @@ std::string OpaqueByIndex(const std::string& full, int index) {
 class InstructionList {
  public:
   explicit InstructionList(const HloInstructionSequence& order) {
-    int64 position = 0;
+    int64_t position = 0;
     Item* last = nullptr;
     for (HloInstruction* inst : order.instructions()) {
       Item* item = new Item;
@@ -224,7 +224,7 @@ class InstructionList {
       return x->should_before < y->should_before;
     });
     // solve swap in's dependency on swap out
-    int64 cnt = 0;
+    int64_t cnt = 0;
     absl::c_for_each(swap_outs_, [&cnt](Item*& item) {
       item->position = cnt++;  // relative position of swap outs
     });
@@ -326,7 +326,7 @@ class InstructionList {
 };
 
 UsesList GetUsers(const InstructionList& instruction_list,
-                  const LogicalBuffer* logical_buffer, const int64 bid,
+                  const LogicalBuffer* logical_buffer, const int64_t bid,
                   const TuplePointsToAnalysis& points_to_analysis) {
   UsesList users;
   for (const BufferAlias& buffer_alias :
@@ -356,14 +356,14 @@ class MemoryRecorder {
  public:
   MemoryRecorder(HloComputation* computation, InstructionList& inst_list,
                  const TuplePointsToAnalysis& points_to_analysis,
-                 int64 memory_bound,
+                 int64_t memory_bound,
                  const HloSwapInsertion::ShapeSizeFunction& size_function);
 
   void PrepareForInstruction(Item* item);
 
   void RecycleAfterInstruction(Item* item);
 
-  int64 memory_usage() const { return memory_usage_; }
+  int64_t memory_usage() const { return memory_usage_; }
 
  private:
   struct Buffer {
@@ -372,7 +372,7 @@ class MemoryRecorder {
 
     // The size of the buffer. In SPMD it is the sharded size according to its
     // defining inst.
-    int64 size;
+    int64_t size;
 
     // whether the buffer is live out of the computation
     bool live_out;
@@ -388,18 +388,18 @@ class MemoryRecorder {
     Item* latest_alloc;
 
     // The size it actually occupies. This can be larger than actual size
-    int64 occupying_size;
+    int64_t occupying_size;
 
     // All uses with the order of positions in the HloInstructionSequence
     UsesList use_positions;
 
     // The index of the next use at use_positions.
-    int64 next_use_index;
+    int64_t next_use_index;
 
     // Position in the tuple this buffer definition lives in
     ShapeIndex index;
 
-    int64 next_use() const {
+    int64_t next_use() const {
       if (next_use_index == use_positions.size()) {
         return kInvalidPosition;
       }
@@ -413,7 +413,7 @@ class MemoryRecorder {
 
     bool IsSwappedIn() const { return latest_alloc != defining_instruction; }
 
-    void SetInGPU(Item* alloc, int64 occupy) {
+    void SetInGPU(Item* alloc, int64_t occupy) {
       if (alloc == nullptr) {
         CHECK(InGPU());
         CHECK(occupy == 0);
@@ -453,7 +453,7 @@ class MemoryRecorder {
       return info;
     }
 
-    int64 size() { return intervals_.size(); }
+    int64_t size() { return intervals_.size(); }
 
     bool empty() { return intervals_.empty(); }
 
@@ -468,7 +468,7 @@ class MemoryRecorder {
     }
   };
 
-  int64 AllocatedSize(const Buffer& buffer) const {
+  int64_t AllocatedSize(const Buffer& buffer) const {
     HloInstruction* inst = buffer.defining_instruction->instruction;
     HloOpcode def_opcode = inst->opcode();
     if (def_opcode == HloOpcode::kParameter) {
@@ -483,7 +483,7 @@ class MemoryRecorder {
   Buffer& CreateBufferFromLogicalBuffer(Item* defining_instruction,
                                         bool live_out, bool not_share,
                                         const LogicalBuffer* logical_buffer) {
-    int64 buffer_id = buffers_.size();
+    int64_t buffer_id = buffers_.size();
     UsesList users = GetUsers(instruction_list_, logical_buffer, buffer_id,
                               points_to_analysis_);
     const Shape& shape = logical_buffer->shape();
@@ -497,34 +497,34 @@ class MemoryRecorder {
 
   void PreAllocate();
 
-  void AddReleasedInternal(int64 size, Item* item);
+  void AddReleasedInternal(int64_t size, Item* item);
 
   // alloc a size of memory
-  void RegisterAlloc(BufferId bid, int64 size);
+  void RegisterAlloc(BufferId bid, int64_t size);
 
   // release all possible to release memory
-  void ReleaseAll(const absl::flat_hash_set<int64>& sizes, Item* release_after);
+  void ReleaseAll(const absl::flat_hash_set<int64_t>& sizes, Item* release_after);
 
   // adjust heaps for all used this round: the next use is changed;
-  void AdjustAll(const absl::flat_hash_set<int64>& worklist);
+  void AdjustAll(const absl::flat_hash_set<int64_t>& worklist);
 
   // try to alloc an interval with given size from free memory.
-  bool AllocFreeMemory(int64 size);
+  bool AllocFreeMemory(int64_t size);
 
   // try to alloc an already released interval.
   // If no such a interval, return nullptr.
-  std::pair<Item*, int64> AllocReleasedMemory(int64 size, bool soft);
+  std::pair<Item*, int64_t> AllocReleasedMemory(int64_t size, bool soft);
 
   // try to alloc by releasing a buffer already in the set.
-  std::pair<BufferId, Item*> AllocWithRelease(int64 size, Item* item);
+  std::pair<BufferId, Item*> AllocWithRelease(int64_t size, Item* item);
 
   // get space for an item. Return the actual allocated size
   // because a larger buffer may be allocated to it
-  int64 GetSpaceFor(int64 size, Item* item);
+  int64_t GetSpaceFor(int64_t size, Item* item);
 
   void SelfCHECK(absl::string_view extra_msg = "") {
     if (memory_bound_ == InfiniteMemory) return;
-    int64 allocated_size, released_size;
+    int64_t allocated_size, released_size;
     allocated_size = released_size = 0;
     for (auto iter = allocated_buffers_.begin();
          iter != allocated_buffers_.end(); ++iter) {
@@ -560,15 +560,15 @@ class MemoryRecorder {
     }
     std::cerr << "free: " << HumanReadableNumBytes(free_memory_) << "\n\n";
   }
-  int64 free_memory_;
-  int64 unsharable_memory_;
+  int64_t free_memory_;
+  int64_t unsharable_memory_;
   HloComputation* computation_;
   InstructionList& instruction_list_;
-  int64 memory_bound_;
+  int64_t memory_bound_;
   const HloSwapInsertion::ShapeSizeFunction& size_function_;
   const TuplePointsToAnalysis& points_to_analysis_;
 
-  int64 memory_usage_;
+  int64_t memory_usage_;
 
   Item* prepare_for_ = nullptr;
   std::vector<Buffer> buffers_;
@@ -576,9 +576,9 @@ class MemoryRecorder {
 
   // allocated buffers are stored by a list of heaps(priority_queue).
   // Each heap contains allocated buffers with the same size
-  std::map<int64, Heap> allocated_buffers_;
+  std::map<int64_t, Heap> allocated_buffers_;
 
-  std::map<int64, std::queue<Item*>> released_intervals_;
+  std::map<int64_t, std::queue<Item*>> released_intervals_;
 };
 };  // namespace
 
@@ -593,7 +593,7 @@ bool NotShare(const LogicalBuffer* logical_buffer) {
 
 MemoryRecorder::MemoryRecorder(
     HloComputation* computation, InstructionList& inst_list,
-    const TuplePointsToAnalysis& points_to_analysis, int64 memory_bound,
+    const TuplePointsToAnalysis& points_to_analysis, int64_t memory_bound,
     const HloSwapInsertion::ShapeSizeFunction& size_function)
     : computation_(computation),
       instruction_list_(inst_list),
@@ -660,11 +660,11 @@ MemoryRecorder::MemoryRecorder(
 void MemoryRecorder::PreAllocate() {
   if (memory_bound_ == -1) return;
   std::vector<Item*> insts;
-  absl::flat_hash_map<Item*, absl::InlinedVector<int64, 5>> intervals_;
+  absl::flat_hash_map<Item*, absl::InlinedVector<int64_t, 5>> intervals_;
   for (auto* item = instruction_list_.first(); item != nullptr;
        item = instruction_list_.next(item)) {
     insts.push_back(item);
-    absl::InlinedVector<int64, 5> intervals;
+    absl::InlinedVector<int64_t, 5> intervals;
     absl::c_for_each(item->buffers_used, [&](Operand& x) {
       x.size = buffers_.at(x.bid).size;
       intervals.push_back(x.size);
@@ -678,7 +678,7 @@ void MemoryRecorder::PreAllocate() {
     absl::c_sort(item->buffers_defined, [&](BufferId x, BufferId y) {
       return buffers_.at(x).size > buffers_.at(y).size;
     });
-    absl::c_sort(intervals, std::greater<int64>());
+    absl::c_sort(intervals, std::greater<int64_t>());
     intervals_.insert({item, std::move(intervals)});
   }
   absl::c_sort(insts, [&intervals_](Item* x, Item* y) {
@@ -688,17 +688,17 @@ void MemoryRecorder::PreAllocate() {
     do {
       if (x_intervals.size() == idx) return false;
       if (y_intervals.size() == idx) return true;
-      int64 size_x = x_intervals.at(idx);
-      int64 size_y = y_intervals.at(idx);
+      int64_t size_x = x_intervals.at(idx);
+      int64_t size_y = y_intervals.at(idx);
       if (size_x != size_y) return size_x > size_y;
       ++idx;
     } while (true);
   });
-  std::vector<int64> simulated_heap;
+  std::vector<int64_t> simulated_heap;
   int index;
   for (Item* item : insts) {
     index = 0;
-    for (const int64 size : intervals_.at(item)) {
+    for (const int64_t size : intervals_.at(item)) {
       if (index == simulated_heap.size()) {
         simulated_heap.push_back(size);
         ++index;
@@ -710,8 +710,8 @@ void MemoryRecorder::PreAllocate() {
       ++index;
     }
   }
-  int64 sum = 0;
-  for (int64 size : simulated_heap) {
+  int64_t sum = 0;
+  for (int64_t size : simulated_heap) {
     sum += size;
     auto iter = released_intervals_.find(size);
     if (iter == released_intervals_.end()) {
@@ -736,7 +736,7 @@ void MemoryRecorder::PreAllocate() {
   SelfCHECK();
 }
 
-void MemoryRecorder::AddReleasedInternal(int64 size, Item* item) {
+void MemoryRecorder::AddReleasedInternal(int64_t size, Item* item) {
   if (size == 0) {
     return;
   }
@@ -750,7 +750,7 @@ void MemoryRecorder::AddReleasedInternal(int64 size, Item* item) {
   }
 }
 
-void MemoryRecorder::RegisterAlloc(BufferId bid, int64 size) {
+void MemoryRecorder::RegisterAlloc(BufferId bid, int64_t size) {
   if (size == 0) {
     return;
   }
@@ -765,10 +765,10 @@ void MemoryRecorder::RegisterAlloc(BufferId bid, int64 size) {
   memory_usage_ += size;
 }
 
-void MemoryRecorder::ReleaseAll(const absl::flat_hash_set<int64>& sizes,
+void MemoryRecorder::ReleaseAll(const absl::flat_hash_set<int64_t>& sizes,
                                 Item* release_after) {
   std::vector<BufferId> release_id;
-  for (int64 size : sizes) {
+  for (int64_t size : sizes) {
     if (size == 0) {
       continue;
     }
@@ -797,8 +797,8 @@ void MemoryRecorder::ReleaseAll(const absl::flat_hash_set<int64>& sizes,
   // return release_id;
 }
 
-void MemoryRecorder::AdjustAll(const absl::flat_hash_set<int64>& worklist) {
-  for (int64 size : worklist) {
+void MemoryRecorder::AdjustAll(const absl::flat_hash_set<int64_t>& worklist) {
+  for (int64_t size : worklist) {
     if (size == 0) {
       continue;
     }
@@ -808,7 +808,7 @@ void MemoryRecorder::AdjustAll(const absl::flat_hash_set<int64>& worklist) {
   }
 }
 
-bool MemoryRecorder::AllocFreeMemory(int64 size) {
+bool MemoryRecorder::AllocFreeMemory(int64_t size) {
   if (free_memory_ == InfiniteMemory)
     return true;  // the compute peak memory mode
   if (free_memory_ >= size) {
@@ -820,14 +820,14 @@ bool MemoryRecorder::AllocFreeMemory(int64 size) {
 
 // The return item can never be a swap out because
 // swap out is created only in AllocWithRelease and consumed immediately
-std::pair<Item*, int64> MemoryRecorder::AllocReleasedMemory(int64 size,
+std::pair<Item*, int64_t> MemoryRecorder::AllocReleasedMemory(int64_t size,
                                                             bool soft) {
   auto iter = released_intervals_.lower_bound(size);
   if (iter == released_intervals_.end() || (iter->first > size * 10 && soft)) {
     return std::make_pair(nullptr, -1);
   }
   Item* head = iter->second.front();
-  int64 interval_len = iter->first;
+  int64_t interval_len = iter->first;
   iter->second.pop();
   if (iter->second.empty()) {
     released_intervals_.erase(interval_len);
@@ -835,7 +835,7 @@ std::pair<Item*, int64> MemoryRecorder::AllocReleasedMemory(int64 size,
   return std::make_pair(head, interval_len);
 }
 
-std::pair<BufferId, Item*> MemoryRecorder::AllocWithRelease(int64 size,
+std::pair<BufferId, Item*> MemoryRecorder::AllocWithRelease(int64_t size,
                                                             Item* item) {
   // We allocate buffers sequentially, so we need to avoid a later allocation
   // occupies an earlier allocation.
@@ -867,7 +867,7 @@ std::pair<BufferId, Item*> MemoryRecorder::AllocWithRelease(int64 size,
   return info;
 }
 
-int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
+int64_t MemoryRecorder::GetSpaceFor(int64_t size, Item* item) {
   // TODO: more info: constant, entry parameter, live out...
   if (size == 0) {
     return size;
@@ -913,7 +913,7 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
   BufferId release_bid = release.first;
   Item* release_inst = release.second;
   Buffer& release_buffer = buffers_.at(release_bid);
-  int64 interval_size = release_buffer.occupying_size;
+  int64_t interval_size = release_buffer.occupying_size;
   VLOG(3) << "Alloc " << HumanReadableNumBytes(size) << " for "
           << item->instruction->ToShortString() << " with swapping out "
           << HumanReadableNumBytes(interval_size) << " buffer of "
@@ -931,7 +931,7 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
       Shape shape = operand->shape();
       ShapeIndex total_idx = {};
       for (size_t i = 0; i < release_buffer.index.size(); ++i) {
-        int64 index = release_buffer.index[i];
+        int64_t index = release_buffer.index[i];
         total_idx.push_back(index);
         operand =
             computation_->AddInstruction(HloInstruction::CreateGetTupleElement(
@@ -997,9 +997,9 @@ int64 MemoryRecorder::GetSpaceFor(int64 size, Item* item) {
 
 void MemoryRecorder::PrepareForInstruction(Item* item) {
   prepare_for_ = item;
-  absl::InlinedVector<std::pair<BufferId, int64>, 3> intervals_for_defined;
+  absl::InlinedVector<std::pair<BufferId, int64_t>, 3> intervals_for_defined;
   auto alloc_use_ = [&](Operand& operand) {
-    int64 bid = operand.bid;
+    int64_t bid = operand.bid;
     auto& buffer = buffers_.at(bid);
     if (buffer.InGPU()) {
       if (buffer.IsSwappedIn()) {
@@ -1060,7 +1060,7 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
         Operand{kInvalidBufferId, 0, swap_in_inst});
     instruction_list_.AddSwapDone(swap_in, swap_done);
 
-    int64 interval_size = GetSpaceFor(AllocatedSize(buffer), swap_in);
+    int64_t interval_size = GetSpaceFor(AllocatedSize(buffer), swap_in);
     buffer.SetInGPU(swap_in, interval_size);
     RegisterAlloc(bid, interval_size);
 
@@ -1068,7 +1068,7 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
     instruction_list_.AddEdge(swap_done, item);
     last_use_inst_.at(bid) = item;
   };
-  auto alloc_def_ = [&](int64 bid) {
+  auto alloc_def_ = [&](int64_t bid) {
     auto& buffer = buffers_.at(bid);
     int interval_size = GetSpaceFor(AllocatedSize(buffer), item);
     buffer.SetInGPU(item, interval_size);
@@ -1110,10 +1110,10 @@ void MemoryRecorder::PrepareForInstruction(Item* item) {
 
 void MemoryRecorder::RecycleAfterInstruction(Item* item) {
   prepare_for_ = nullptr;
-  absl::flat_hash_set<int64> worklist;
-  absl::flat_hash_set<int64> to_adjust_sizes;
+  absl::flat_hash_set<int64_t> worklist;
+  absl::flat_hash_set<int64_t> to_adjust_sizes;
   for (auto& operand : item->buffers_used) {
-    int64 bid = operand.bid;
+    int64_t bid = operand.bid;
     auto& buffer = buffers_.at(bid);
 
     ++buffer.next_use_index;
@@ -1134,20 +1134,20 @@ void MemoryRecorder::RecycleAfterInstruction(Item* item) {
   SelfCHECK();
 }
 
-StatusOr<int64> HloSwapInsertion::ComputePeakMemory(
+StatusOr<int64_t> HloSwapInsertion::ComputePeakMemory(
     HloComputation* computation, const HloInstructionSequence& order) const {
   InstructionList instruction_list(order);
   MemoryRecorder tracker(computation, instruction_list, *points_to_analysis_,
                          InfiniteMemory, size_function_);
-  int64 peak_memory = tracker.memory_usage();
+  int64_t peak_memory = tracker.memory_usage();
   for (auto item = instruction_list.first(); item != nullptr;
        item = instruction_list.next(item)) {
     const HloInstruction* instruction = item->instruction;
-    TF_ASSIGN_OR_RETURN(int64 callee_usage,
+    TF_ASSIGN_OR_RETURN(int64_t callee_usage,
                         CalledComputationsMemoryUsage(instruction));
     tracker.PrepareForInstruction(item);
     peak_memory =
-        std::max<int64>(peak_memory, tracker.memory_usage() + callee_usage);
+        std::max<int64_t>(peak_memory, tracker.memory_usage() + callee_usage);
     tracker.RecycleAfterInstruction(item);
   }
   VLOG(1) << "Peak memory for " << computation->name() << ": "
@@ -1155,14 +1155,14 @@ StatusOr<int64> HloSwapInsertion::ComputePeakMemory(
   return peak_memory;
 }
 
-StatusOr<int64> HloSwapInsertion::CalledComputationsMemoryUsage(
+StatusOr<int64_t> HloSwapInsertion::CalledComputationsMemoryUsage(
     const HloInstruction* instruction) const {
   const CallSite* callsite =
       call_graph_->GetNode(instruction->parent()).GetCallSite(instruction);
-  if (callsite == nullptr || callsite->context() == CallContext::kParallel) {
+  if (callsite == nullptr || callsite->context() == CallContext::kEmbedded) {
     return 0;
   }
-  int64 callee_usage = 0;
+  int64_t callee_usage = 0;
   for (const HloComputation* computation : callsite->called_computations()) {
     TF_RET_CHECK(ContainsKey(computation_peak_memory_, computation));
     callee_usage += computation_peak_memory_.at(computation);
@@ -1172,7 +1172,7 @@ StatusOr<int64> HloSwapInsertion::CalledComputationsMemoryUsage(
 
 StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
     HloComputation* computation, HloSchedule* schedule,
-    int64 memory_limit_bytes) {
+    int64_t memory_limit_bytes) {
   InstructionList instruction_list(schedule->sequence(computation));
   MemoryRecorder tracker(computation, instruction_list, *points_to_analysis_,
                          memory_limit_bytes_, size_function_);
@@ -1181,29 +1181,29 @@ StatusOr<bool> HloSwapInsertion::SwapInsertionComputation(
 
   VLOG(1) << "memory limit is: " << memory_limit_bytes_;
 
-  int64 peak_memory = tracker.memory_usage();
+  int64_t peak_memory = tracker.memory_usage();
   bool changed = false;
 
   for (auto* item = instruction_list.first(); item != nullptr;
        item = instruction_list.next(item)) {
     const HloInstruction* instruction = item->instruction;
 
-    TF_ASSIGN_OR_RETURN(int64 callee_usage,
+    TF_ASSIGN_OR_RETURN(int64_t callee_usage,
                         CalledComputationsMemoryUsage(instruction));
 
     tracker.PrepareForInstruction(item);
     peak_memory =
-        std::max<int64>(peak_memory, tracker.memory_usage() + callee_usage);
+        std::max<int64_t>(peak_memory, tracker.memory_usage() + callee_usage);
     VLOG(4) << "memory usage after computation is: " << tracker.memory_usage();
     // callee usage is too large, try to swap the callee.
     const CallSite* callsite = call_graph_node.GetCallSite(instruction);
     if (callsite != nullptr &&
-        callsite->context() == CallContext::kSequential &&
+        callsite->context() == CallContext::kControlFlow &&
         callee_usage + tracker.memory_usage() > memory_limit_bytes_) {
       for (HloComputation* called_computation :
            callsite->called_computations()) {
-        int64 subcomputation_memory_limit_bytes =
-            std::max<int64>(0, memory_limit_bytes_ - tracker.memory_usage());
+        int64_t subcomputation_memory_limit_bytes =
+            std::max<int64_t>(0, memory_limit_bytes_ - tracker.memory_usage());
         VLOG(3) << "dive into subcomputation";
         TF_ASSIGN_OR_RETURN(
             bool subcomputation_changed,
@@ -1235,7 +1235,7 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
   TF_RET_CHECK(module->has_schedule());
   TF_ASSIGN_OR_RETURN(points_to_analysis_, TuplePointsToAnalysis::Run(module));
 
-  int64 module_output_size = 0;
+  int64_t module_output_size = 0;
   ShapeUtil::ForEachSubshape(
       module->result_shape(),
       [&module_output_size, module, this](const Shape& subshape,
@@ -1246,7 +1246,7 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
   call_graph_ = CallGraph::Build(module);
   TF_RETURN_IF_ERROR(call_graph_->VisitNodes(
       [this, module](const CallGraphNode& node) -> Status {
-        if (node.context() == CallContext::kSequential) {
+        if (node.context() == CallContext::kControlFlow) {
           TF_ASSIGN_OR_RETURN(
               computation_peak_memory_[node.computation()],
               ComputePeakMemory(node.computation(), module->schedule().sequence(
@@ -1260,7 +1260,7 @@ StatusOr<bool> HloSwapInsertion::Run(HloModule* module) {
   // computation plus the output size of the computation. This is because the
   // peak memory for a computation does not include the output as this is
   // typically accounted for in the caller.
-  const int64 before_peak_memory =
+  const int64_t before_peak_memory =
       computation_peak_memory_.at(module->entry_computation()) +
       module_output_size;
   VLOG(1) << "Peak memory usage of module (before): "

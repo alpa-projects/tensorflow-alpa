@@ -36,7 +36,7 @@ namespace xla {
 namespace gpu {
 namespace {
 
-bool IsSkipped(const int64 op_id) {
+bool IsSkipped(const int64_t op_id) {
   // Return whether this op should be skipped.
   const char* env = getenv("XLA_SKIP_NCCL_COLLECTIVE_IDS");
   if (env == nullptr) {

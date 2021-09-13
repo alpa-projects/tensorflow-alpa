@@ -300,6 +300,7 @@ class DotHandler {
           new_leaf_vector.push_back(std::move(stra));
         }
       }
+      CHECK(!new_leaf_vector.empty());
       strategies->leaf_vector = std::move(new_leaf_vector);
     }
   }

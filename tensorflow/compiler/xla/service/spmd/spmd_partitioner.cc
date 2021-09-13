@@ -1510,7 +1510,7 @@ Status SpmdPartitioningVisitor::DefaultAction(HloInstruction* hlo) {
     return HandleElementwise(hlo);
   }
 
-  if (hlo->IsCustomCall("identity") || hlo->IsCustomCall("xla_pipeline_marker")) {
+  if (hlo->IsCustomCall("identity")) {
     return HandleElementwise(hlo);
   }
 

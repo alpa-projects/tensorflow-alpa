@@ -572,6 +572,13 @@ void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                const InstructionBatchDimMap& batch_map,
                const AutoShardingSolverOption& solver_option);
 
+void HandleConv(std::unique_ptr<StrategyVector>& strategies,
+                LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
+                const HloInstruction* ins, size_t instruction_id,
+                const ClusterEnvironment& cluster_env,
+                const InstructionBatchDimMap& batch_map,
+                const AutoShardingSolverOption& solver_option);
+
 HloSharding GetReduceScatterOutput(const HloInstruction* ins,
                                    const ShardingStrategy& straetgy,
                                    const ClusterEnvironment& cluster_env);

@@ -4,6 +4,30 @@
 namespace xla {
 namespace spmd {
 
+// Filter strategies according to the solver_option.force_batch_dim_to_mesh_dim.
+// This can be used to forcibly generate data-parallel strategies.
+void FilterStrategy(const HloInstruction* ins,
+                    std::unique_ptr<StrategyVector>& strategies,
+                    const ClusterEnvironment& cluster_env,
+                    const InstructionBatchDimMap& batch_map,
+                    const AutoShardingSolverOption& solver_option) {
+  int mesh_dim = solver_option.force_batch_dim_to_mesh_dim;
+  int batch_dim = batch_map.at(ins);
+  CHECK_GE(ins->shape().dimensions(batch_dim),
+           cluster_env.device_mesh.dim(mesh_dim));
+
+  std::vector<ShardingStrategy> new_leaf_vector;
+  for (auto& stra : strategies->leaf_vector) {
+    std::vector<int> tensor_dim_to_mesh_dim =
+        cluster_env.GetTensorDimToMeshDim(ins->shape(), stra.output_sharding);
+    if (tensor_dim_to_mesh_dim[batch_dim] == mesh_dim) {
+      new_leaf_vector.push_back(std::move(stra));
+    }
+  }
+  CHECK(!new_leaf_vector.empty());
+  strategies->leaf_vector = std::move(new_leaf_vector);
+}
+
 class DotHandler {
  public:
   DotHandler(std::unique_ptr<StrategyVector>& strategies,
@@ -134,7 +158,7 @@ class DotHandler {
 
       if (false && solver_option.prefer_reduce_scatter) {  // Deprecated branch
         name = absl::StrFormat("SS = RS x SS @ {%d,%d} (reduce-scatter @ %d)",
-                               mesh_dim0, mesh_dim1, mesh_dim0),
+                               mesh_dim0, mesh_dim1, mesh_dim0);
         output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
                            {mesh_dim0, mesh_dim1}, cluster_env);
         memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
@@ -284,23 +308,11 @@ class DotHandler {
     // Split batch dims.
     SplitBatchDims();
 
-    // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies.
+    // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies
+    // and only keep the data parallel strategies.
     if (solver_option.force_batch_dim_to_mesh_dim >= 0 &&
         batch_map.count(ins)) {
-      int mesh_dim = solver_option.force_batch_dim_to_mesh_dim;
-      int batch_dim = batch_map.at(ins);
-      CHECK_GE(ins->shape().dimensions(batch_dim), device_mesh.dim(mesh_dim));
-
-      std::vector<ShardingStrategy> new_leaf_vector;
-      for (auto& stra : strategies->leaf_vector) {
-        std::vector<int> tensor_dim_to_mesh_dim =
-            cluster_env.GetTensorDimToMeshDim(ins->shape(),
-                                              stra.output_sharding);
-        if (tensor_dim_to_mesh_dim[batch_dim] == mesh_dim) {
-          new_leaf_vector.push_back(std::move(stra));
-        }
-      }
-      strategies->leaf_vector = std::move(new_leaf_vector);
+      FilterStrategy(ins, strategies, cluster_env, batch_map, solver_option);
     }
   }
 
@@ -337,6 +349,176 @@ void HandleDot(std::unique_ptr<StrategyVector>& strategies,
 
   DotHandler handler(strategies, strategy_map, ins, cluster_env, batch_map,
                      solver_option);
+  handler.RegisterStrategies();
+}
+
+class ConvHandler {
+ public:
+  ConvHandler(std::unique_ptr<StrategyVector>& strategies,
+              StrategyMap& strategy_map, const HloInstruction* ins,
+              const ClusterEnvironment& cluster_env,
+              const InstructionBatchDimMap& batch_map,
+              const AutoShardingSolverOption& solver_option)
+      : strategies(strategies),
+        strategy_map(strategy_map),
+        ins(ins),
+        cluster_env(cluster_env),
+        batch_map(batch_map),
+        solver_option(solver_option),
+        device_mesh(cluster_env.device_mesh),
+        lhs(ins->operand(0)),
+        rhs(ins->operand(1)),
+        conv_dnums(ins->convolution_dimension_numbers()) {
+    lhs_batch_dim = conv_dnums.input_batch_dimension();
+    lhs_in_channel_dim = conv_dnums.input_feature_dimension();
+    rhs_in_channel_dim = conv_dnums.kernel_input_feature_dimension();
+    rhs_out_channel_dim = conv_dnums.kernel_output_feature_dimension();
+    out_batch_dim = conv_dnums.output_batch_dimension();
+    out_out_channel_dim = conv_dnums.output_feature_dimension();
+
+    // Only support 2 dimensional device mesh
+    CHECK_EQ(device_mesh.num_dimensions(), 2);
+  }
+
+  void SplitLhsBatchRhsOutchannel(int mesh_dim0, int mesh_dim1) {
+    HloSharding output_spec =
+        Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
+             {mesh_dim0, mesh_dim1}, cluster_env);
+
+    strategies->leaf_vector.push_back(ShardingStrategy(
+        {absl::StrFormat("SS = SR x RS @ {%d,%d}", mesh_dim0, mesh_dim1),
+         output_spec,
+         0,
+         0,
+         GetBytes(ins->shape()) / output_spec.NumTiles(),
+         {
+             ReshardingCostVector(
+                 strategy_map.at(lhs).get(), lhs->shape(),
+                 Tile(lhs->shape(), {lhs_batch_dim}, {mesh_dim0}, cluster_env),
+                 cluster_env),
+             ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
+                                  Tile(rhs->shape(), {rhs_out_channel_dim},
+                                       {mesh_dim1}, cluster_env),
+                                  cluster_env),
+         }}));
+  }
+
+  void SplitLhsBatchBothInchannel(int mesh_dim0, int mesh_dim1) {
+    if (device_mesh.dim(mesh_dim0) > 1 && device_mesh.dim(mesh_dim1) > 1) {
+      std::string name =
+          absl::StrFormat("SR = SS x SR @ {%d,%d} (allreduce @ %d)", mesh_dim0,
+                          mesh_dim1, mesh_dim1);
+      HloSharding output_spec =
+          Tile(ins->shape(), {out_batch_dim}, {mesh_dim0}, cluster_env);
+      double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+      double communication_cost =
+          cluster_env.AllReduceCost(memory_cost, mesh_dim1);
+
+      strategies->leaf_vector.push_back(ShardingStrategy(
+          {name,
+           output_spec,
+           0,
+           communication_cost,
+           memory_cost,
+           {
+               ReshardingCostVector(
+                   strategy_map.at(lhs).get(), lhs->shape(),
+                   Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
+                        {mesh_dim0, mesh_dim1}, cluster_env),
+                   cluster_env),
+               ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
+                                    Tile(rhs->shape(), {rhs_in_channel_dim},
+                                         {mesh_dim1}, cluster_env),
+                                    cluster_env),
+           }}));
+    }
+  }
+
+  void SplitRhsOutchannelBothInchannel(int mesh_dim0, int mesh_dim1) {
+    if (device_mesh.dim(mesh_dim0) > 1) {
+      std::string name =
+          absl::StrFormat("RS = RS x SS @ {%d,%d} (allreduce @ %d)", mesh_dim0,
+                          mesh_dim1, mesh_dim0);
+      HloSharding output_spec =
+          Tile(ins->shape(), {out_out_channel_dim}, {mesh_dim1}, cluster_env);
+      double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+      double communication_cost =
+          cluster_env.AllReduceCost(memory_cost, mesh_dim0);
+
+      strategies->leaf_vector.push_back(ShardingStrategy(
+          {name,
+           output_spec,
+           0,
+           communication_cost,
+           memory_cost,
+           {
+               ReshardingCostVector(strategy_map.at(lhs).get(), lhs->shape(),
+                                    Tile(lhs->shape(), {lhs_in_channel_dim},
+                                         {mesh_dim0}, cluster_env),
+                                    cluster_env),
+               ReshardingCostVector(
+                   strategy_map.at(rhs).get(), rhs->shape(),
+                   Tile(rhs->shape(), {rhs_in_channel_dim, rhs_out_channel_dim},
+                        {mesh_dim0, mesh_dim1}, cluster_env),
+                   cluster_env),
+           }}));
+    }
+  }
+
+  void RegisterStrategies() {
+    // SS = SR x RS
+    // Split lhs batch dim and rhs out_channel dim.
+    SplitLhsBatchRhsOutchannel(0, 1);
+    SplitLhsBatchRhsOutchannel(1, 0);
+
+    // SR = SS x SR
+    // Split lhs batch dim and both in_channel dims.
+    SplitLhsBatchBothInchannel(0, 1);
+    SplitLhsBatchBothInchannel(1, 0);
+
+    // RS = RS x SS
+    // Split rhs out_channel dim and both in_channel dims.
+    SplitRhsOutchannelBothInchannel(0, 1);
+    SplitRhsOutchannelBothInchannel(1, 0);
+
+    // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies
+    // and only keep the data parallel strategies.
+    if (solver_option.force_batch_dim_to_mesh_dim >= 0 &&
+        batch_map.count(ins)) {
+      FilterStrategy(ins, strategies, cluster_env, batch_map, solver_option);
+    }
+  }
+
+  std::unique_ptr<StrategyVector>& strategies;
+  StrategyMap& strategy_map;
+  const HloInstruction* ins;
+  const ClusterEnvironment& cluster_env;
+  const InstructionBatchDimMap& batch_map;
+  const AutoShardingSolverOption& solver_option;
+
+  const Array<int64_t>& device_mesh;
+  const HloInstruction* lhs;
+  const HloInstruction* rhs;
+
+  // Dimension information
+  const ConvolutionDimensionNumbers& conv_dnums;
+  int64_t lhs_batch_dim, lhs_in_channel_dim;
+  int64_t rhs_in_channel_dim, rhs_out_channel_dim;
+  int64_t out_batch_dim, out_out_channel_dim;
+};
+
+// Register strategies for dot instructions.
+void HandleConv(std::unique_ptr<StrategyVector>& strategies,
+                LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
+                const HloInstruction* ins, size_t instruction_id,
+                const ClusterEnvironment& cluster_env,
+                const InstructionBatchDimMap& batch_map,
+                const AutoShardingSolverOption& solver_option) {
+  strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
+  SetInNodesWithInstruction(strategies, ins, strategy_map);
+
+  ConvHandler handler(strategies, strategy_map, ins, cluster_env, batch_map,
+                      solver_option);
   handler.RegisterStrategies();
 }
 

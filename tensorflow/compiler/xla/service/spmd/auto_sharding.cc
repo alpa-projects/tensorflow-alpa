@@ -58,7 +58,8 @@ HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
         next_mesh_dim = mesh_dims[index];
       }
 
-      for (int64_t i = 0; i < tile_assignment_dimensions[next_tensor_dim]; ++i) {
+      for (int64_t i = 0; i < tile_assignment_dimensions[next_tensor_dim];
+           ++i) {
         if (next_mesh_dim != -1) {
           mesh_indices[next_mesh_dim] = i;
         }
@@ -67,7 +68,8 @@ HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
     }
   };
 
-  std::vector<int64_t> mesh_indices(cluster_env.device_mesh.num_dimensions(), -1);
+  std::vector<int64_t> mesh_indices(cluster_env.device_mesh.num_dimensions(),
+                                    -1);
   generate_tile_assignment_devices(-1, mesh_indices);
 
   // Make HloSharding
@@ -369,7 +371,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies->following = src_strategies;
 
         if (ins->users().size() == 1 || mesh_nn_dims >= 2) {
-          for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
+          for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
+               ++sid) {
             absl::optional<HloSharding> output_spec =
                 hlo_sharding_util::ReshapeSharding(
                     operand->shape(), ins->shape(),
@@ -445,7 +448,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         CHECK(!strategies->leaf_vector.empty());
         break;
       }
-      case HloOpcode::kTranspose: {
+      case HloOpcode::kTranspose:
+      case HloOpcode::kReverse: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
@@ -460,9 +464,17 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies->following = src_strategies;
 
         for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
-          HloSharding output_spec = hlo_sharding_util::TransposeSharding(
-              src_strategies->leaf_vector[sid].output_sharding,
-              ins->dimensions());
+          HloSharding output_spec = Undefined();
+
+          if (ins->opcode() == HloOpcode::kTranspose) {
+            output_spec = hlo_sharding_util::TransposeSharding(
+                src_strategies->leaf_vector[sid].output_sharding,
+                ins->dimensions());
+          } else {
+            output_spec = hlo_sharding_util::ReverseSharding(
+                src_strategies->leaf_vector[sid].output_sharding,
+                ins->dimensions());
+          }
 
           std::string name = SimpleToString(output_spec);
           double compute_cost = 0, communication_cost = 0;
@@ -657,7 +669,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         std::vector<int64_t> old_dim_to_new_dim;
         old_dim_to_new_dim.reserve(operand->shape().rank());
         int64_t pt = 0;
-        for (int64_t old_dim = 0; old_dim < operand->shape().rank(); ++old_dim) {
+        for (int64_t old_dim = 0; old_dim < operand->shape().rank();
+             ++old_dim) {
           if (absl::c_find(dimensions, old_dim) != dimensions.end()) {
             old_dim_to_new_dim.push_back(-1);
           } else {
@@ -677,7 +690,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
               operand->shape(),
               src_strategies->leaf_vector[sid].output_sharding);
 
-          std::vector<int64_t> tile_tensor_dims, tile_mesh_dims, all_reduce_dims;
+          std::vector<int64_t> tile_tensor_dims, tile_mesh_dims,
+              all_reduce_dims;
 
           for (int64_t tensor_dim = 0; tensor_dim < operand->shape().rank();
                ++tensor_dim) {
@@ -727,6 +741,11 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
       case HloOpcode::kDot: {
         HandleDot(strategies, leaf_strategies, strategy_map, ins,
                   instruction_id, cluster_env, batch_dim_map, solver_option);
+        break;
+      }
+      case HloOpcode::kConvolution: {
+        HandleConv(strategies, leaf_strategies, strategy_map, ins,
+                   instruction_id, cluster_env, batch_dim_map, solver_option);
         break;
       }
       case HloOpcode::kTuple: {
@@ -1244,7 +1263,8 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>, double> CallSolver(
 
   // Serialize edges and edge costs to 1d numpy arrays
   int64_t N = leaf_strategies.size();
-  int64_t M = pass_context::GetInt("auto_sharding::memory_budget_per_device", -1);
+  int64_t M =
+      pass_context::GetInt("auto_sharding::memory_budget_per_device", -1);
   std::vector<int> s_len_np = cost_graph.node_lens;
   const std::vector<int>& s_follow_np = cost_graph.follow_idx;
   std::vector<int> E_np;
@@ -1434,10 +1454,9 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>, double> CallSolver(
 }
 
 // Get the final sharding strategy according to the ilp solution.
-const ShardingStrategy& GetShardingStrategy_(const HloInstruction* inst,
-                                             const StrategyMap& strategy_map,
-                                             const CostGraph& cost_graph,
-                                             const std::vector<int64_t>& s_val) {
+const ShardingStrategy& GetShardingStrategy_(
+    const HloInstruction* inst, const StrategyMap& strategy_map,
+    const CostGraph& cost_graph, const std::vector<int64_t>& s_val) {
   const StrategyVector* strategies = strategy_map.at(inst).get();
   CHECK(!strategies->is_tuple);
   int node_idx = strategies->id;
@@ -1498,7 +1517,8 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     if (strategy.output_sharding.IsReplicated()) {
       return Tile(ins->shape(), {0}, {mesh_dim}, cluster_env);
     } else {
-      Array<int64_t> tile_assignment = strategy.output_sharding.tile_assignment();
+      Array<int64_t> tile_assignment =
+          strategy.output_sharding.tile_assignment();
       tile_assignment.Reshape({cluster_env.total_devices});
       return HloSharding::Tile(std::move(tile_assignment));
     }
@@ -1775,7 +1795,7 @@ void SetHloSharding(const HloInstructionSequence& sequence,
             Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1},
                  cluster_env));
       } else if (stra.name == "SR = SS x SR @ {1,0} (allreduce @ 0)" &&
-          !IsFullyTiled(lhs_sharding) && !rhs_sharding.IsReplicated()) {
+                 !IsFullyTiled(lhs_sharding) && !rhs_sharding.IsReplicated()) {
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0},

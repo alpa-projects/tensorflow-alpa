@@ -131,8 +131,8 @@ InstructionDepthMap BuildInstructionDepthMap(
             // For similar reasons mentioned above, we give some penalty to
             // broadcast.
             case HloOpcode::kBroadcast:
-              delta = -10;
-              break;
+               delta = -5;
+               break;
             case HloOpcode::kConstant:
               delta = 0;
               break;

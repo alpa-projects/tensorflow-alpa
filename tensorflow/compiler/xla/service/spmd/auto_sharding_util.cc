@@ -110,7 +110,8 @@ InstructionDepthMap BuildInstructionDepthMap(
       for (const HloInstruction* node : inst->users()) {
         int now_degree = --degree_dict[node];
         if (now_degree == 0) {
-          int delta = 0;
+          int64_t delta = 0;
+          bool reset = false;
 
           // Heavy operators have more weight (distance).
           switch (node->opcode()) {
@@ -125,13 +126,13 @@ InstructionDepthMap BuildInstructionDepthMap(
             // TODO(lmzheng): remove this hack by correctly registering
             // strategies for broadcast.
             case HloOpcode::kReduce:
-              delta = -10;
+              reset = true;
               break;
             // For similar reasons mentioned above, we give some penalty to
             // broadcast.
             case HloOpcode::kBroadcast:
-              delta = -3;
-              break;
+               delta = -5;
+               break;
             case HloOpcode::kConstant:
               delta = 0;
               break;
@@ -139,16 +140,28 @@ InstructionDepthMap BuildInstructionDepthMap(
             case HloOpcode::kTuple:
             case HloOpcode::kCustomCall:  // Mainly for pipeline_marker
               // Skip these useless instructions.
-              delta = -1;
+              delta = 0;
               break;
             default:
               delta = 1;
               break;
           }
 
+          if (reset) {
+            depth_map[node] = 0;
+          } else {
+            int64_t max_depth = depth_map.at(inst) + delta;
+            for (const HloInstruction* operand : node->operands()) {
+              max_depth = std::max(max_depth, depth_map.at(operand) + delta);
+            }
+            depth_map[node] = max_depth;
+          }
+
           next_frontier.push_back(node);
-          depth_map[node] = depth_map[inst] + delta;
           collected += 1;
+
+          // std::cerr << node->ToString(HloPrintOptions::ShortParsable()) << "
+          // depth: " << depth_map[node] << std::endl;
         }
       }
     }
@@ -165,16 +178,17 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   InstructionBatchDimMap batch_map;
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
 
-  bool first_dot = true;
+  // We use the first dot or convolution as the source to start batch dim
+  // propagation. Assume the first dim of the first dot is the batch dim.
+  bool first_dot_conv = true;
+  int batch_dim_of_source = 0;
 
   for (const HloInstruction* ins : instructions) {
     switch (ins->opcode()) {
       case HloOpcode::kDot: {
-        if (first_dot) {
-          // We use the first dot as source to start batch dim propagation.
-          // Assume the first dim of the first dot is batch dim.
-          first_dot = false;
-          batch_map[ins] = 0;
+        if (first_dot_conv) {
+          first_dot_conv = false;
+          batch_map[ins] = batch_dim_of_source;
           break;
         }
 
@@ -213,6 +227,32 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
           }
           if (value == rhs_space_dims[0]) {
             batch_map[ins] = space_base_dim + 1;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kConvolution: {
+        if (first_dot_conv) {
+          first_dot_conv = false;
+          batch_map[ins] = batch_dim_of_source;
+          break;
+        }
+
+        const HloInstruction* lhs = ins->operand(0);
+        const HloInstruction* rhs = ins->operand(1);
+        const auto& conv_dnums = ins->convolution_dimension_numbers();
+
+        if (batch_map.count(lhs)) {
+          int value = batch_map.at(lhs);
+          if (value == conv_dnums.input_batch_dimension()) {
+            batch_map[ins] = conv_dnums.output_batch_dimension();
+          }
+        }
+
+        if (batch_map.count(rhs)) {
+          int value = batch_map.at(rhs);
+          if (value == conv_dnums.kernel_output_feature_dimension()) {
+            batch_map[ins] = conv_dnums.output_feature_dimension();
           }
         }
         break;

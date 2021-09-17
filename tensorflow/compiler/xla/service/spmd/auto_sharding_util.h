@@ -283,7 +283,7 @@ inline bool IsUndefined(const HloSharding& hlo_sharding) {
 }
 
 // Pretty print a HloSharding in a simplified form
-inline std::string SimpleToString(const HloSharding& spec) {
+inline std::string ToStringSimple(const HloSharding& spec) {
   if (spec.IsReplicated()) {
     return "R";
   }

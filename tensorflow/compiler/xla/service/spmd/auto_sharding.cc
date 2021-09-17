@@ -158,7 +158,7 @@ std::unique_ptr<StrategyVector> FollowInsStrategyVector(
     for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
       HloSharding output_spec =
           src_strategies->leaf_vector[sid].output_sharding;
-      std::string name = SimpleToString(output_spec);
+      std::string name = ToStringSimple(output_spec);
       double compute_cost = 0, communication_cost = 0;
       double memory_cost =
           have_memory_cost ? GetBytes(shape) / output_spec.NumTiles() : 0;
@@ -291,7 +291,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
               src_strategies->leaf_vector[sid].output_sharding, ins->shape(),
               ins->dimensions());
 
-          std::string name = SimpleToString(output_spec);
+          std::string name = ToStringSimple(output_spec);
           double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
           strategies->leaf_vector.push_back(ShardingStrategy(
@@ -382,7 +382,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
               continue;
             }
 
-            std::string name = SimpleToString(*output_spec);
+            std::string name = ToStringSimple(*output_spec);
             double compute_cost = 0, communication_cost = 0;
             double memory_cost =
                 GetBytes(ins->shape()) / output_spec->NumTiles();
@@ -476,7 +476,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                 ins->dimensions());
           }
 
-          std::string name = SimpleToString(output_spec);
+          std::string name = ToStringSimple(output_spec);
           double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
           strategies->leaf_vector.push_back(ShardingStrategy(
@@ -517,7 +517,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             continue;
           }
 
-          std::string name = SimpleToString(*output_spec);
+          std::string name = ToStringSimple(*output_spec);
           double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec->NumTiles();
           std::vector<std::vector<double>> resharding_costs;
@@ -616,7 +616,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           HloSharding output_spec =
               src_strategies->leaf_vector[sid].output_sharding;
 
-          std::string name = SimpleToString(output_spec);
+          std::string name = ToStringSimple(output_spec);
           double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
           std::vector<std::vector<double>> resharding_costs;
@@ -721,7 +721,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                 cluster_env.AllReduceCost(memory_cost, mesh_dim);
           }
 
-          std::string name = SimpleToString(output_spec);
+          std::string name = ToStringSimple(output_spec);
           if (!all_reduce_dims.empty()) {
             name += " (allreduce @ " + ToString(all_reduce_dims) + ")";
           }

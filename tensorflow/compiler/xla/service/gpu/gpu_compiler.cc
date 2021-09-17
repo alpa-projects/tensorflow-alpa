@@ -497,6 +497,7 @@ Status GpuCompiler::OptimizeHloModule(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
     } else {
+      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();

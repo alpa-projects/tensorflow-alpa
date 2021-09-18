@@ -679,6 +679,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("set_pass_context", &pass_context::SetPassContext);
   m.def("clear_pass_context", &pass_context::ClearPassContext);
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds);
+  m.def("get_grad_sync_channel_ids_with_hint", &spmd::GetGradSyncChannelIdsWithHint);
 
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)

@@ -33,10 +33,12 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
   // std::cerr << module->ToString();
   // std::cerr << "=====================================" << std::endl;
 
+  auto indices = pass_context::GetIntVector("auto_sharding::rewrite_indices");
+
   HloComputation* entry = module->entry_computation();
   HloInstruction* output_tuple = entry->root_instruction();
 
-  for (size_t i = 0; i < output_tuple->operand_count(); ++i) {
+  for (size_t i : indices) {
     HloInstruction* add_ins = output_tuple->mutable_operand(i);
     if (add_ins->opcode() != HloOpcode::kAdd) {
       continue;

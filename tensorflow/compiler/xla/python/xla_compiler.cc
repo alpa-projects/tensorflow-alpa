@@ -678,7 +678,9 @@ void BuildXlaCompilerSubmodule(py::module& m) {
 
   m.def("set_pass_context", &pass_context::SetPassContext);
   m.def("clear_pass_context", &pass_context::ClearPassContext);
-  m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds);
+  m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds,
+        "get grad all-reduce channel ids", py::arg("module"),
+        py::arg("grad_idx") = absl::nullopt);
 
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)
@@ -707,6 +709,5 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .value("IFFT", FftType::IFFT)
       .value("RFFT", FftType::RFFT)
       .value("IRFFT", FftType::IRFFT);
-
 }
 }  // namespace xla

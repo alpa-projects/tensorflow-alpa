@@ -10,14 +10,13 @@ class GradAccRewrite : public HloModulePass {
  public:
   GradAccRewrite() = default;
   ~GradAccRewrite() override = default;
-  absl::string_view name() const override {
-    return "grad_acc_rewrite";
-  }
+  absl::string_view name() const override { return "grad_acc_rewrite"; }
 
   StatusOr<bool> Run(HloModule* module) override;
 };
 
-std::string GetGradSyncChannelIds(const HloModule* module);
+std::string GetGradSyncChannelIds(const HloModule* module,
+                                  absl::optional<std::vector<int>> grad_idx);
 
 }  // namespace spmd
 }  // namespace xla

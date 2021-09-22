@@ -57,8 +57,8 @@ HloSharding BroadcastSharding(const HloSharding& input_spec,
 
 // Propagate sharding for dim-wise operations (e.g., slice, pad) which works
 // independently on each dimension.
-// The sharding can successfully propagate if the operation only happends on
-// tensor dimentions that are not tiled.
+// The sharding can successfully propagate if the operation only happens
+// on tensor dimentions that are not tiled.
 absl::optional<HloSharding> PropagateDimwiseSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Shape& new_shape) {
@@ -72,6 +72,28 @@ absl::optional<HloSharding> PropagateDimwiseSharding(
   for (int64_t i = 0; i < old_shape.rank(); ++i) {
     if (tile_assignment.dim(i) > 1 &&
         new_shape.dimensions(i) != old_shape.dimensions(i)) {
+      return absl::nullopt;
+    }
+  }
+
+  return input_spec;
+}
+
+// Propagate sharding for ReduceWindow-like operations.
+// The sharding can successfully propagate if the window operation only happens
+// on tensor dimentions that are not tiled.
+absl::optional<HloSharding> PropagateReduceWindowSharding(
+    const HloSharding& input_spec, const Shape& old_shape,
+    const Window& window) {
+  if (input_spec.IsReplicated()) {
+    return input_spec;
+  }
+
+  CHECK(!input_spec.IsTuple());
+
+  const auto& tile_assignment = input_spec.tile_assignment();
+  for (int64_t i = 0; i < old_shape.rank(); ++i) {
+    if (tile_assignment.dim(i) > 1 && window.dimensions(i).size() != 1) {
       return absl::nullopt;
     }
   }
@@ -126,14 +148,20 @@ InstructionDepthMap BuildInstructionDepthMap(
             // TODO(lmzheng): remove this hack by correctly registering
             // strategies for broadcast.
             case HloOpcode::kReduce:
+              delta = 1;
               reset = true;
               break;
             // For similar reasons mentioned above, we give some penalty to
             // broadcast.
             case HloOpcode::kBroadcast:
-               delta = -5;
-               break;
+              delta = -5;
+              break;
             case HloOpcode::kConstant:
+            case HloOpcode::kParameter:
+              delta = 0;
+              break;
+            case HloOpcode::kReshape:
+            case HloOpcode::kTranspose:
               delta = 0;
               break;
             case HloOpcode::kGetTupleElement:
@@ -148,7 +176,7 @@ InstructionDepthMap BuildInstructionDepthMap(
           }
 
           if (reset) {
-            depth_map[node] = 0;
+            depth_map[node] = delta;
           } else {
             int64_t max_depth = depth_map.at(inst) + delta;
             for (const HloInstruction* operand : node->operands()) {
@@ -185,6 +213,123 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
   for (const HloInstruction* ins : instructions) {
     switch (ins->opcode()) {
+      case HloOpcode::kParameter:
+      case HloOpcode::kConstant:
+      case HloOpcode::kIota:
+      case HloOpcode::kRngGetAndUpdateState:
+        break;
+      case HloOpcode::kBroadcast: {
+        const HloInstruction* operand = ins->operand(0);
+        const auto& dimensions = ins->dimensions();
+
+        if (batch_map.count(operand)) {
+          int value = batch_map[operand];
+          if (value == 0 && !absl::c_linear_search(dimensions, value)) {
+            batch_map[ins] = value;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kReshape: {
+        const HloInstruction* operand = ins->operand(0);
+
+        if (batch_map.count(operand)) {
+          int value = batch_map[operand];
+          if (value == 0) {
+            batch_map[ins] = value;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kTranspose: {
+        const HloInstruction* operand = ins->operand(0);
+        const auto& dimensions = ins->dimensions();
+
+        if (batch_map.count(operand)) {
+          int value = batch_map[operand];
+          if (value == 0 && dimensions[0] == 0) {
+            batch_map[ins] = value;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kReverse:
+      case HloOpcode::kPad:
+      case HloOpcode::kSlice:
+      case HloOpcode::kConcatenate:
+      case HloOpcode::kDynamicSlice:
+      case HloOpcode::kDynamicUpdateSlice:
+      case HloOpcode::kReduceWindow:
+      case HloOpcode::kSelectAndScatter:
+      // Unary elementwise operations.
+      case HloOpcode::kAbs:
+      case HloOpcode::kRoundNearestAfz:
+      case HloOpcode::kCeil:
+      case HloOpcode::kClz:
+      case HloOpcode::kConvert:
+      case HloOpcode::kBitcastConvert:
+      case HloOpcode::kCopy:
+      case HloOpcode::kCos:
+      case HloOpcode::kExp:
+      case HloOpcode::kExpm1:
+      case HloOpcode::kFloor:
+      case HloOpcode::kImag:
+      case HloOpcode::kIsFinite:
+      case HloOpcode::kLog:
+      case HloOpcode::kLog1p:
+      case HloOpcode::kNot:
+      case HloOpcode::kNegate:
+      case HloOpcode::kPopulationCount:
+      case HloOpcode::kReal:
+      case HloOpcode::kReducePrecision:
+      case HloOpcode::kRsqrt:
+      case HloOpcode::kLogistic:
+      case HloOpcode::kSign:
+      case HloOpcode::kSin:
+      case HloOpcode::kSqrt:
+      case HloOpcode::kCbrt:
+      case HloOpcode::kTanh:
+      // Binary elementwise operations
+      case HloOpcode::kAdd:
+      case HloOpcode::kAtan2:
+      case HloOpcode::kCompare:
+      case HloOpcode::kComplex:
+      case HloOpcode::kDivide:
+      case HloOpcode::kMaximum:
+      case HloOpcode::kMinimum:
+      case HloOpcode::kMultiply:
+      case HloOpcode::kPower:
+      case HloOpcode::kRemainder:
+      case HloOpcode::kSubtract:
+      case HloOpcode::kAnd:
+      case HloOpcode::kOr:
+      case HloOpcode::kXor:
+      case HloOpcode::kShiftLeft:
+      case HloOpcode::kShiftRightArithmetic:
+      case HloOpcode::kShiftRightLogical:
+      // Ternary elementwise operations.
+      case HloOpcode::kSelect:
+      case HloOpcode::kClamp: {
+        for (const HloInstruction* operand : ins->unique_operands()) {
+          if (batch_map.count(operand)) {
+            batch_map[ins] = batch_map[operand];
+            break;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kReduce: {
+        const HloInstruction* operand = ins->operand(0);
+        const auto& dimensions = ins->dimensions();
+
+        if (batch_map.count(operand)) {
+          int value = batch_map[operand];
+          if (value == 0 && !absl::c_linear_search(dimensions, value)) {
+            batch_map[ins] = value;
+          }
+        }
+        break;
+      }
       case HloOpcode::kDot: {
         if (first_dot_conv) {
           first_dot_conv = false;
@@ -257,123 +402,20 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         }
         break;
       }
-      case HloOpcode::kReshape: {
-        const HloInstruction* operand = ins->operand(0);
-
-        if (batch_map.count(operand)) {
-          int value = batch_map[operand];
-          if (value == 0) {
-            batch_map[ins] = value;
-          }
-        }
+      case HloOpcode::kGetTupleElement:
+      case HloOpcode::kTuple:
+      case HloOpcode::kCustomCall:
         break;
-      }
-      case HloOpcode::kTranspose: {
-        const HloInstruction* operand = ins->operand(0);
-        const auto& dimensions = ins->dimensions();
-
-        if (batch_map.count(operand)) {
-          int value = batch_map[operand];
-          if (value == 0 && dimensions[0] == 0) {
-            batch_map[ins] = value;
-          }
-        }
-        break;
-      }
-      case HloOpcode::kBroadcast: {
-        const HloInstruction* operand = ins->operand(0);
-        const auto& dimensions = ins->dimensions();
-
-        if (batch_map.count(operand)) {
-          int value = batch_map[operand];
-          if (value == 0 && !absl::c_linear_search(dimensions, value)) {
-            batch_map[ins] = value;
-          }
-        }
-        break;
-      }
-      case HloOpcode::kReduce: {
-        const HloInstruction* operand = ins->operand(0);
-        const auto& dimensions = ins->dimensions();
-
-        if (batch_map.count(operand)) {
-          int value = batch_map[operand];
-          if (value == 0 && !absl::c_linear_search(dimensions, value)) {
-            batch_map[operand] = value;
-          }
-        }
-        break;
-      }
-      case HloOpcode::kSlice:
-      case HloOpcode::kDynamicSlice:
-      case HloOpcode::kDynamicUpdateSlice:
-      // Unary elementwise operations.
-      case HloOpcode::kAbs:
-      case HloOpcode::kRoundNearestAfz:
-      case HloOpcode::kCeil:
-      case HloOpcode::kClz:
-      case HloOpcode::kConvert:
-      case HloOpcode::kBitcastConvert:
-      case HloOpcode::kCopy:
-      case HloOpcode::kCos:
-      case HloOpcode::kExp:
-      case HloOpcode::kExpm1:
-      case HloOpcode::kFloor:
-      case HloOpcode::kImag:
-      case HloOpcode::kIsFinite:
-      case HloOpcode::kLog:
-      case HloOpcode::kLog1p:
-      case HloOpcode::kNot:
-      case HloOpcode::kNegate:
-      case HloOpcode::kPopulationCount:
-      case HloOpcode::kReal:
-      case HloOpcode::kReducePrecision:
-      case HloOpcode::kRsqrt:
-      case HloOpcode::kLogistic:
-      case HloOpcode::kSign:
-      case HloOpcode::kSin:
-      case HloOpcode::kSqrt:
-      case HloOpcode::kCbrt:
-      case HloOpcode::kTanh:
-      // Binary elementwise operations
-      case HloOpcode::kAdd:
-      case HloOpcode::kAtan2:
-      case HloOpcode::kCompare:
-      case HloOpcode::kComplex:
-      case HloOpcode::kDivide:
-      case HloOpcode::kMaximum:
-      case HloOpcode::kMinimum:
-      case HloOpcode::kMultiply:
-      case HloOpcode::kPower:
-      case HloOpcode::kRemainder:
-      case HloOpcode::kSubtract:
-      case HloOpcode::kAnd:
-      case HloOpcode::kOr:
-      case HloOpcode::kXor:
-      case HloOpcode::kShiftLeft:
-      case HloOpcode::kShiftRightArithmetic:
-      case HloOpcode::kShiftRightLogical:
-      // Ternary elementwise operations.
-      case HloOpcode::kSelect:
-      case HloOpcode::kClamp: {
-        for (const HloInstruction* operand : ins->unique_operands()) {
-          if (batch_map.count(operand)) {
-            batch_map[ins] = batch_map[operand];
-            break;
-          }
-        }
-        break;
-      }
-
       default:
-        break;
+        LOG(FATAL) << "Unhandled instruction: " + ins->name();
     }
   }
 
   // for (auto iter : batch_map) {
-  //  std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << " "
-  //            << iter.second << std::endl;
-  //}
+  //   std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << "
+  //   "
+  //             << iter.second << std::endl;
+  // }
   // exit(0);
 
   return batch_map;

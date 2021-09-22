@@ -248,7 +248,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
        ++instruction_id) {
     const HloInstruction* ins = instructions[instruction_id];
     std::unique_ptr<StrategyVector> strategies;
-    switch (ins->opcode()) {
+    HloOpcode opcode = ins->opcode();
+    switch (opcode) {
       case HloOpcode::kParameter: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
 
@@ -466,7 +467,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
           HloSharding output_spec = Undefined();
 
-          if (ins->opcode() == HloOpcode::kTranspose) {
+          if (opcode == HloOpcode::kTranspose) {
             output_spec = hlo_sharding_util::TransposeSharding(
                 src_strategies->leaf_vector[sid].output_sharding,
                 ins->dimensions());
@@ -492,9 +493,11 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
       }
       case HloOpcode::kPad:
       case HloOpcode::kSlice:
-      case HloOpcode::kDynamicSlice:
       case HloOpcode::kConcatenate:  // TODO(lmzheng): revisit concatenate
-      case HloOpcode::kDynamicUpdateSlice: {
+      case HloOpcode::kDynamicSlice:
+      case HloOpcode::kDynamicUpdateSlice:
+      case HloOpcode::kReduceWindow:
+      case HloOpcode::kSelectAndScatter: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
@@ -509,9 +512,27 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies->following = src_strategies;
 
         for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
-          absl::optional<HloSharding> output_spec = PropagateDimwiseSharding(
-              src_strategies->leaf_vector[sid].output_sharding,
-              operand->shape(), ins->shape());
+          absl::optional<HloSharding> output_spec;
+
+          switch (opcode) {
+            case HloOpcode::kPad:
+            case HloOpcode::kSlice:
+            case HloOpcode::kConcatenate:
+            case HloOpcode::kDynamicSlice:
+            case HloOpcode::kDynamicUpdateSlice:
+              output_spec = PropagateDimwiseSharding(
+                  src_strategies->leaf_vector[sid].output_sharding,
+                  operand->shape(), ins->shape());
+              break;
+            case HloOpcode::kReduceWindow:
+            case HloOpcode::kSelectAndScatter:
+              output_spec = PropagateReduceWindowSharding(
+                  src_strategies->leaf_vector[sid].output_sharding,
+                  operand->shape(), ins->window());
+              break;
+            default:
+              LOG(FATAL) << "Unhandled instruction: " + ins->name();
+          }
 
           if (!output_spec.has_value()) {
             continue;
@@ -589,13 +610,18 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
         // Follow the operand with the max depth
         int64_t follow_idx = -1;
-        int64_t max_depth = -1 << 30;
+        double max_depth = -1e20;
         for (int64_t i = 0; i < ins->operand_count(); ++i) {
           const HloInstruction* operand = ins->operand(i);
-          if (!undefined_set.count(operand) &&
-              depth_map.at(operand) > max_depth) {
-            follow_idx = i;
-            max_depth = depth_map.at(operand);
+          if (!undefined_set.count(operand)) {
+            double depth =
+                depth_map.at(operand) + operand->shape().rank() / 10.0;
+            // Add the rank to depth to prefer the operand with the higher rank
+            // if some operands have the same depth.
+            if (depth > max_depth) {
+              follow_idx = i;
+              max_depth = depth_map.at(operand);
+            }
           }
           // If an alias constraint is set, always follow its alias source.
           auto it = alias_map.find(ins);

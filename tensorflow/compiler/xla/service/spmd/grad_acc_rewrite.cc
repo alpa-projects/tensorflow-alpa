@@ -83,30 +83,18 @@ void DfsSearch(const HloInstruction* cur, absl::flat_hash_set<int>& ret) {
   }
 }
 
-std::string GetGradSyncChannelIds(const HloModule* module) {
-  // Get the channel ids of grad-sync all-reduce.
-  // Start from output tuple and ends at instructions other than bitcast, slice.
-  absl::flat_hash_set<int> channel_ids;
-
-  HloComputation* entry = module->entry_computation();
-  DfsSearch(entry->root_instruction(), channel_ids);
-
-  std::string ret = ".";
-  for (auto x : channel_ids) {
-    ret += std::to_string(x) + ".";
-  }
-
-  return ret;
-}
-
-std::string GetGradSyncChannelIdsWithHint(const HloModule* module,
-                                          const std::vector<int> grad_idx) {
+std::string GetGradSyncChannelIds(const HloModule* module,
+                                  absl::optional<std::vector<int>> grad_idx) {
   absl::flat_hash_set<int> channel_ids;
 
   HloInstruction* root = module->entry_computation()->root_instruction();
-  CHECK(root->opcode() == HloOpcode::kTuple) << "The root inst is not tuple";
-  for (int idx : grad_idx) {
-    DfsSearch(root->operand(idx), channel_ids);
+  if (grad_idx){
+    CHECK(root->opcode() == HloOpcode::kTuple) << "The root inst is not tuple";
+    for (int idx : grad_idx.value()) {
+      DfsSearch(root->operand(idx), channel_ids);
+    }
+  } else {
+    DfsSearch(root, channel_ids);
   }
 
   std::string ret = ".";

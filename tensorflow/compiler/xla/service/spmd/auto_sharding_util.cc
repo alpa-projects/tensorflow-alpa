@@ -188,8 +188,8 @@ InstructionDepthMap BuildInstructionDepthMap(
           next_frontier.push_back(node);
           collected += 1;
 
-          // std::cerr << node->ToString(HloPrintOptions::ShortParsable()) << "
-          // depth: " << depth_map[node] << std::endl;
+          // std::cerr << node->ToString(HloPrintOptions::ShortParsable()) <<
+          // "depth: " << depth_map[node] << std::endl;
         }
       }
     }

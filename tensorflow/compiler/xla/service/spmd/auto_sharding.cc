@@ -501,12 +501,26 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-        const HloInstruction* operand = ins->operand(0);
-        if (undefined_set.count(operand)) {
-          break;
+        // Follow the operand with the max depth
+        int64_t follow_idx = -1;
+        double max_depth = -1e20;
+        for (int64_t i = 0; i < ins->operand_count(); ++i) {
+          const HloInstruction* operand = ins->operand(i);
+          if (!undefined_set.count(operand)) {
+            double depth =
+                depth_map.at(operand) + operand->shape().rank() / 10.0;
+            // Add the rank to depth to prefer the operand with the higher rank
+            // if some operands have the same depth.
+            if (depth > max_depth) {
+              follow_idx = i;
+              max_depth = depth_map.at(operand);
+            }
+          }
         }
+        CHECK_GE(follow_idx, 0);
 
         // Create follow strategies
+        const HloInstruction* operand = ins->operand(follow_idx);
         const StrategyVector* src_strategies = strategy_map.at(operand).get();
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;

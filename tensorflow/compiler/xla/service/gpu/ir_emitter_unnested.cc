@@ -3146,6 +3146,12 @@ Status IrEmitterUnnested::EmitNcclThunk(mlir::Operation* untyped_op) {
     } else {
       thunk = absl::make_unique<NcclThunkType>(GetThunkInfo(op), op,
                                                /*buffers=*/std::move(buffers));
+      if (mlir::isa<mlir::lmhlo::AllReduceOp>(op) ||
+          mlir::isa<mlir::lmhlo_gpu::AllReduceStartOp>(op)) {
+        // add the name of a module to help with skip all-reduce
+        std::string module_name = ir_emitter_context_->hlo_module().name();
+        static_cast<NcclAllReduceThunkBase*>(thunk.get())->set_module_name(module_name);
+      }
     }
     // Record thunks for all-reduce-start ops as the done ops need them.
     TF_RETURN_IF_ERROR(MaybeAddAllReduceStartThunkToMap(

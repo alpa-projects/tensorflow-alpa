@@ -43,12 +43,17 @@ class NcclAllReduceThunkBase : public NcclCollectiveThunk {
                          NcclAllReduceConfig config,
                          std::vector<Buffer> buffers);
 
+  void set_module_name(const std::string& module_name) {
+    skip_env_name_ = module_name + "XLA_SKIP_NCCL_COLLECTIVE_IDS";
+  }
+
  protected:
   const NcclCollectiveConfig& config() const override { return config_.config; }
 
  protected:
   const NcclAllReduceConfig config_;
   const std::vector<Buffer> buffers_;
+  std::string skip_env_name_ = "";
 };
 
 class NcclAllReduceThunk : public NcclAllReduceThunkBase {

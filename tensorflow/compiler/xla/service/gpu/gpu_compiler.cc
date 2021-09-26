@@ -150,13 +150,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/slice_sinker.h"
 #include "tensorflow/compiler/xla/service/slow_operation_alarm.h"
 #include "tensorflow/compiler/xla/service/sort_simplifier.h"
-<<<<<<< HEAD
 #include "tensorflow/compiler/xla/service/spmd/stateful_rng_spmd_partitioner.h"
-=======
-#include "tensorflow/compiler/xla/service/spmd/auto_sharding.h"
-#include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
-#include "tensorflow/compiler/xla/service/spmd/slice_auto_sharded_stages.h"
->>>>>>> Gradient Accumulation - Part 3 (Skip unnecessary allreduce) (#35)
 #include "tensorflow/compiler/xla/service/stable_sort_expander.h"
 #include "tensorflow/compiler/xla/service/transpose_folding.h"
 #include "tensorflow/compiler/xla/service/tuple_simplifier.h"
@@ -1007,8 +1001,13 @@ static Status CompileModuleToLlvmIrImpl(
       &results->output_shape, &results->entry_func_attrs));
 
   IrEmitterContext ir_emitter_context(
+<<<<<<< HEAD
       /*hlo_module=*/nullptr, /*buffer_assignment=*/nullptr, platform_name,
       gpu_device_info, cuda_compute_capability, rocm_compute_capability,
+=======
+      /*hlo_module=*/hlo_module, /*buffer_assignment=*/nullptr, platform_name,
+      gpu_device_info, cuda_compute_capability, profile_index_map,
+>>>>>>> Fix conflicts of env var XLA_SKIP_NCCL_COLLECTIVE_IDS (#40)
       &mlir_context, results->llvm_module.get());
 
   ir_emitter_context.set_allocations(results->allocations);

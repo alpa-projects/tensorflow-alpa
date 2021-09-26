@@ -452,7 +452,8 @@ void BuildXlaCompilerSubmodule(py::module& m) {
               ret[i] = params[i]->shape();
             }
             return ret;
-          });
+          })
+      .def("name", &HloModule::name);
 
   m.def("hlo_module_to_dot_graph",
         [](const HloModule& hlo_module) -> StatusOr<std::string> {

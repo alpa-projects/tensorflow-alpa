@@ -92,7 +92,9 @@ void BuildOpsSubmodule(py::module* m) {
   ops.def("AllToAll", &AllToAll, py::arg("operand"), py::arg("split_dimension"),
           py::arg("concat_dimension"), py::arg("split_count"),
           py::arg("replica_groups") = py::list(),
-          py::arg("layout") = absl::nullopt);
+          py::arg("channel_id") = absl::nullopt,
+          py::arg("layout") = absl::nullopt,
+          py::arg("use_global_device_ids") = absl::nullopt);
   ops.def("BitcastConvertType", &BitcastConvertType, py::arg("operand"),
           py::arg("new_element_type"));
   ops.def("Broadcast", &Broadcast, py::arg("operand"), py::arg("sizes"));

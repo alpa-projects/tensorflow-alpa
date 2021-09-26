@@ -2961,7 +2961,9 @@ XlaOp XlaBuilder::ReduceScatter(
 XlaOp XlaBuilder::AllToAll(XlaOp operand, int64_t split_dimension,
                            int64_t concat_dimension, int64_t split_count,
                            absl::Span<const ReplicaGroup> replica_groups,
-                           const absl::optional<Layout>& layout) {
+                           const absl::optional<ChannelHandle>& channel_id,
+                           const absl::optional<Layout>& layout,
+                           const absl::optional<bool> use_global_device_ids) {
   // Array all_to_all may need to violate layout constraint to be legal so use
   // the tuple version.
   if (layout.has_value()) {
@@ -2969,12 +2971,14 @@ XlaOp XlaBuilder::AllToAll(XlaOp operand, int64_t split_dimension,
                          split_count, replica_groups, layout);
   }
   return AllToAllArray(operand, split_dimension, concat_dimension, split_count,
-                       replica_groups);
+                       replica_groups, channel_id, use_global_device_ids);
 }
 
 XlaOp XlaBuilder::AllToAllArray(XlaOp operand, int64_t split_dimension,
                                 int64_t concat_dimension, int64_t split_count,
-                                absl::Span<const ReplicaGroup> replica_groups) {
+                                absl::Span<const ReplicaGroup> replica_groups,
+                                const absl::optional<ChannelHandle>& channel_id,
+                                const absl::optional<bool> use_global_device_ids) {
   return ReportErrorOrReturn([&]() -> StatusOr<XlaOp> {
     TF_ASSIGN_OR_RETURN(const Shape* operand_shape, GetShapePtr(operand));
     TF_ASSIGN_OR_RETURN(
@@ -2992,6 +2996,12 @@ XlaOp XlaBuilder::AllToAllArray(XlaOp operand, int64_t split_dimension,
       for (const ReplicaGroup& group : replica_groups) {
         *instr.add_replica_groups() = group;
       }
+    }
+    if (channel_id.has_value()) {
+      instr.set_channel_id(channel_id->handle());
+    }
+    if (use_global_device_ids.has_value()) {
+      instr.set_use_global_device_ids(use_global_device_ids.value());
     }
     instr.add_dimensions(split_dimension);
     TF_ASSIGN_OR_RETURN(
@@ -4560,9 +4570,12 @@ XlaOp ReduceScatter(const XlaOp operand, const XlaComputation& computation,
 XlaOp AllToAll(const XlaOp operand, int64_t split_dimension,
                int64_t concat_dimension, int64_t split_count,
                absl::Span<const ReplicaGroup> replica_groups,
-               const absl::optional<Layout>& layout) {
+               const absl::optional<ChannelHandle>& channel_id,
+               const absl::optional<Layout>& layout,
+               const absl::optional<bool> use_global_device_ids) {
   return operand.builder()->AllToAll(operand, split_dimension, concat_dimension,
-                                     split_count, replica_groups, layout);
+                                     split_count, replica_groups, channel_id, layout,
+                                     use_global_device_ids);
 }
 
 XlaOp AllToAllTuple(const XlaOp operand, int64_t split_dimension,

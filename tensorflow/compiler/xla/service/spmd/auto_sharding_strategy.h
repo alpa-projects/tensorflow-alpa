@@ -167,10 +167,12 @@ class ProfilingResult {
   double EstimateAllToAllCost(
       const std::vector<std::vector<int>>& replica_groups, int64_t size,
       std::string dtype) const {
-    // The 1.5 is a penalty factor to disencourage all-to-all.
-    double penalty_factor = 1.5;
+    // A penalty factor to make the theoretical cost match the
+    // empirical cost on v100 + nvlink.
+    int64_t num_devices = replica_groups.front().size();
+    double penalty_factor = num_devices / 2;
     return EstimateAllGatherCost(replica_groups,
-                                 size / replica_groups.front().size(), dtype) *
+                                 size / num_devices, dtype) *
            penalty_factor;
   }
 
@@ -334,8 +336,8 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes +
+    return (int(mesh_alpha[mesh_dim] +
+            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes) +
             0.1);
   }
 
@@ -351,9 +353,9 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (mesh_alpha[mesh_dim] +
+    return (int(mesh_alpha[mesh_dim] +
             mesh_beta[mesh_dim] * 2 * (num_devices - 1) / num_devices *
-                num_bytes +
+                num_bytes) +
             0.01);
   }
 
@@ -368,8 +370,8 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes +
+    return (int(mesh_alpha[mesh_dim] +
+            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes) +
             0.001);
   }
 
@@ -383,12 +385,13 @@ class ClusterEnvironment {
                                               num_bytes / 4, "float32");
     }
 
-    // The 1.5 is a penalty factor to disencourage all-to-all.
+    // A penalty factor to make the theoretical cost match the
+    // empirical cost on v100 + nvlink.
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    double penalty_factor = 1.5;
-    return (mesh_alpha[mesh_dim] +
+    double penalty_factor = num_devices / 2;
+    return (int(mesh_alpha[mesh_dim] +
             mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
-                num_devices * num_bytes * penalty_factor +
+                num_devices * num_bytes * penalty_factor) +
             0.001);
   }
 

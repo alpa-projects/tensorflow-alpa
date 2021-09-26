@@ -268,6 +268,10 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
   TF_DISALLOW_COPY_AND_ASSIGN(HloCostAnalysis);
 };
 
+// Count the number of floating point operations for
+// dot and convolution in a HLO module.
+double CountFlopDotConvOnly(const HloComputation& computation);
+
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_HLO_COST_ANALYSIS_H_

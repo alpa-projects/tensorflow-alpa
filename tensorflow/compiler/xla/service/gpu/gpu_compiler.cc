@@ -943,7 +943,7 @@ static Status CompileModuleToLlvmIrImpl(
       &results->output_shape, &results->entry_func_attrs));
 
   IrEmitterContext ir_emitter_context(
-      /*hlo_module=*/nullptr, /*buffer_assignment=*/nullptr, platform_name,
+      /*hlo_module=*/hlo_module, /*buffer_assignment=*/nullptr, platform_name,
       gpu_device_info, cuda_compute_capability, profile_index_map,
       &mlir_context, results->llvm_module.get());
 

@@ -422,6 +422,9 @@ absl::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
         const Window& conv_window)>& create_sharded_dot = {},
     SpmdBuilder* b = nullptr, HloModule* module = nullptr,
     SpmdPartitioningVisitor* visitor = nullptr) {
+  // Temporarily disable windowed dot.
+  return absl::nullopt;
+
   if (num_partitions > max_iterations) {
     return absl::nullopt;
   }

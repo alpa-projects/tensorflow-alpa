@@ -1,9 +1,9 @@
-#include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
-
 #include <vector>
 
 #include "pybind11/pybind11.h"
 #include "tensorflow/compiler/xla/service/hlo_live_range.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
+#include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 
 namespace xla {
 namespace spmd {
@@ -167,10 +167,11 @@ class ProfilingResult {
   double EstimateAllToAllCost(
       const std::vector<std::vector<int>>& replica_groups, int64_t size,
       std::string dtype) const {
-    // The 1.5 is a penalty factor to disencourage all-to-all.
-    double penalty_factor = 1.5;
-    return EstimateAllGatherCost(replica_groups,
-                                 size / replica_groups.front().size(), dtype) *
+    // A penalty factor to make the theoretical cost match the
+    // empirical cost on v100 + nvlink.
+    int64_t num_devices = replica_groups.front().size();
+    double penalty_factor = num_devices / 2;
+    return EstimateAllGatherCost(replica_groups, size / num_devices, dtype) *
            penalty_factor;
   }
 
@@ -334,8 +335,8 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes +
+    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
+                                           num_devices * num_bytes) +
             0.1);
   }
 
@@ -351,9 +352,9 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * 2 * (num_devices - 1) / num_devices *
-                num_bytes +
+    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * 2 *
+                                           (num_devices - 1) / num_devices *
+                                           num_bytes) +
             0.01);
   }
 
@@ -368,8 +369,8 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices * num_bytes +
+    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
+                                           num_devices * num_bytes) +
             0.001);
   }
 
@@ -383,12 +384,13 @@ class ClusterEnvironment {
                                               num_bytes / 4, "float32");
     }
 
-    // The 1.5 is a penalty factor to disencourage all-to-all.
+    // A penalty factor to make the theoretical cost match the
+    // empirical cost on v100 + nvlink.
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    double penalty_factor = 1.5;
-    return (mesh_alpha[mesh_dim] +
-            mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
-                num_devices * num_bytes * penalty_factor +
+    double penalty_factor = num_devices / 2;
+    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
+                                           num_devices / num_devices *
+                                           num_bytes * penalty_factor) +
             0.001);
   }
 
@@ -453,12 +455,6 @@ class ClusterEnvironment {
         GetTensorDimToMeshDim(shape, src_spec);
     std::vector<int> dst_tensor_dim_to_mesh_dim =
         GetTensorDimToMeshDim(shape, dst_spec);
-
-    bool has_replicated = false;
-    if (src_spec.IsReplicated() || src_spec.ReplicateOnLastTileDim() ||
-        dst_spec.IsReplicated() || dst_spec.ReplicateOnLastTileDim()) {
-      has_replicated = true;
-    }
 
     // Analyze the dims that need to dynamic-sliced or all-gather.
     std::vector<int> slice_dims;
@@ -545,6 +541,282 @@ class ClusterEnvironment {
   std::vector<std::vector<std::vector<int>>> cached_replica_groups;
 };
 
+// A graph data structure to simplify the edge cost graph.
+// It merges nodes and does path compression.
+class CostGraph {
+ public:
+  CostGraph(const LeafStrategies& leaf_strategies,
+            const AssociativeDotPairs& associative_dot_pairs) {
+    node_lens.reserve(leaf_strategies.size());
+    adjacency.assign(leaf_strategies.size(), absl::flat_hash_set<int>());
+
+    // Build the cost graph
+    for (const auto& strategies : leaf_strategies) {
+      node_lens.push_back(strategies->leaf_vector.size());
+
+      for (const auto& strategy : strategies->leaf_vector) {
+        CHECK_EQ(strategy.resharding_costs.size(), strategies->in_nodes.size());
+      }
+
+      for (size_t i = 0; i < strategies->in_nodes.size(); ++i) {
+        size_t src_idx = strategies->in_nodes[i]->id;
+        size_t dst_idx = strategies->id;
+
+        Matrix edge_cost(node_lens[src_idx], node_lens[dst_idx]);
+        for (size_t k = 0; k < strategies->leaf_vector.size(); ++k) {
+          const ShardingStrategy& stra = strategies->leaf_vector[k];
+          for (size_t j = 0; j < stra.resharding_costs[i].size(); ++j) {
+            edge_cost(j, k) = stra.resharding_costs[i][j];
+          }
+        }
+
+        AddEdgeCost(src_idx, dst_idx, edge_cost);
+      }
+
+      if (strategies->following) {
+        to_merge_pairs_.push_back({strategies->id, strategies->following->id});
+      }
+    }
+
+    // Adjust the edge costs for dot pairs that can be optimized by
+    // AllReduceReassociate
+    for (const auto& pair : associative_dot_pairs) {
+      size_t src_idx = pair.first->id;
+      size_t dst_idx = pair.second->id;
+
+      if (node_lens[src_idx] != node_lens[dst_idx]) {
+        continue;
+      }
+
+      Matrix edge_cost(node_lens[src_idx], node_lens[dst_idx]);
+      for (size_t i = 0; i < node_lens[src_idx]; ++i) {
+        if (leaf_strategies[src_idx]->leaf_vector[i].communication_cost > 0) {
+          CHECK_FLOAT_EQ(
+              leaf_strategies[src_idx]->leaf_vector[i].communication_cost,
+              leaf_strategies[dst_idx]->leaf_vector[i].communication_cost);
+          edge_cost(i, i) =
+              -leaf_strategies[src_idx]->leaf_vector[i].communication_cost;
+        }
+      }
+      AddEdgeCost(src_idx, dst_idx, edge_cost);
+    }
+  }
+
+  Matrix GetEdgeCost(int i, int j) {
+    if (i <= j) {
+      return edge_costs[{i, j}];
+    } else {
+      return edge_costs[{j, i}].Transpose();
+    }
+  }
+
+  void AddEdgeCost(int i, int j, Matrix& cost) {
+    if (i > j) {
+      std::swap(i, j);
+      cost = cost.Transpose();
+    }
+
+    if (edge_costs.count({i, j})) {
+      CHECK(adjacency[i].count(j));
+      CHECK(adjacency[j].count(i));
+      edge_costs[{i, j}] = edge_costs[{i, j}] + cost;
+    } else {
+      adjacency[i].insert(j);
+      adjacency[j].insert(i);
+      edge_costs[{i, j}] = cost;
+    }
+  }
+
+  void RemoveEdge(int i, int j) {
+    if (i > j) {
+      std::swap(i, j);
+    }
+
+    CHECK(adjacency[i].count(j));
+    CHECK(adjacency[j].count(i));
+    CHECK(edge_costs.count({i, j}));
+
+    adjacency[i].erase(j);
+    adjacency[j].erase(i);
+    edge_costs.erase({i, j});
+  }
+
+  void MergeNode(int src, int dst) {
+    CHECK(adjacency[src].count(dst));
+    CHECK(adjacency[dst].count(src));
+    CHECK(!merged_to_.count(src));
+    CHECK(!merged_to_.count(dst));
+    CHECK_NE(src, dst);
+
+    Matrix edge_cost = GetEdgeCost(dst, src);
+
+    std::vector<int> reindexing(node_lens[dst]);
+    if (node_lens[dst] == node_lens[src]) {
+      // Assume the orders of strategies in src and dst match
+      // (i.e. i-th strategy in src follows i-th strategy in dst).
+      // This is true in most cases because of how we create the
+      // following strategies.
+      std::iota(reindexing.begin(), reindexing.end(), 0);
+    } else {
+      // Otherwise, find the strategy to follow greedily.
+      // For every straetgy in dst, find the strategy in src with
+      // the lowest resharding cost.
+      std::vector<int> arange(node_lens[src]);
+      std::iota(arange.begin(), arange.end(), 0);
+      for (int i = 0; i < node_lens[dst]; ++i) {
+        std::vector<std::pair<double, int>> keys;
+
+        // If there are multiple strategies with the same lowest costs,
+        // prefer to follow "replicated", which has the largest index.
+        // Node: We assume the strategy "Repilcated" is always appended
+        // as the last strategy in BuildStrategyAndCost.
+        for (int j = 0; j < node_lens[src]; ++j) {
+          keys.push_back({edge_cost(i, j), -j});
+        }
+
+        std::sort(arange.begin(), arange.end(), [&keys](int l, int r) {
+          return (keys[l].first < keys[r].first) ||
+                 (keys[l].first == keys[r].first &&
+                  keys[l].second < keys[r].second);
+        });
+
+        reindexing[i] = arange.front();
+      }
+    }
+    merged_to_[src] = dst;
+    reindexing_vector[src] = reindexing;
+
+    // Merge edge cost matrix
+    std::vector<int> adj_list(adjacency[src].begin(), adjacency[src].end());
+    for (int adj : adj_list) {
+      if (adj == dst) {
+        continue;
+      }
+      Matrix added_edge_cost(node_lens[dst], node_lens[adj]);
+
+      for (int i = 0; i < node_lens[dst]; ++i) {
+        int j = reindexing[i];
+        Matrix edge_cost_src_adj = GetEdgeCost(src, adj);
+        for (int k = 0; k < node_lens[adj]; ++k) {
+          added_edge_cost(i, k) = edge_cost(i, j) + edge_cost_src_adj(j, k);
+        }
+      }
+
+      AddEdgeCost(dst, adj, added_edge_cost);
+    }
+
+    // Remove edges
+    for (int adj : adj_list) {
+      RemoveEdge(src, adj);
+    }
+  }
+
+  int QueryDestination(int node) {
+    if (merged_to_.count(node)) {
+      int old_dst = merged_to_[node];
+      int new_dst = QueryDestination(old_dst);
+      if (old_dst != new_dst) {
+        // Compresss path
+        const std::vector<int>& old_reindexing_vector = reindexing_vector[node];
+        std::vector<int> new_reindexing_vector;
+        for (int i = 0; i < node_lens[new_dst]; ++i) {
+          new_reindexing_vector.push_back(
+              old_reindexing_vector[reindexing_vector[old_dst][i]]);
+        }
+        reindexing_vector[node] = new_reindexing_vector;
+        merged_to_[node] = new_dst;
+      }
+      return new_dst;
+    } else {
+      return node;
+    }
+  }
+
+  void Simplify() {
+    const bool enable =
+        pass_context::GetBool("auto_sharding::simplify_graph", true);
+
+    // Merge nodes
+    for (const auto& pair : to_merge_pairs_) {
+      int src = pair.first;
+      int dst = pair.second;
+      dst = QueryDestination(dst);
+      if (enable) {
+        MergeNode(src, dst);
+      }
+    }
+
+    // Build follow map
+    follow_idx.reserve(node_lens.size());
+    for (int i = 0; i < node_lens.size(); ++i) {
+      if (merged_to_.count(i)) {
+        follow_idx.push_back(QueryDestination(i));
+      } else {
+        follow_idx.push_back(-1);
+      }
+    }
+  }
+
+  int RemapIndex(int node_id, int value) const {
+    if (follow_idx[node_id] < 0) {
+      return value;
+    } else {
+      return reindexing_vector.at(node_id)[value];
+    }
+  }
+
+  std::string ToString() {
+    std::ostringstream os;
+    os << "Cost Graph:" << std::endl;
+
+    for (int i = 0; i < node_lens.size(); ++i) {
+      os << "Node " << i << ": " << node_lens[i] << "\n";
+    }
+    os << "\n";
+
+    for (const auto& iter : edge_costs) {
+      os << "Edge (" << iter.first.first << ", " << iter.first.second << "):\n";
+      os << iter.second.ToString() << "\n";
+    }
+
+    return os.str();
+  }
+
+  // The number of strategies of each node.
+  std::vector<int> node_lens;
+  // The adjacency list of each node.
+  std::vector<absl::flat_hash_set<int>> adjacency;
+  // The cost matrix between two nodes.
+  absl::flat_hash_map<std::pair<int, int>, Matrix> edge_costs;
+  // The reindexing vector of the node.
+  // A reindexing vector maps a strategy index from the node being followed
+  // to a strategy index of the curret node.
+  absl::flat_hash_map<int, std::vector<int>> reindexing_vector;
+  // Maps a node id to the node id that is being followed by this node.
+  // The value is -1 if the current node does not follow any node.
+  std::vector<int> follow_idx;
+
+  // Save the destination of merged nodes.
+  absl::flat_hash_map<int, int> merged_to_;
+  // Save pairs that need to be merged.
+  std::vector<std::pair<int, int>> to_merge_pairs_;
+};
+
+// Get the final sharding strategy according to the ilp solution.
+inline const ShardingStrategy& GetShardingStrategy_(
+    const HloInstruction* inst, const StrategyMap& strategy_map,
+    const CostGraph& cost_graph, const std::vector<int64_t>& s_val) {
+  const StrategyVector* strategies = strategy_map.at(inst).get();
+  CHECK(!strategies->is_tuple);
+  int node_idx = strategies->id;
+  int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
+  return strategies->leaf_vector[stra_idx];
+}
+
+// An abbreviation of GetShardingStrategy_
+#define GetShardingStrategy(inst) \
+  GetShardingStrategy_((inst), strategy_map, cost_graph, s_val)
+
 // Function declarations
 // Their comments can be found in their definitions in *.cc files.
 HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
@@ -579,9 +851,12 @@ void HandleConv(std::unique_ptr<StrategyVector>& strategies,
                 const InstructionBatchDimMap& batch_map,
                 const AutoShardingSolverOption& solver_option);
 
-HloSharding GetReduceScatterOutput(const HloInstruction* ins,
-                                   const ShardingStrategy& straetgy,
-                                   const ClusterEnvironment& cluster_env);
+void GenerateReduceScatter(const HloInstructionSequence& sequence,
+                           const AliasMap& alias_map,
+                           const StrategyMap& strategy_map,
+                           const CostGraph& cost_graph,
+                           const std::vector<int64_t>& s_val,
+                           const ClusterEnvironment& cluster_env);
 
 }  // namespace spmd
 }  // namespace xla

@@ -1,7 +1,7 @@
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 
-#include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_strategy.h"
+#include "tensorflow/compiler/xla/shape_util.h"
 
 namespace xla {
 namespace spmd {
@@ -422,7 +422,6 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   return batch_map;
 }
 
-
 // Return the output sharding of the reduce-scatter variant of a given strategy.
 HloSharding GetReduceScatterOutput(const HloInstruction* ins,
                                    const ShardingStrategy& strategy,
@@ -459,8 +458,10 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
                   {mesh_dim0, mesh_dim1}, cluster_env);
     }
-  } if (ins->opcode() == HloOpcode::kConvolution) {
-    const ConvolutionDimensionNumbers& conv_dnums = ins->convolution_dimension_numbers();
+  }
+  if (ins->opcode() == HloOpcode::kConvolution) {
+    const ConvolutionDimensionNumbers& conv_dnums =
+        ins->convolution_dimension_numbers();
     int out_batch_dim = conv_dnums.output_batch_dimension();
     int out_out_channel_dim = conv_dnums.output_feature_dimension();
 

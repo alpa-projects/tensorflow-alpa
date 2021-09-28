@@ -392,6 +392,9 @@ absl::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
     const HloSharding& lhs_sharding, const HloSharding& rhs_sharding,
     int64_t max_iterations = INT64_MAX,
     const HloInstruction* original_hlo = nullptr) {
+  // Temporarily disable windowed dot
+  return absl::nullopt;
+
   if (num_partitions >= max_iterations) {
     return absl::nullopt;
   }

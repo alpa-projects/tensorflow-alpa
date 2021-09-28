@@ -524,7 +524,7 @@ bool HasReduceScatterOpportunity(const HloInstruction* inst,
     return true;
   }
   if (inst->opcode() == HloOpcode::kConvolution) {
-    return false;
+    return true;
   }
 
   return false;

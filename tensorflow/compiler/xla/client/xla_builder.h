@@ -746,7 +746,9 @@ class XlaBuilder {
   XlaOp AllToAll(XlaOp operand, int64_t split_dimension,
                  int64_t concat_dimension, int64_t split_count,
                  absl::Span<const ReplicaGroup> replica_groups,
-                 const absl::optional<Layout>& layout = absl::nullopt);
+                 const absl::optional<ChannelHandle>& channel_id = absl::nullopt,
+                 const absl::optional<Layout>& layout = absl::nullopt,
+                 const absl::optional<bool> use_global_device_ids = absl::nullopt);
 
   XlaOp AllToAllTuple(XlaOp operand, int64_t split_dimension,
                       int64_t concat_dimension, int64_t split_count,
@@ -1337,7 +1339,7 @@ class XlaBuilder {
                          absl::Span<const ReplicaGroup> replica_groups,
                          const absl::optional<ChannelHandle>& channel_id,
                          const absl::optional<Shape>& shape_with_layout,
-	                     const absl::optional<bool> use_global_device_ids);
+                         const absl::optional<bool> use_global_device_ids);
   friend XlaOp ReduceScatter(XlaOp operand, const XlaComputation& computation,
                              int64_t scatter_dimension, int64_t shard_count,
                              absl::Span<const ReplicaGroup> replica_groups,
@@ -1347,7 +1349,9 @@ class XlaBuilder {
   friend XlaOp AllToAll(XlaOp operand, int64_t split_dimension,
                         int64_t concat_dimension, int64_t split_count,
                         absl::Span<const ReplicaGroup> replica_groups,
-                        const absl::optional<Layout>& layout);
+                        const absl::optional<ChannelHandle>& channel_id,
+                        const absl::optional<Layout>& layout,
+                        const absl::optional<bool> use_global_device_ids);
   friend XlaOp AllToAllTuple(XlaOp operand, int64_t split_dimension,
                              int64_t concat_dimension, int64_t split_count,
                              absl::Span<const ReplicaGroup> replica_groups,
@@ -1482,7 +1486,9 @@ class XlaBuilder {
 
   XlaOp AllToAllArray(XlaOp operand, int64_t split_dimension,
                       int64_t concat_dimension, int64_t split_count,
-                      absl::Span<const ReplicaGroup> replica_groups);
+                      absl::Span<const ReplicaGroup> replica_groups,
+                      const absl::optional<ChannelHandle>& channel_id=absl::nullopt,
+                      const absl::optional<bool> use_global_device_ids=absl::nullopt);
 
   // Creates an op with the given opcode and the output shape.
   virtual StatusOr<XlaOp> AddOpWithShape(HloOpcode opcode, const Shape& shape,
@@ -2326,7 +2332,9 @@ XlaOp ReduceScatter(
 XlaOp AllToAll(XlaOp operand, int64_t split_dimension, int64_t concat_dimension,
                int64_t split_count,
                absl::Span<const ReplicaGroup> replica_groups = {},
-               const absl::optional<Layout>& layout = absl::nullopt);
+               const absl::optional<ChannelHandle>& channel_id = absl::nullopt,
+               const absl::optional<Layout>& layout = absl::nullopt,
+               const absl::optional<bool> use_global_device_ids = absl::nullopt);
 
 XlaOp AllToAllTuple(XlaOp operand, int64_t split_dimension,
                     int64_t concat_dimension, int64_t split_count,

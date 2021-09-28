@@ -283,7 +283,7 @@ inline bool IsUndefined(const HloSharding& hlo_sharding) {
 }
 
 // Pretty print a HloSharding in a simplified form
-inline std::string SimpleToString(const HloSharding& spec) {
+inline std::string ToStringSimple(const HloSharding& spec) {
   if (spec.IsReplicated()) {
     return "R";
   }
@@ -320,6 +320,13 @@ HloSharding BroadcastSharding(const HloSharding& input_spec,
 absl::optional<HloSharding> PropagateDimwiseSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Shape& new_shape);
+
+// Propagate sharding for ReduceWindow-like operations.
+// The sharding can successfully propagate if the window operation only happens
+// on tensor dimentions that are not tiled.
+absl::optional<HloSharding> PropagateReduceWindowSharding(
+    const HloSharding& input_spec, const Shape& old_shape,
+    const Window& window);
 
 /*
  * Gradient accumulation

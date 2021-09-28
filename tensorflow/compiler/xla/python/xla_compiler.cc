@@ -506,6 +506,16 @@ void BuildXlaCompilerSubmodule(py::module& m) {
         TF_RETURN_IF_ERROR(module.entry_computation()->Accept(analysis.get()));
         return analysis->properties();
       });
+  m.def(
+      "hlo_module_count_flop_dot_conv_only",
+      [](const HloModule& module) -> double {
+        double ret = 0.0;
+        for (HloComputation* computation : module.computations()) {
+          ret += CountFlopDotConvOnly(*computation);
+        }
+        return ret;
+      });
+
 
   py::class_<XlaOp> xla_op_class(m, "XlaOp");
 

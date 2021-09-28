@@ -459,6 +459,29 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
                   {mesh_dim0, mesh_dim1}, cluster_env);
     }
+  } if (ins->opcode() == HloOpcode::kConvolution) {
+    const ConvolutionDimensionNumbers& conv_dnums = ins->convolution_dimension_numbers();
+    int out_batch_dim = conv_dnums.output_batch_dimension();
+    int out_out_channel_dim = conv_dnums.output_feature_dimension();
+
+    int mesh_dim0, mesh_dim1;
+    if (strategy.name.find("{0,1}") != std::string::npos) {
+      mesh_dim0 = 0;
+      mesh_dim1 = 1;
+    } else {
+      mesh_dim0 = 1;
+      mesh_dim1 = 0;
+    }
+
+    if (ins->shape().dimensions(out_batch_dim) <
+            cluster_env.device_mesh.dim(mesh_dim0) ||
+        ins->shape().dimensions(out_out_channel_dim) <
+            cluster_env.device_mesh.dim(mesh_dim1)) {
+      return Undefined();
+    }
+
+    return Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
+                {mesh_dim0, mesh_dim1}, cluster_env);
   } else if (ins->opcode() == HloOpcode::kReduce) {
     // TODO(lmzheng): support more cases.
     CHECK_EQ(ins->shape().rank(), 1);
@@ -498,6 +521,9 @@ bool HasReduceScatterOpportunity(const HloInstruction* inst,
       return false;
     }
     return true;
+  }
+  if (inst->opcode() == HloOpcode::kConvolution) {
+    return false;
   }
 
   return false;

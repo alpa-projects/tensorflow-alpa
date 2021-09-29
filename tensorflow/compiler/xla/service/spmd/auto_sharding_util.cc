@@ -448,10 +448,15 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
         mesh_dim1 = 0;
       }
 
-      if (ins->shape().dimensions(space_base_dim) <
-              cluster_env.device_mesh.dim(mesh_dim0) ||
-          ins->shape().dimensions(space_base_dim + 1) <
-              cluster_env.device_mesh.dim(mesh_dim1)) {
+      if (ins->shape().dimensions(space_base_dim) %
+                  cluster_env.device_mesh.dim(mesh_dim0) !=
+              0 ||
+          ins->shape().dimensions(space_base_dim + 1) %
+                  cluster_env.device_mesh.dim(mesh_dim1) !=
+              0) {
+        // XLA supports uneven partitioning by adding padding.
+        // However, the ShardingSpec in Jax does not support uneven
+        // partitioning.
         return Undefined();
       }
 
@@ -474,10 +479,14 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       mesh_dim1 = 0;
     }
 
-    if (ins->shape().dimensions(out_batch_dim) <
-            cluster_env.device_mesh.dim(mesh_dim0) ||
-        ins->shape().dimensions(out_out_channel_dim) <
-            cluster_env.device_mesh.dim(mesh_dim1)) {
+    if (ins->shape().dimensions(out_batch_dim) %
+                cluster_env.device_mesh.dim(mesh_dim0) !=
+            0 ||
+        ins->shape().dimensions(out_out_channel_dim) %
+                cluster_env.device_mesh.dim(mesh_dim1) !=
+            0) {
+      // XLA supports uneven partitioning by adding padding.
+      // However, the ShardingSpec in Jax does not support uneven partitioning.
       return Undefined();
     }
 
@@ -524,7 +533,7 @@ bool HasReduceScatterOpportunity(const HloInstruction* inst,
     return true;
   }
   if (inst->opcode() == HloOpcode::kConvolution) {
-    return false;
+    return true;
   }
 
   return false;

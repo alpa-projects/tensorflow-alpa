@@ -465,7 +465,50 @@ class ConvHandler {
     }
   }
 
+  void SplitDepthwise(int mesh_dim0, int mesh_dim1, bool forward) {
+    HloSharding output_spec =
+        Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
+             {mesh_dim0, mesh_dim1}, cluster_env);
+
+    strategies->leaf_vector.push_back(ShardingStrategy(
+        {absl::StrFormat("SS = SS x RS @ {%d,%d}", mesh_dim0, mesh_dim1),
+         output_spec,
+         0,
+         0,
+         GetBytes(ins->shape()) / output_spec.NumTiles(),
+         {
+             ReshardingCostVector(
+                 strategy_map.at(lhs).get(), lhs->shape(),
+                 forward ?
+                 Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
+                     {mesh_dim0, mesh_dim1}, cluster_env) :
+                 Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
+                     {mesh_dim1, mesh_dim0}, cluster_env),
+                 cluster_env),
+             ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
+                                  Tile(rhs->shape(), {rhs_out_channel_dim},
+                                       {mesh_dim1}, cluster_env),
+                                  cluster_env),
+         }}));
+  }
+
   void RegisterStrategies() {
+    if ((ins->feature_group_count() == lhs->shape().dimensions(lhs_in_channel_dim) &&
+         ins->feature_group_count() == rhs->shape().dimensions(rhs_out_channel_dim))) {
+      // for depthwise conv
+      // SS = SS x S
+      // Split batch dim and channel dim
+      SplitDepthwise(0, 1, true);
+      SplitDepthwise(1, 0, true);
+    } else if ((ins->batch_group_count() == lhs->shape().dimensions(lhs_batch_dim) &&
+              ins->batch_group_count() == rhs->shape().dimensions(rhs_out_channel_dim))) {
+      // for depthwise conv filter_backward
+      // SS = SS x S
+      // Split batch dim and channel dim
+      SplitDepthwise(0, 1, false);
+      SplitDepthwise(1, 0, false);
+    }
+
     // SS = SR x RS
     // Split lhs batch dim and rhs out_channel dim.
     SplitLhsBatchRhsOutchannel(0, 1);

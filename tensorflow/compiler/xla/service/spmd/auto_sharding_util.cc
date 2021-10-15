@@ -1,5 +1,6 @@
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 
+#include "tensorflow/compiler/xla/service/hlo_sharding_util.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_strategy.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 
@@ -549,6 +550,20 @@ bool AllUsersAreReduce(const HloInstruction* inst) {
   return true;
 }
 
+// Set sharding, and apply transpose if necessary.
+void SetSharding(HloInstruction* to_split, const HloSharding& output_spec,
+                 const HloInstruction* ref_inst,
+                 const HloInstruction* shape_inst) {
+  if (DimensionsEqual(to_split->shape(), ref_inst->shape())) {
+    to_split->set_sharding(output_spec);
+  } else {
+    CHECK(shape_inst != nullptr);
+    CHECK_EQ(shape_inst->opcode(), HloOpcode::kTranspose);
+    to_split->set_sharding(hlo_sharding_util::TransposeSharding(
+        output_spec, shape_inst->dimensions()));
+  }
+}
+
 // Substitute all-reduce strategies with their reduce-scatter variants.
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const AliasMap& alias_map,
@@ -576,6 +591,9 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       absl::flat_hash_set<HloInstruction*> consumer_set;
       absl::flat_hash_set<const HloInstruction*> visited;
 
+      // We allow at most one transpose in the path of replication analysis.
+      HloInstruction* transpose_inst = nullptr;
+
       // Use DFS to find the replicated set.
       std::function<void(HloInstruction*)> find_replicated_set;
       find_replicated_set = [&](HloInstruction* cur) {
@@ -584,12 +602,19 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         // Check whether the node is a boundary node.
         absl::flat_hash_set<HloInstruction*> users =
             UsersWithAlias(cur, alias_map, output);
-
         for (HloInstruction* consumer : users) {
+          const HloInstruction* shape_inst = cur;
+          if (consumer->opcode() == HloOpcode::kTranspose &&
+              transpose_inst == nullptr) {
+            shape_inst = consumer;
+            transpose_inst = consumer;
+            // TODO(lmzheng): fix output_sharding comparison.
+          }
+
           if (consumer->opcode() == HloOpcode::kTuple ||
               GetShardingStrategy(consumer).output_sharding !=
                   strategy.output_sharding ||
-              !DimensionsEqual(consumer->shape(), inst->shape())) {
+              !DimensionsEqual(consumer->shape(), shape_inst->shape())) {
             boundary_set.insert(cur);
             return;
           }
@@ -608,7 +633,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           if (!visited.count(operand) && !IsAlwaysReplicated(operand) &&
               GetShardingStrategy(operand).output_sharding ==
                   strategy.output_sharding &&
-              DimensionsEqual(operand->shape(), inst->shape())) {
+              DimensionsEqual(operand->shape(), cur->shape())) {
             find_replicated_set(operand);
           }
         }
@@ -619,6 +644,10 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       visited.insert(inst);
       visited.insert(output);
       for (HloInstruction* consumer : UsersWithAlias(inst, alias_map, output)) {
+        if (consumer->opcode() == HloOpcode::kTranspose &&
+            transpose_inst == nullptr) {
+          transpose_inst = consumer;
+        }
         find_replicated_set(consumer);
       }
 
@@ -655,7 +684,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
       // Print replicated set and boundary set
       // std::cerr << inst->ToString(HloPrintOptions::ShortParsable()) << "\n";
-      // std::cerr << "replicated set (#parameter: " << num_replicated_parameters
+      // std::cerr << "replicated set (#parameter: " <<
+      // num_replicated_parameters
       //           << "):\n";
       // for (auto x : replicated_set) {
       //   std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable())
@@ -665,7 +695,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       //           << "):\n";
       // for (auto x : boundary_set) {
       //   std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable())
-      //             << " " << absl::c_linear_search(need_all_gather, x) << "\n";
+      //             << " " << absl::c_linear_search(need_all_gather, x) <<
+      //             "\n";
       // }
 
       // If applicable, replace all-reduce with reduce-scatter by
@@ -687,11 +718,11 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         }
 
         for (HloInstruction* to_split : replicated_set) {
-          to_split->set_sharding(output_spec);
+          SetSharding(to_split, output_spec, inst, transpose_inst);
         }
 
         for (HloInstruction* to_split : need_all_gather) {
-          to_split->set_sharding(output_spec);
+          SetSharding(to_split, output_spec, inst, transpose_inst);
           if (move_all_gather_to_alias_parameter &&
               to_split->users().size() == 1 &&
               to_split->users().front() == output &&
@@ -700,7 +731,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             // This partitions more tensors but introduces communication
             // in the forward pass, which is not desired in gradient
             // accumulation.
-            alias_map.at(to_split)->set_sharding(output_spec);
+            SetSharding(alias_map.at(to_split), output_spec, inst,
+                        transpose_inst);
             insert_all_gather.push_back(alias_map.at(to_split));
           } else {
             insert_all_gather.push_back(to_split);

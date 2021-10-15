@@ -445,6 +445,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .def("has_schedule", &HloModule::has_schedule)
       .def("spmd_output_sharding", &HloModule::spmd_output_sharding)
       .def("spmd_parameters_shardings", &HloModule::spmd_parameters_shardings)
+      .def("infer_spmd_shardings", &HloModule::infer_spmd_shardings)
       .def("parameter_shapes", [](const HloModule& hlo_module) -> std::vector<Shape>{
             const auto params = hlo_module.entry_computation()->parameter_instructions();
             std::vector<Shape> ret(params.size());

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <vector>
 
 #include "pybind11/pybind11.h"
@@ -335,8 +336,9 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
-                                           num_devices * num_bytes) +
+    return (round(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] *
+                                             (num_devices - 1) / num_devices *
+                                             num_bytes) +
             0.1);
   }
 
@@ -352,9 +354,9 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * 2 *
-                                           (num_devices - 1) / num_devices *
-                                           num_bytes) +
+    return (round(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * 2 *
+                                             (num_devices - 1) / num_devices *
+                                             num_bytes) +
             0.01);
   }
 
@@ -369,8 +371,9 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
-                                           num_devices * num_bytes) +
+    return (round(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] *
+                                             (num_devices - 1) / num_devices *
+                                             num_bytes) +
             0.001);
   }
 
@@ -388,9 +391,9 @@ class ClusterEnvironment {
     // empirical cost on v100 + nvlink.
     int64_t num_devices = device_mesh.dim(mesh_dim);
     double penalty_factor = num_devices / 2;
-    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
-                                           num_devices / num_devices *
-                                           num_bytes * penalty_factor) +
+    return (round(mesh_alpha[mesh_dim] +
+                  mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
+                      num_devices * num_bytes * penalty_factor) +
             0.001);
   }
 
@@ -554,7 +557,8 @@ class CostGraph {
     // Build the cost graph
     for (const auto& strategies : leaf_strategies) {
       node_lens.push_back(strategies->leaf_vector.size());
-      extra_node_costs.push_back(std::vector<double>(strategies->leaf_vector.size(), 0.0));
+      extra_node_costs.push_back(
+          std::vector<double>(strategies->leaf_vector.size(), 0.0));
 
       for (const auto& strategy : strategies->leaf_vector) {
         CHECK_EQ(strategy.resharding_costs.size(), strategies->in_nodes.size());

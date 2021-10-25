@@ -395,6 +395,11 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                  {FollowInsCostVector(src_strategies->leaf_vector.size(),
                                       sid)}}));
           }
+
+          if (strategies->leaf_vector.empty()) {
+            LOG(WARNING) << "Failed to generate follow strategies for ins: "
+                         << ins->ToString() << ". This is mostly due to uneven partition.";
+          }
         }
 
         // Fail to create follow strategies, enumerate all possible cases
@@ -1072,7 +1077,8 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>, double> CallSolver(
     if (s_follow_np[i] < 0) {
       for (size_t j = 0; j < strategies->leaf_vector.size(); ++j) {
         c_np.push_back(strategies->leaf_vector[j].compute_cost);
-        d_np.push_back(strategies->leaf_vector[j].communication_cost);
+        d_np.push_back(strategies->leaf_vector[j].communication_cost +
+                       cost_graph.extra_node_costs[i][j]);
         m_np.push_back(strategies->leaf_vector[j].memory_cost);
       }
     } else {
@@ -1081,7 +1087,8 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>, double> CallSolver(
       for (size_t k = 0; k < reindexing.size(); ++k) {
         size_t j = reindexing[k];
         c_np.push_back(strategies->leaf_vector[j].compute_cost);
-        d_np.push_back(strategies->leaf_vector[j].communication_cost);
+        d_np.push_back(strategies->leaf_vector[j].communication_cost +
+                       cost_graph.extra_node_costs[i][j]);
         m_np.push_back(strategies->leaf_vector[j].memory_cost);
       }
     }

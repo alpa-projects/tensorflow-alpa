@@ -1,3 +1,4 @@
+#include <cmath>
 #include <vector>
 
 #include "pybind11/pybind11.h"
@@ -335,8 +336,9 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
-                                           num_devices * num_bytes) +
+    return (round(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] *
+                                             (num_devices - 1) / num_devices *
+                                             num_bytes) +
             0.1);
   }
 
@@ -352,9 +354,9 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * 2 *
-                                           (num_devices - 1) / num_devices *
-                                           num_bytes) +
+    return (round(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * 2 *
+                                             (num_devices - 1) / num_devices *
+                                             num_bytes) +
             0.01);
   }
 
@@ -369,8 +371,9 @@ class ClusterEnvironment {
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
-                                           num_devices * num_bytes) +
+    return (round(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] *
+                                             (num_devices - 1) / num_devices *
+                                             num_bytes) +
             0.001);
   }
 
@@ -388,9 +391,9 @@ class ClusterEnvironment {
     // empirical cost on v100 + nvlink.
     int64_t num_devices = device_mesh.dim(mesh_dim);
     double penalty_factor = num_devices / 2;
-    return (int(mesh_alpha[mesh_dim] + mesh_beta[mesh_dim] * (num_devices - 1) /
-                                           num_devices / num_devices *
-                                           num_bytes * penalty_factor) +
+    return (round(mesh_alpha[mesh_dim] +
+                  mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
+                      num_devices * num_bytes * penalty_factor) +
             0.001);
   }
 
@@ -548,11 +551,14 @@ class CostGraph {
   CostGraph(const LeafStrategies& leaf_strategies,
             const AssociativeDotPairs& associative_dot_pairs) {
     node_lens.reserve(leaf_strategies.size());
+    extra_node_costs.reserve(leaf_strategies.size());
     adjacency.assign(leaf_strategies.size(), absl::flat_hash_set<int>());
 
     // Build the cost graph
     for (const auto& strategies : leaf_strategies) {
       node_lens.push_back(strategies->leaf_vector.size());
+      extra_node_costs.push_back(
+          std::vector<double>(strategies->leaf_vector.size(), 0.0));
 
       for (const auto& strategy : strategies->leaf_vector) {
         CHECK_EQ(strategy.resharding_costs.size(), strategies->in_nodes.size());
@@ -688,21 +694,28 @@ class CostGraph {
 
     // Merge edge cost matrix
     std::vector<int> adj_list(adjacency[src].begin(), adjacency[src].end());
-    for (int adj : adj_list) {
-      if (adj == dst) {
-        continue;
-      }
-      Matrix added_edge_cost(node_lens[dst], node_lens[adj]);
+    if (adj_list.size() > 1) {
+      for (int adj : adj_list) {
+        if (adj == dst) {
+          continue;
+        }
+        Matrix added_edge_cost(node_lens[dst], node_lens[adj]);
 
+        for (int i = 0; i < node_lens[dst]; ++i) {
+          int j = reindexing[i];
+          Matrix edge_cost_src_adj = GetEdgeCost(src, adj);
+          for (int k = 0; k < node_lens[adj]; ++k) {
+            added_edge_cost(i, k) = edge_cost(i, j) + edge_cost_src_adj(j, k);
+          }
+        }
+
+        AddEdgeCost(dst, adj, added_edge_cost);
+      }
+    } else {
       for (int i = 0; i < node_lens[dst]; ++i) {
         int j = reindexing[i];
-        Matrix edge_cost_src_adj = GetEdgeCost(src, adj);
-        for (int k = 0; k < node_lens[adj]; ++k) {
-          added_edge_cost(i, k) = edge_cost(i, j) + edge_cost_src_adj(j, k);
-        }
+        extra_node_costs[dst][i] += edge_cost(i, j);
       }
-
-      AddEdgeCost(dst, adj, added_edge_cost);
     }
 
     // Remove edges
@@ -788,6 +801,8 @@ class CostGraph {
   std::vector<absl::flat_hash_set<int>> adjacency;
   // The cost matrix between two nodes.
   absl::flat_hash_map<std::pair<int, int>, Matrix> edge_costs;
+  // The extra node costs introduced by merging nodes.
+  std::vector<std::vector<double>> extra_node_costs;
   // The reindexing vector of the node.
   // A reindexing vector maps a strategy index from the node being followed
   // to a strategy index of the curret node.

@@ -479,11 +479,11 @@ class ConvHandler {
          {
              ReshardingCostVector(
                  strategy_map.at(lhs).get(), lhs->shape(),
-                 forward ?
-                 Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
-                     {mesh_dim0, mesh_dim1}, cluster_env) :
-                 Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
-                     {mesh_dim1, mesh_dim0}, cluster_env),
+                 forward
+                     ? Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
+                            {mesh_dim0, mesh_dim1}, cluster_env)
+                     : Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
+                            {mesh_dim1, mesh_dim0}, cluster_env),
                  cluster_env),
              ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
                                   Tile(rhs->shape(), {rhs_out_channel_dim},
@@ -493,15 +493,19 @@ class ConvHandler {
   }
 
   void RegisterStrategies() {
-    if ((ins->feature_group_count() == lhs->shape().dimensions(lhs_in_channel_dim) &&
-         ins->feature_group_count() == rhs->shape().dimensions(rhs_out_channel_dim))) {
+    if ((ins->feature_group_count() ==
+             lhs->shape().dimensions(lhs_in_channel_dim) &&
+         ins->feature_group_count() ==
+             rhs->shape().dimensions(rhs_out_channel_dim))) {
       // for depthwise conv
       // SS = SS x S
       // Split batch dim and channel dim
       SplitDepthwise(0, 1, true);
       SplitDepthwise(1, 0, true);
-    } else if ((ins->batch_group_count() == lhs->shape().dimensions(lhs_batch_dim) &&
-              ins->batch_group_count() == rhs->shape().dimensions(rhs_out_channel_dim))) {
+    } else if ((ins->batch_group_count() ==
+                    lhs->shape().dimensions(lhs_batch_dim) &&
+                ins->batch_group_count() ==
+                    rhs->shape().dimensions(rhs_out_channel_dim))) {
       // for depthwise conv filter_backward
       // SS = SS x S
       // Split batch dim and channel dim

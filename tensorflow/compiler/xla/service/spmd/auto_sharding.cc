@@ -398,7 +398,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
           if (strategies->leaf_vector.empty()) {
             LOG(WARNING) << "Failed to generate follow strategies for ins: "
-                         << ins->ToString() << ". This is mostly due to uneven partition.";
+                         << ins->ToString()
+                         << ". This is mostly due to uneven partition.";
           }
         }
 
@@ -1260,8 +1261,9 @@ void SetHloSharding(const HloInstructionSequence& sequence,
     if (strategies->is_tuple) {
       const Shape& out_shape = inst->shape();
       ShapeTree<HloSharding> tuple_sharding(out_shape, Undefined());
-      std::function<void(const StrategyVector*)> get_flattened_shardings;
       std::vector<HloSharding> flattened_shardings;
+
+      std::function<void(const StrategyVector*)> get_flattened_shardings;
       get_flattened_shardings = [&](const StrategyVector* cur) {
         if (cur->is_tuple) {
           for (const auto& child : strategies->childs) {
@@ -1269,23 +1271,29 @@ void SetHloSharding(const HloInstructionSequence& sequence,
           }
         } else {
           CHECK(cur->following != nullptr);
-          if (!instructions[cur->following->instruction_id]
-                   ->shape()
-                   .IsTuple() &&
-              instructions[cur->following->instruction_id]->has_sharding()) {
-            // its sharding has been forcibly set
-            flattened_shardings.push_back(
-                instructions[cur->following->instruction_id]->sharding());
-          } else {
-            int node_idx = cur->id;
-            int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
-            flattened_shardings.push_back(
-                cur->leaf_vector[stra_idx].output_sharding);
-          }
+          int node_idx = cur->id;
+          int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
+          flattened_shardings.push_back(
+              cur->leaf_vector[stra_idx].output_sharding);
         }
       };
       get_flattened_shardings(strategies);
+
+      // If the sharding of some operands are already forcely set,
+      // use the provided sharding instead of ilp solution
       int i = 0;
+      for (const auto operand : inst->operands()) {
+        if (operand->shape().IsTuple()) {
+          break;  // TODO(lmzheng): handle nested tuple
+        }
+        if (operand->has_sharding()) {
+          flattened_shardings[i] = operand->sharding();
+        }
+        i++;
+      }
+
+      // Create Tuple HloSharding
+      i = 0;
       for (auto& leaf : tuple_sharding.leaves()) {
         leaf.second = flattened_shardings[i++];
       }

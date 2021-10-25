@@ -564,6 +564,14 @@ void SetSharding(HloInstruction* to_split, const HloSharding& output_spec,
   }
 }
 
+bool IsParameterConvert(const HloInstruction* inst) {
+  if (inst->opcode() == HloOpcode::kConvert &&
+      inst->operand(0)->opcode() == HloOpcode::kParameter) {
+    return true;
+  }
+  return false;
+}
+
 // Substitute all-reduce strategies with their reduce-scatter variants.
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const AliasMap& alias_map,
@@ -574,7 +582,11 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
   const HloInstruction* output = instructions.back();
 
-  bool move_all_gather_to_alias_parameter = true;
+  // A debug option: whether moves all-gather from output to the parameters.
+  // This controls the location of all-gather.
+  // If true, all-gather happends before forward pass.
+  // If false, all-gather happends after backward pass.
+  bool move_all_gather_to_alias_parameter = false;
 
   std::vector<HloInstruction*> insert_all_gather;
 
@@ -612,6 +624,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           }
 
           if (consumer->opcode() == HloOpcode::kTuple ||
+              (!move_all_gather_to_alias_parameter &&
+               IsParameterConvert(consumer)) ||
               GetShardingStrategy(consumer).output_sharding !=
                   strategy.output_sharding ||
               !DimensionsEqual(consumer->shape(), shape_inst->shape())) {
@@ -640,16 +654,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       };
 
       // Find the replicated set starting from the all-reduce instruction.
-      replicated_set.insert(inst);
-      visited.insert(inst);
       visited.insert(output);
-      for (HloInstruction* consumer : UsersWithAlias(inst, alias_map, output)) {
-        if (consumer->opcode() == HloOpcode::kTranspose &&
-            transpose_inst == nullptr) {
-          transpose_inst = consumer;
-        }
-        find_replicated_set(consumer);
-      }
+      find_replicated_set(inst);
 
       // Analyze the instructions after which all-gather should be inserted.
       std::vector<HloInstruction*> need_all_gather;
@@ -723,6 +729,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
         for (HloInstruction* to_split : need_all_gather) {
           SetSharding(to_split, output_spec, inst, transpose_inst);
+
           if (move_all_gather_to_alias_parameter &&
               to_split->users().size() == 1 &&
               to_split->users().front() == output &&

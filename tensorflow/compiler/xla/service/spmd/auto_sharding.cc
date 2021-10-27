@@ -975,14 +975,17 @@ AliasMap BuildAliasMap(const HloModule* module,
       entry->parameter_instructions();
   const HloInstruction* output_tuple = entry->root_instruction();
 
+  if (IsCustomCallMarker(output_tuple)) {
+    output_tuple = output_tuple->operand(0);
+  }
+
   alias_config.ForEachAlias([&](const ShapeIndex& output_index,
                                 const HloInputOutputAliasConfig::Alias& alias) {
-    HloInstruction* src_ins = parameter_instructions[alias.parameter_number];
     CHECK_EQ(alias.parameter_index.size(), 0) << "Do not support tuple alias";
-    const HloInstruction* dst_ins =
-        dataflow_analysis.GetUniqueValueAt(output_tuple, output_index)
-            .instruction();
+    CHECK_EQ(output_index.size(), 1) << "Do not support tuple alias";
 
+    HloInstruction* src_ins = parameter_instructions[alias.parameter_number];
+    const HloInstruction* dst_ins = output_tuple->operand(output_index.front());
     alias_map[dst_ins] = src_ins;
   });
 
@@ -1263,37 +1266,37 @@ void SetHloSharding(const HloInstructionSequence& sequence,
       ShapeTree<HloSharding> tuple_sharding(out_shape, Undefined());
       std::vector<HloSharding> flattened_shardings;
 
-      std::function<void(const StrategyVector*)> get_flattened_shardings;
-      get_flattened_shardings = [&](const StrategyVector* cur) {
-        if (cur->is_tuple) {
-          for (const auto& child : strategies->childs) {
-            get_flattened_shardings(child.get());
+      //std::function<void(const StrategyVector*)> get_flattened_shardings;
+      //get_flattened_shardings = [&](const StrategyVector* cur) {
+      //  if (cur->is_tuple) {
+      //    for (const auto& child : strategies->childs) {
+      //      get_flattened_shardings(child.get());
+      //    }
+      //  } else {
+      //    CHECK(cur->following != nullptr);
+      //    int node_idx = cur->id;
+      //    int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
+      //    flattened_shardings.push_back(
+      //        cur->leaf_vector[stra_idx].output_sharding);
+      //  }
+      //};
+      //get_flattened_shardings(strategies);
+
+      // Read shardings from operand instructions
+      std::function<void(const HloInstruction*)> get_flattened_shardings;
+      get_flattened_shardings = [&](const HloInstruction* cur) {
+        for (const HloInstruction* operand : cur->operands()) {
+          if (operand->shape().IsTuple()) {
+            get_flattened_shardings(operand);
+          } else {
+            flattened_shardings.push_back(operand->sharding());
           }
-        } else {
-          CHECK(cur->following != nullptr);
-          int node_idx = cur->id;
-          int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
-          flattened_shardings.push_back(
-              cur->leaf_vector[stra_idx].output_sharding);
         }
       };
-      get_flattened_shardings(strategies);
-
-      // If the sharding of some operands are already forcely set,
-      // use the provided sharding instead of ilp solution
-      int i = 0;
-      for (const auto operand : inst->operands()) {
-        if (operand->shape().IsTuple()) {
-          break;  // TODO(lmzheng): handle nested tuple
-        }
-        if (operand->has_sharding()) {
-          flattened_shardings[i] = operand->sharding();
-        }
-        i++;
-      }
+      get_flattened_shardings(inst);
 
       // Create Tuple HloSharding
-      i = 0;
+      int i = 0;
       for (auto& leaf : tuple_sharding.leaves()) {
         leaf.second = flattened_shardings[i++];
       }

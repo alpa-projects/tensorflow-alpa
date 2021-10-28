@@ -16,9 +16,9 @@ constexpr double INFINITY_COST = 1e10;
 
 // Options for the auto-sharding solver.
 struct AutoShardingSolverOption {
-  // Forcely split the batch dimension and map it to a mesh dimension.
+  // Forcibly split the batch dimension and map it to a mesh dimension.
   // This can force the auto-sharding pass to generate the data parallel
-  // startegy.
+  // strategy.
   int force_batch_dim_to_mesh_dim;
 
   // If true, override the cost of all-gather with the given value.
@@ -67,7 +67,7 @@ struct ShardingStrategy {
   std::vector<std::vector<double>> resharding_costs;
 };
 
-// The strategy for each instructions.
+// The strategy for each instruction.
 // We use unique_ptr for ownership, and raw pointers for other references.
 struct StrategyVector {
   bool is_tuple;

@@ -7,6 +7,11 @@
 namespace xla {
 namespace spmd {
 
+NullStream& NullStream::Global() {
+  static NullStream stream;
+  return stream;
+}
+
 // Return whether the instruction is always replicated.
 // (e.g., constant, broadcasted constant, scalar)
 bool IsAlwaysReplicated(const HloInstruction* inst) {
@@ -189,9 +194,6 @@ InstructionDepthMap BuildInstructionDepthMap(
 
           next_frontier.push_back(node);
           collected += 1;
-
-          // std::cerr << node->ToString(HloPrintOptions::ShortParsable()) <<
-          // "depth: " << depth_map[node] << std::endl;
         }
       }
     }
@@ -413,6 +415,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
     }
   }
 
+  // Print batch map
   // for (auto iter : batch_map) {
   //   std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << "
   //   "
@@ -564,6 +567,14 @@ void SetSharding(HloInstruction* to_split, const HloSharding& output_spec,
   }
 }
 
+bool IsParameterConvert(const HloInstruction* inst) {
+  if (inst->opcode() == HloOpcode::kConvert &&
+      inst->operand(0)->opcode() == HloOpcode::kParameter) {
+    return true;
+  }
+  return false;
+}
+
 // Substitute all-reduce strategies with their reduce-scatter variants.
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const AliasMap& alias_map,
@@ -572,9 +583,20 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const std::vector<int64_t>& s_val,
                            const ClusterEnvironment& cluster_env) {
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
-  const HloInstruction* output = instructions.back();
 
-  bool move_all_gather_to_alias_parameter = true;
+  // Propagation ends at output
+  const HloInstruction* output = instructions.back();
+  if (IsCustomCallMarker(output)) {
+    output = output->operand(0);
+  }
+
+  // A debug option: whether to do all-gather after backward pass.
+  // This controls the location of all-gather.
+  // If true, all-gather happends after backward pass, which is desired for
+  // gradient accumulation. If false, all-gather happends before forward pass,
+  // which can partitions more tensors.
+  bool do_all_gather_after_backward = true;
+  int verbose = 0;
 
   std::vector<HloInstruction*> insert_all_gather;
 
@@ -612,6 +634,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           }
 
           if (consumer->opcode() == HloOpcode::kTuple ||
+              (do_all_gather_after_backward && IsParameterConvert(consumer)) ||
               GetShardingStrategy(consumer).output_sharding !=
                   strategy.output_sharding ||
               !DimensionsEqual(consumer->shape(), shape_inst->shape())) {
@@ -628,8 +651,11 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             find_replicated_set(consumer);
           }
         }
+
         for (size_t i = 0; i < cur->operand_count(); ++i) {
           HloInstruction* operand = cur->mutable_operand(i);
+          operand = PassThroughCustomCallMarkerOperand(operand, cur);
+
           if (!visited.count(operand) && !IsAlwaysReplicated(operand) &&
               GetShardingStrategy(operand).output_sharding ==
                   strategy.output_sharding &&
@@ -640,16 +666,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       };
 
       // Find the replicated set starting from the all-reduce instruction.
-      replicated_set.insert(inst);
-      visited.insert(inst);
       visited.insert(output);
-      for (HloInstruction* consumer : UsersWithAlias(inst, alias_map, output)) {
-        if (consumer->opcode() == HloOpcode::kTranspose &&
-            transpose_inst == nullptr) {
-          transpose_inst = consumer;
-        }
-        find_replicated_set(consumer);
-      }
+      find_replicated_set(inst);
 
       // Analyze the instructions after which all-gather should be inserted.
       std::vector<HloInstruction*> need_all_gather;
@@ -662,6 +680,40 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             replicated_set.insert(node);
           } else {
             need_all_gather.push_back(node);
+          }
+        }
+      }
+
+      // If we do all-gather on some parameters, move this all-gather after
+      // backward.
+      if (do_all_gather_after_backward && need_all_gather.size() == 1) {
+        HloInstruction* point = need_all_gather.front();
+        std::vector<HloInstruction*> path;
+
+        HloInstruction* root = point;
+        while (true) {
+          path.push_back(root);
+          if (root->opcode() == HloOpcode::kGetTupleElement) {
+            root = PassThroughCustomCallMarkerOperand(root->mutable_operand(0),
+                                                      root);
+          } else {
+            break;
+          }
+        }
+
+        if (root->opcode() == HloOpcode::kParameter) {
+          for (auto x : path) {
+            replicated_set.erase(x);
+            boundary_set.erase(x);
+          }
+          need_all_gather.clear();
+          for (auto x : replicated_set) {
+            auto iter = alias_map.find(x);
+            if (iter != alias_map.end() && iter->second == root) {
+              boundary_set.insert(x);
+              need_all_gather.push_back(x);
+              break;
+            }
           }
         }
       }
@@ -683,21 +735,22 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       }
 
       // Print replicated set and boundary set
-      // std::cerr << inst->ToString(HloPrintOptions::ShortParsable()) << "\n";
-      // std::cerr << "replicated set (#parameter: " <<
-      // num_replicated_parameters
-      //           << "):\n";
-      // for (auto x : replicated_set) {
-      //   std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable())
-      //             << "\n";
-      // }
-      // std::cerr << "boundary set (#incompatible: " << need_all_gather.size()
-      //           << "):\n";
-      // for (auto x : boundary_set) {
-      //   std::cerr << "  " << x->ToString(HloPrintOptions::ShortParsable())
-      //             << " " << absl::c_linear_search(need_all_gather, x) <<
-      //             "\n";
-      // }
+      StdCerr(verbose) << inst->ToString(HloPrintOptions::ShortParsable())
+                       << "\n";
+      StdCerr(verbose) << "replicated set (#parameter: "
+                       << num_replicated_parameters << "):\n";
+      for (auto x : replicated_set) {
+        StdCerr(verbose) << "  "
+                         << x->ToString(HloPrintOptions::ShortParsable())
+                         << "\n";
+      }
+      StdCerr(verbose) << "boundary set (#incompatible: "
+                       << need_all_gather.size() << "):\n";
+      for (auto x : boundary_set) {
+        StdCerr(verbose) << "  "
+                         << x->ToString(HloPrintOptions::ShortParsable()) << " "
+                         << absl::c_linear_search(need_all_gather, x) << "\n";
+      }
 
       // If applicable, replace all-reduce with reduce-scatter by
       // setting instructions' sharding.
@@ -709,7 +762,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           continue;
         }
 
-        // std::cerr << "SET:  " << output_spec.ToString() << std::endl;
+        StdCerr(verbose) << "SET:  " << output_spec.ToString() << std::endl;
 
         if (StrStartsWith(strategy.name, "RR = RS x SR")) {
           // If set the sharding for this dot instruction, the SPMD
@@ -723,8 +776,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
         for (HloInstruction* to_split : need_all_gather) {
           SetSharding(to_split, output_spec, inst, transpose_inst);
-          if (move_all_gather_to_alias_parameter &&
-              to_split->users().size() == 1 &&
+
+          if (!do_all_gather_after_backward && to_split->users().size() == 1 &&
               to_split->users().front() == output &&
               alias_map.count(to_split)) {
             // Move the all-gather to its alias parameter.
@@ -740,7 +793,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         }
       }
 
-      // std::cerr << "-----------------------done\n" << std::endl;
+      StdCerr(verbose) << "-----------------------done\n" << std::endl;
     }
   }
 

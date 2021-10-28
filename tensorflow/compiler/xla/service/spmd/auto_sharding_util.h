@@ -226,38 +226,86 @@ inline std::pair<std::vector<int64_t>, std::vector<int64_t>> GetSpaceDims(
   return std::make_pair(std::move(lhs_space_dims), std::move(rhs_space_dims));
 }
 
-// Return the users of an instruction and its alias, excluding the final output
-// tuple.
+// Return whether this instruction is a custom call marker introduced by us.
+inline bool IsCustomCallMarker(const HloInstruction* inst) {
+  return inst->IsCustomCall("xla_pipeline_marker") ||
+         inst->IsCustomCall("identity");
+}
+
+// Return whether the tuple is only used by a custom call marker.
+inline bool IsCustomCallMarkerTuple(const HloInstruction* inst) {
+  return inst->opcode() == HloOpcode::kTuple && inst->users().size() == 1 &&
+         IsCustomCallMarker(inst->users().front());
+}
+
+// Pass through the custom call marker and get the acutal user
+inline HloInstruction* PassThroughCustomCallMarkerUser(
+    HloInstruction* raw_user, const HloInstruction* inst) {
+  if (!IsCustomCallMarkerTuple(raw_user)) {
+    return raw_user;
+  }
+
+  const HloInstruction* custom_call = raw_user->users().front();
+
+  int index = -1;
+  for (int i = 0; i < raw_user->operand_count(); i++) {
+    if (raw_user->operand(i) == inst) {
+      index = i;
+      break;
+    }
+  }
+  CHECK(index != -1);
+
+  HloInstruction* ret = nullptr;
+  for (HloInstruction* user : custom_call->users()) {
+    CHECK_EQ(user->opcode(), HloOpcode::kGetTupleElement);
+    if (user->tuple_index() == index) {
+      CHECK_EQ(ret, nullptr);
+      ret = user;
+    }
+  }
+
+  return ret == nullptr ? raw_user : ret;
+}
+
+// Pass through the custom call marker and get the acutal operand
+inline HloInstruction* PassThroughCustomCallMarkerOperand(
+    HloInstruction* raw_operand, const HloInstruction* inst) {
+  if (!IsCustomCallMarker(raw_operand)) {
+    return raw_operand;
+  }
+
+  CHECK_EQ(inst->opcode(), HloOpcode::kGetTupleElement);
+
+  int index = inst->tuple_index();
+  return raw_operand->mutable_operand(0)->mutable_operand(index);
+}
+
+// Return the users of an instruction and its alias,
+// excluding the final output tuple.
 inline absl::flat_hash_set<HloInstruction*> UsersWithAlias(
     const HloInstruction* inst, const AliasMap& alias_map,
     const HloInstruction* output) {
-  absl::flat_hash_set<HloInstruction*> users(inst->users().begin(),
-                                             inst->users().end());
+  absl::flat_hash_set<HloInstruction*> users;
+
+  for (HloInstruction* user : inst->users()) {
+    users.insert(PassThroughCustomCallMarkerUser(user, inst));
+  }
+
   auto iter = alias_map.find(inst);
   if (iter != alias_map.end()) {
-    users.insert(iter->second->users().begin(), iter->second->users().end());
+    for (HloInstruction* user : iter->second->users()) {
+      users.insert(PassThroughCustomCallMarkerUser(user, iter->second));
+    }
   }
 
   users.erase(output);
-
   return users;
 }
 
 // Return whether the instruction is always replicated.
 // (e.g., constant, broadcasted constant, scalar)
 bool IsAlwaysReplicated(const HloInstruction* inst);
-
-// Return the number of users and exclude the output instruction.
-inline int NumNonOutputUsers(const HloInstruction* inst,
-                             const HloInstruction* output) {
-  int ret = 0;
-  for (const auto x : inst->users()) {
-    if (x != output) {
-      ret++;
-    }
-  }
-  return ret;
-}
 
 // Depth analysis (breadth first search) that compute the depth of each
 // instruction. We also assign a much larger distance to heavey operators (e.g.,
@@ -364,6 +412,28 @@ inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
   }
 
   return ret;
+}
+
+/*
+ * I/O Utility
+ */
+
+/*! \brief An empty output stream */
+class NullStream : public std::ostream {
+ public:
+  NullStream() : std::ostream(nullptr) {}
+  NullStream(const NullStream&) : std::ostream(nullptr) {}
+  static NullStream& Global();
+};
+
+template <class T>
+NullStream& operator<<(NullStream& os, const T& value) {
+  return os;
+}
+
+/*! \brief Get std cout with verbose control */
+inline std::ostream& StdCerr(int verbose, int setting = 1) {
+  return verbose >= setting ? std::cerr : NullStream::Global();
 }
 
 }  // namespace spmd

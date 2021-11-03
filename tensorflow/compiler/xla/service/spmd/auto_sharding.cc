@@ -1332,26 +1332,45 @@ void SetHloSharding(const HloInstructionSequence& sequence,
       const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
       const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
 
-      // TODO(lmzheng): cover more cases.
-      if (stra.name == "SR = SS x SR @ {0,1} (allreduce @ 1)" &&
-          !IsFullyTiled(lhs_sharding) && !rhs_sharding.IsReplicated()) {
-        // Note:
-        // the condition !rhs_sharding->IsReplicated() is required for
-        // the cases where we allow recomputation of dot instructions.
-        // In these cases, we can generate fake "allreduce" which will
-        // be simplified by SPMD partitioner later. We do not want to
-        // do ForceOperandSharding which disables the simplification.
+      if (stra.name == "SR = SS x SR @ {0,1} (allreduce @ 1)") {
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1},
                  cluster_env));
-      } else if (stra.name == "SR = SS x SR @ {1,0} (allreduce @ 0)" &&
-                 !IsFullyTiled(lhs_sharding) && !rhs_sharding.IsReplicated()) {
+        ForceOperandSharding(
+            inst, 1,
+            Tile(lhs->shape(), {rhs_con_dims[0]}, {1},
+                 cluster_env));
+      } else if (stra.name == "SR = SS x SR @ {1,0} (allreduce @ 0)") {
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0},
                  cluster_env));
+        ForceOperandSharding(
+            inst, 1,
+            Tile(lhs->shape(), {rhs_con_dims[0]}, {0},
+                 cluster_env));
+      } else if (stra.name == "RS = RS x SS @ {0,1} (allreduce @ 0)") {
+        ForceOperandSharding(
+            inst, 0,
+            Tile(lhs->shape(), {lhs_con_dims[0]}, {0},
+                 cluster_env));
+        ForceOperandSharding(
+            inst, 1,
+            Tile(lhs->shape(), {rhs_con_dims[0], rhs_space_dims[0]}, {0, 1},
+                 cluster_env));
+      } else if (stra.name == "RS = RS x SS @ {1,0} (allreduce @ 1)") {
+        ForceOperandSharding(
+            inst, 0,
+            Tile(lhs->shape(), {lhs_con_dims[0]}, {1},
+                 cluster_env));
+        ForceOperandSharding(
+            inst, 1,
+            Tile(lhs->shape(), {rhs_con_dims[0], rhs_space_dims[0]}, {1, 0},
+                 cluster_env));
       }
+
+
     } else if (inst->opcode() == HloOpcode::kIota) {
       if (inst->sharding().IsReplicated()) {
         // For fully replicated iota, leave its sharding annotation to the

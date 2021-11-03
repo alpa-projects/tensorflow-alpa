@@ -270,6 +270,9 @@ inline std::string ToStringSimple(const HloSharding& spec) {
 inline void ForceOperandSharding(HloInstruction* inst, int operand_num,
                                  const HloSharding& sharding) {
   HloInstruction* operand = inst->mutable_operand(operand_num);
+  if (operand->sharding() == sharding) {
+    return;
+  }
   HloInstruction* replace_with = inst->parent()->AddInstruction(
       HloInstruction::CreateReshape(operand->shape(), operand));
   replace_with->set_sharding(sharding);

@@ -214,6 +214,7 @@ bool ImplementedAsLibraryCall(const HloInstruction& hlo) {
 const char* const kBuiltinSwapOutTarget = "__builtin$SwapOut";
 const char* const kBuiltinSwapInTarget = "__builtin$SwapIn";
 const char* const kBuiltinSwapDoneTarget = "__builtin$SwapDone";
+const char* const kBuiltinMemZeroTarget = "__builtin$MemZero";
 
 static ReductionDimensions GetReductionKindAndContiguousComponentsImpl(
     const Shape& input_shape, absl::Span<const int64_t> dims_to_reduce) {

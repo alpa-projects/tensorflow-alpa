@@ -390,8 +390,8 @@ class ClusterEnvironment {
     // A penalty factor to make the theoretical cost match the
     // empirical cost on v100 + nvlink.
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    double penalty_factor = num_devices / 2;
-    //double penalty_factor = 1.0;
+    //double penalty_factor = num_devices / 2;
+    double penalty_factor = 0.5;
     return (round(mesh_alpha[mesh_dim] +
                   mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
                       num_devices * num_bytes * penalty_factor) +

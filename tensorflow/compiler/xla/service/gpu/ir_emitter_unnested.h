@@ -183,6 +183,7 @@ class IrEmitterUnnested : public IrEmitter {
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   Status EmitSwapThunk(mlir::Operation* op);
   Status EmitSwapDoneThunk(mlir::Operation* op);
+  Status EmitMemZeroThunk(mlir::Operation* op);
   Status EmitCustomCallThunk(mlir::Operation* op);
   Status EmitFftThunk(mlir::Operation* op);
   Status EmitFusion(mlir::Operation* op);

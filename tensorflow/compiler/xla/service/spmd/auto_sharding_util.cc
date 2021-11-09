@@ -94,7 +94,8 @@ absl::optional<HloSharding> PropagateReduceWindowSharding(
 }
 
 // Pass through the custom call marker and get the source instruction
-const HloInstruction* PassThroughCustomCallMarkerGetSource(const HloInstruction* ins) {
+const HloInstruction* PassThroughCustomCallMarkerGetSource(
+    const HloInstruction* ins) {
   while (ins->opcode() == HloOpcode::kGetTupleElement &&
          IsCustomCallMarker(ins->operand(0))) {
     const HloInstruction* custom_call = ins->operand(0);
@@ -182,7 +183,8 @@ InstructionDepthMap BuildInstructionDepthMap(
             depth_map[node] = delta;
           } else if (node->opcode() == HloOpcode::kGetTupleElement &&
                      IsCustomCallMarker(node->operand(0))) {
-            depth_map[node] = depth_map.at(PassThroughCustomCallMarkerGetSource(node));
+            depth_map[node] =
+                depth_map.at(PassThroughCustomCallMarkerGetSource(node));
           } else {
             int64_t max_depth = depth_map.at(inst) + delta;
             for (const HloInstruction* operand : node->operands()) {
@@ -417,7 +419,8 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   // Print batch map
   // std::cerr << "Batch dim map" << std::endl;
   // for (auto iter : batch_map) {
-  //   std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << " "
+  //   std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << "
+  //   "
   //             << iter.second << std::endl;
   // }
 

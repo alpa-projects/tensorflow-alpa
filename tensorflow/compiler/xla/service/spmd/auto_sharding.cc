@@ -867,11 +867,9 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           const HloInstruction* operand = ins->operand(0);
           const StrategyVector* src_strategies = strategy_map.at(operand).get();
           CHECK(src_strategies->is_tuple);
-          // TODO (zhuohan): The memory cost of the marker should eventually be
-          // 0.
           strategies = FollowInsStrategyVector(
               src_strategies, ins->shape(), instruction_id,
-              /* have_memory_cost= */ true, leaf_strategies);
+              /* have_memory_cost= */ false, leaf_strategies);
         } else if (ins->IsCustomCall("identity")) {
           const HloInstruction* operand = ins->operand(0);
           const StrategyVector* src_strategies = strategy_map.at(operand).get();
@@ -1524,6 +1522,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   solver_option.load_solution_vector =
       pass_context::GetBool("auto_sharding::load_solution_vector", false);
+
+  // RemoveCustomCallMarker(module);
 
   // std::cerr << "===== Enter AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();

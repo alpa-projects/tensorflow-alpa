@@ -12,21 +12,6 @@ NullStream& NullStream::Global() {
   return stream;
 }
 
-// Return whether the instruction is always replicated.
-// (e.g., constant, broadcasted constant, scalar)
-bool IsAlwaysReplicated(const HloInstruction* inst) {
-  if (inst->opcode() == HloOpcode::kConstant) {
-    return true;
-  }
-  if (inst->shape().rank() == 0) {
-    return true;
-  }
-  if (inst->opcode() == HloOpcode::kBroadcast) {
-    return IsAlwaysReplicated(inst->operand(0));
-  }
-  return false;
-}
-
 // Propagate sharding for broadcast.
 // The output will be tiled along the broadcasted dimension the same way
 // as the input for the broadcast while the other dimensions are kept
@@ -108,6 +93,18 @@ absl::optional<HloSharding> PropagateReduceWindowSharding(
   return input_spec;
 }
 
+// Pass through the custom call marker and get the source instruction
+const HloInstruction* PassThroughCustomCallMarkerGetSource(
+    const HloInstruction* ins) {
+  while (ins->opcode() == HloOpcode::kGetTupleElement &&
+         IsCustomCallMarker(ins->operand(0))) {
+    const HloInstruction* custom_call = ins->operand(0);
+    const HloInstruction* tuple = custom_call->operand(0);
+    ins = tuple->operand(ins->tuple_index());
+  }
+  return ins;
+}
+
 // Depth analysis (breadth first search).
 // We also assign a much larger distance to heavey operators (e.g., dot,
 // convolution).
@@ -184,6 +181,10 @@ InstructionDepthMap BuildInstructionDepthMap(
 
           if (reset) {
             depth_map[node] = delta;
+          } else if (node->opcode() == HloOpcode::kGetTupleElement &&
+                     IsCustomCallMarker(node->operand(0))) {
+            depth_map[node] =
+                depth_map.at(PassThroughCustomCallMarkerGetSource(node));
           } else {
             int64_t max_depth = depth_map.at(inst) + delta;
             for (const HloInstruction* operand : node->operands()) {
@@ -416,12 +417,12 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   }
 
   // Print batch map
+  // std::cerr << "Batch dim map" << std::endl;
   // for (auto iter : batch_map) {
   //   std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << "
   //   "
   //             << iter.second << std::endl;
   // }
-  // exit(0);
 
   return batch_map;
 }
@@ -567,12 +568,99 @@ void SetSharding(HloInstruction* to_split, const HloSharding& output_spec,
   }
 }
 
+// Return whether the instruction is always replicated.
+// (e.g., constant, broadcasted constant, scalar)
+bool IsAlwaysReplicated(const HloInstruction* inst) {
+  if (inst->opcode() == HloOpcode::kConstant) {
+    return true;
+  }
+  if (inst->shape().rank() == 0) {
+    return true;
+  }
+  if (inst->opcode() == HloOpcode::kBroadcast) {
+    return IsAlwaysReplicated(inst->operand(0));
+  }
+  return false;
+}
+
+// Return whether this instruction is a convert on a parameter.
 bool IsParameterConvert(const HloInstruction* inst) {
   if (inst->opcode() == HloOpcode::kConvert &&
       inst->operand(0)->opcode() == HloOpcode::kParameter) {
     return true;
   }
   return false;
+}
+
+// Pass through the custom call marker and get the acutal operand.
+inline HloInstruction* PassThroughCustomCallMarkerOperand(
+    HloInstruction* raw_operand, const HloInstruction* inst) {
+  if (!IsCustomCallMarker(raw_operand)) {
+    return raw_operand;
+  }
+
+  CHECK_EQ(inst->opcode(), HloOpcode::kGetTupleElement);
+
+  int index = inst->tuple_index();
+  return raw_operand->mutable_operand(0)->mutable_operand(index);
+}
+
+// Return whether the tuple is only used by a custom call marker.
+inline bool IsCustomCallMarkerTuple(const HloInstruction* inst) {
+  return inst->opcode() == HloOpcode::kTuple && inst->users().size() == 1 &&
+         IsCustomCallMarker(inst->users().front());
+}
+
+// Pass through the custom call marker and get the acutal user
+inline HloInstruction* PassThroughCustomCallMarkerUser(
+    HloInstruction* raw_user, const HloInstruction* inst) {
+  if (!IsCustomCallMarkerTuple(raw_user)) {
+    return raw_user;
+  }
+
+  const HloInstruction* custom_call = raw_user->users().front();
+
+  int index = -1;
+  for (int i = 0; i < raw_user->operand_count(); i++) {
+    if (raw_user->operand(i) == inst) {
+      index = i;
+      break;
+    }
+  }
+  CHECK(index != -1);
+
+  HloInstruction* ret = nullptr;
+  for (HloInstruction* user : custom_call->users()) {
+    CHECK_EQ(user->opcode(), HloOpcode::kGetTupleElement);
+    if (user->tuple_index() == index) {
+      CHECK_EQ(ret, nullptr);
+      ret = user;
+    }
+  }
+
+  return ret == nullptr ? raw_user : ret;
+}
+
+// Return the users of an instruction and its alias,
+// excluding the final output tuple.
+inline absl::flat_hash_set<HloInstruction*> UsersWithAlias(
+    const HloInstruction* inst, const AliasMap& alias_map,
+    const HloInstruction* output) {
+  absl::flat_hash_set<HloInstruction*> users;
+
+  for (HloInstruction* user : inst->users()) {
+    users.insert(PassThroughCustomCallMarkerUser(user, inst));
+  }
+
+  auto iter = alias_map.find(inst);
+  if (iter != alias_map.end()) {
+    for (HloInstruction* user : iter->second->users()) {
+      users.insert(PassThroughCustomCallMarkerUser(user, iter->second));
+    }
+  }
+
+  users.erase(output);
+  return users;
 }
 
 // Substitute all-reduce strategies with their reduce-scatter variants.
@@ -804,6 +892,47 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         HloInstruction::CreateReshape(inst->shape(), inst));
     replace_with->set_sharding(GetShardingStrategy(inst).output_sharding);
     inst->ReplaceAllUsesWith(replace_with);
+  }
+}
+
+void RemoveCustomCallMarker(HloModule* module) {
+  HloComputation* entry_computation = module->entry_computation();
+
+  std::vector<HloInstruction*> get_tuple_ins;
+  std::vector<HloInstruction*> marker_ins;
+
+  for (HloInstruction* ins : entry_computation->instructions()) {
+    if (ins->opcode() == HloOpcode::kGetTupleElement &&
+        IsCustomCallMarker(ins->operand(0))) {
+      get_tuple_ins.push_back(ins);
+      marker_ins.push_back(ins->mutable_operand(0));
+    }
+  }
+
+  for (HloInstruction* raw_ins : get_tuple_ins) {
+    HloInstruction* ins = raw_ins;
+    while (ins->opcode() == HloOpcode::kGetTupleElement) {
+      HloInstruction* custom_call = ins->mutable_operand(0);
+      CHECK(IsCustomCallMarker(custom_call));
+      HloInstruction* tuple = custom_call->mutable_operand(0);
+      ins = tuple->mutable_operand(ins->tuple_index());
+    }
+
+    raw_ins->ReplaceAllUsesWith(ins);
+  }
+
+  for (HloInstruction* ins : get_tuple_ins) {
+    entry_computation->RemoveInstruction(ins);
+  }
+
+  absl::flat_hash_set<const HloInstruction*> removed;
+  for (HloInstruction* ins : marker_ins) {
+    if (!removed.count(ins)) {
+      HloInstruction* tmp = ins->mutable_operand(0);
+      entry_computation->RemoveInstruction(ins);
+      entry_computation->RemoveInstruction(tmp);
+      removed.insert(ins);
+    }
   }
 }
 

@@ -72,7 +72,7 @@ class DotHandler {
 
     HloSharding output_spec =
         Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
-             {mesh_dim0, mesh_dim1}, cluster_env);
+             {mesh_dim0, mesh_dim1}, device_mesh);
     strategies->leaf_vector.push_back(ShardingStrategy(
         {absl::StrFormat("SS = SR x RS @ {%d,%d}", mesh_dim0, mesh_dim1),
          output_spec,
@@ -82,11 +82,11 @@ class DotHandler {
          {
              ReshardingCostVector(strategy_map.at(lhs).get(), lhs->shape(),
                                   Tile(lhs->shape(), {lhs_space_dims[0]},
-                                       {mesh_dim0}, cluster_env),
+                                       {mesh_dim0}, device_mesh),
                                   cluster_env),
              ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
                                   Tile(rhs->shape(), {rhs_space_dims[0]},
-                                       {mesh_dim1}, cluster_env),
+                                       {mesh_dim1}, device_mesh),
                                   cluster_env),
          }}));
   }
@@ -109,7 +109,7 @@ class DotHandler {
         name = absl::StrFormat("SS = SS x SR @ {%d,%d} (reduce-scatter @ %d)",
                                mesh_dim0, mesh_dim1, mesh_dim1);
         output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
-                           {mesh_dim0, mesh_dim1}, cluster_env);
+                           {mesh_dim0, mesh_dim1}, device_mesh);
         memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
         communication_cost = cluster_env.ReduceScatterCost(
             memory_cost * device_mesh.dim(mesh_dim1), mesh_dim1);
@@ -117,7 +117,7 @@ class DotHandler {
         name = absl::StrFormat("SR = SS x SR @ {%d,%d} (allreduce @ %d)",
                                mesh_dim0, mesh_dim1, mesh_dim1);
         output_spec =
-            Tile(ins->shape(), {space_base_dim}, {mesh_dim0}, cluster_env);
+            Tile(ins->shape(), {space_base_dim}, {mesh_dim0}, device_mesh);
         memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
         communication_cost = cluster_env.AllReduceCost(memory_cost, mesh_dim1);
       }
@@ -132,11 +132,11 @@ class DotHandler {
                ReshardingCostVector(
                    strategy_map.at(lhs).get(), lhs->shape(),
                    Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]},
-                        {mesh_dim0, mesh_dim1}, cluster_env),
+                        {mesh_dim0, mesh_dim1}, device_mesh),
                    cluster_env),
                ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
                                     Tile(rhs->shape(), {rhs_con_dims[0]},
-                                         {mesh_dim1}, cluster_env),
+                                         {mesh_dim1}, device_mesh),
                                     cluster_env),
            }}));
     }
@@ -160,7 +160,7 @@ class DotHandler {
         name = absl::StrFormat("SS = RS x SS @ {%d,%d} (reduce-scatter @ %d)",
                                mesh_dim0, mesh_dim1, mesh_dim0);
         output_spec = Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
-                           {mesh_dim0, mesh_dim1}, cluster_env);
+                           {mesh_dim0, mesh_dim1}, device_mesh);
         memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
         communication_cost = cluster_env.ReduceScatterCost(
             memory_cost * device_mesh.dim(mesh_dim0), mesh_dim0);
@@ -168,7 +168,7 @@ class DotHandler {
         name = absl::StrFormat("RS = RS x SS @ {%d,%d} (allreduce @ %d)",
                                mesh_dim0, mesh_dim1, mesh_dim0),
         output_spec =
-            Tile(ins->shape(), {space_base_dim + 1}, {mesh_dim1}, cluster_env);
+            Tile(ins->shape(), {space_base_dim + 1}, {mesh_dim1}, device_mesh);
         memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
         communication_cost = cluster_env.AllReduceCost(memory_cost, mesh_dim0);
       }
@@ -182,12 +182,12 @@ class DotHandler {
            {
                ReshardingCostVector(strategy_map.at(lhs).get(), lhs->shape(),
                                     Tile(lhs->shape(), {lhs_con_dims[0]},
-                                         {mesh_dim0}, cluster_env),
+                                         {mesh_dim0}, device_mesh),
                                     cluster_env),
                ReshardingCostVector(
                    strategy_map.at(rhs).get(), rhs->shape(),
                    Tile(rhs->shape(), {rhs_con_dims[0], rhs_space_dims[0]},
-                        {mesh_dim0, mesh_dim1}, cluster_env),
+                        {mesh_dim0, mesh_dim1}, device_mesh),
                    cluster_env),
            }}));
     }
@@ -207,7 +207,7 @@ class DotHandler {
           continue;
         }
 
-        HloSharding output_spec = Tile(ins->shape(), {i}, {j}, cluster_env);
+        HloSharding output_spec = Tile(ins->shape(), {i}, {j}, device_mesh);
         strategies->leaf_vector.push_back(ShardingStrategy(
             {absl::StrFormat("Sb_%d = Sb x Sb @ {%d}", i, j),
              output_spec,
@@ -217,11 +217,11 @@ class DotHandler {
              {
                  ReshardingCostVector(
                      strategy_map.at(lhs).get(), lhs->shape(),
-                     Tile(lhs->shape(), {lhs_batch_dims[i]}, {j}, cluster_env),
+                     Tile(lhs->shape(), {lhs_batch_dims[i]}, {j}, device_mesh),
                      cluster_env),
                  ReshardingCostVector(
                      strategy_map.at(rhs).get(), rhs->shape(),
-                     Tile(rhs->shape(), {rhs_batch_dims[i]}, {j}, cluster_env),
+                     Tile(rhs->shape(), {rhs_batch_dims[i]}, {j}, device_mesh),
                      cluster_env),
              }}));
       }
@@ -232,7 +232,7 @@ class DotHandler {
         device_mesh.dim(1) > 1) {
       strategies->leaf_vector.clear();
 
-      HloSharding output_spec = Tile(ins->shape(), {0, 1}, {0, 1}, cluster_env);
+      HloSharding output_spec = Tile(ins->shape(), {0, 1}, {0, 1}, device_mesh);
       strategies->leaf_vector.push_back(ShardingStrategy(
           {"Sb = Sb x Sb @ {0,1}",
            output_spec,
@@ -243,12 +243,12 @@ class DotHandler {
                ReshardingCostVector(
                    strategy_map.at(lhs).get(), lhs->shape(),
                    Tile(lhs->shape(), {lhs_batch_dims[0], lhs_batch_dims[1]},
-                        {0, 1}, cluster_env),
+                        {0, 1}, device_mesh),
                    cluster_env),
                ReshardingCostVector(
                    strategy_map.at(rhs).get(), rhs->shape(),
                    Tile(rhs->shape(), {rhs_batch_dims[0], rhs_batch_dims[1]},
-                        {0, 1}, cluster_env),
+                        {0, 1}, device_mesh),
                    cluster_env),
            }}));
     }
@@ -271,11 +271,11 @@ class DotHandler {
            {
                ReshardingCostVector(strategy_map.at(lhs).get(), lhs->shape(),
                                     Tile(lhs->shape(), {lhs_con_dims[0]},
-                                         {mesh_dim0}, cluster_env),
+                                         {mesh_dim0}, device_mesh),
                                     cluster_env),
                ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
                                     Tile(rhs->shape(), {rhs_con_dims[0]},
-                                         {mesh_dim0}, cluster_env),
+                                         {mesh_dim0}, device_mesh),
                                     cluster_env),
            }}));
     }
@@ -383,7 +383,7 @@ class ConvHandler {
   void SplitLhsBatchRhsOutchannel(int mesh_dim0, int mesh_dim1) {
     HloSharding output_spec =
         Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
-             {mesh_dim0, mesh_dim1}, cluster_env);
+             {mesh_dim0, mesh_dim1}, device_mesh);
 
     strategies->leaf_vector.push_back(ShardingStrategy(
         {absl::StrFormat("SS = SR x RS @ {%d,%d}", mesh_dim0, mesh_dim1),
@@ -394,11 +394,11 @@ class ConvHandler {
          {
              ReshardingCostVector(
                  strategy_map.at(lhs).get(), lhs->shape(),
-                 Tile(lhs->shape(), {lhs_batch_dim}, {mesh_dim0}, cluster_env),
+                 Tile(lhs->shape(), {lhs_batch_dim}, {mesh_dim0}, device_mesh),
                  cluster_env),
              ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
                                   Tile(rhs->shape(), {rhs_out_channel_dim},
-                                       {mesh_dim1}, cluster_env),
+                                       {mesh_dim1}, device_mesh),
                                   cluster_env),
          }}));
   }
@@ -409,7 +409,7 @@ class ConvHandler {
           absl::StrFormat("SR = SS x SR @ {%d,%d} (allreduce @ %d)", mesh_dim0,
                           mesh_dim1, mesh_dim1);
       HloSharding output_spec =
-          Tile(ins->shape(), {out_batch_dim}, {mesh_dim0}, cluster_env);
+          Tile(ins->shape(), {out_batch_dim}, {mesh_dim0}, device_mesh);
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost =
           cluster_env.AllReduceCost(memory_cost, mesh_dim1);
@@ -424,11 +424,11 @@ class ConvHandler {
                ReshardingCostVector(
                    strategy_map.at(lhs).get(), lhs->shape(),
                    Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
-                        {mesh_dim0, mesh_dim1}, cluster_env),
+                        {mesh_dim0, mesh_dim1}, device_mesh),
                    cluster_env),
                ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
                                     Tile(rhs->shape(), {rhs_in_channel_dim},
-                                         {mesh_dim1}, cluster_env),
+                                         {mesh_dim1}, device_mesh),
                                     cluster_env),
            }}));
     }
@@ -440,7 +440,7 @@ class ConvHandler {
           absl::StrFormat("RS = RS x SS @ {%d,%d} (allreduce @ %d)", mesh_dim0,
                           mesh_dim1, mesh_dim0);
       HloSharding output_spec =
-          Tile(ins->shape(), {out_out_channel_dim}, {mesh_dim1}, cluster_env);
+          Tile(ins->shape(), {out_out_channel_dim}, {mesh_dim1}, device_mesh);
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost =
           cluster_env.AllReduceCost(memory_cost, mesh_dim0);
@@ -454,12 +454,12 @@ class ConvHandler {
            {
                ReshardingCostVector(strategy_map.at(lhs).get(), lhs->shape(),
                                     Tile(lhs->shape(), {lhs_in_channel_dim},
-                                         {mesh_dim0}, cluster_env),
+                                         {mesh_dim0}, device_mesh),
                                     cluster_env),
                ReshardingCostVector(
                    strategy_map.at(rhs).get(), rhs->shape(),
                    Tile(rhs->shape(), {rhs_in_channel_dim, rhs_out_channel_dim},
-                        {mesh_dim0, mesh_dim1}, cluster_env),
+                        {mesh_dim0, mesh_dim1}, device_mesh),
                    cluster_env),
            }}));
     }
@@ -468,7 +468,7 @@ class ConvHandler {
   void SplitDepthwise(int mesh_dim0, int mesh_dim1, bool forward) {
     HloSharding output_spec =
         Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
-             {mesh_dim0, mesh_dim1}, cluster_env);
+             {mesh_dim0, mesh_dim1}, device_mesh);
 
     strategies->leaf_vector.push_back(ShardingStrategy(
         {absl::StrFormat("SS = SS x RS @ {%d,%d}", mesh_dim0, mesh_dim1),
@@ -481,13 +481,13 @@ class ConvHandler {
                  strategy_map.at(lhs).get(), lhs->shape(),
                  forward
                      ? Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
-                            {mesh_dim0, mesh_dim1}, cluster_env)
+                            {mesh_dim0, mesh_dim1}, device_mesh)
                      : Tile(lhs->shape(), {lhs_batch_dim, lhs_in_channel_dim},
-                            {mesh_dim1, mesh_dim0}, cluster_env),
+                            {mesh_dim1, mesh_dim0}, device_mesh),
                  cluster_env),
              ReshardingCostVector(strategy_map.at(rhs).get(), rhs->shape(),
                                   Tile(rhs->shape(), {rhs_out_channel_dim},
-                                       {mesh_dim1}, cluster_env),
+                                       {mesh_dim1}, device_mesh),
                                   cluster_env),
          }}));
   }

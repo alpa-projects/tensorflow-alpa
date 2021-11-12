@@ -837,7 +837,7 @@ inline const ShardingStrategy& GetShardingStrategy_(
 // Their comments can be found in their definitions in *.cc files.
 HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
                  const std::vector<int64_t> mesh_dims,
-                 const ClusterEnvironment& cluster_env);
+                 const Array<int64_t>& device_mesh);
 
 std::vector<double> ReshardingCostVector(const StrategyVector* strategies,
                                          const Shape& shape,

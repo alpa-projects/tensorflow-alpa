@@ -431,6 +431,8 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 HloSharding GetReduceScatterOutput(const HloInstruction* ins,
                                    const ShardingStrategy& strategy,
                                    const ClusterEnvironment& cluster_env) {
+  const Array<int64_t>& device_mesh = cluster_env.device_mesh;
+
   if (ins->opcode() == HloOpcode::kDot) {
     const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
     int64_t space_base_dim = dot_dnums.lhs_batch_dimensions_size();
@@ -442,7 +444,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       } else {
         mesh_dim = 1;
       }
-      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, cluster_env);
+      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh);
     } else {
       int mesh_dim0, mesh_dim1;
       if (strategy.name.find("{0,1}") != std::string::npos) {
@@ -466,7 +468,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       }
 
       return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
-                  {mesh_dim0, mesh_dim1}, cluster_env);
+                  {mesh_dim0, mesh_dim1}, device_mesh);
     }
   }
   if (ins->opcode() == HloOpcode::kConvolution) {
@@ -496,7 +498,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     }
 
     return Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
-                {mesh_dim0, mesh_dim1}, cluster_env);
+                {mesh_dim0, mesh_dim1}, device_mesh);
   } else if (ins->opcode() == HloOpcode::kReduce) {
     // TODO(lmzheng): support more cases.
     CHECK_EQ(ins->shape().rank(), 1);
@@ -509,7 +511,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     }
 
     if (strategy.output_sharding.IsReplicated()) {
-      return Tile(ins->shape(), {0}, {mesh_dim}, cluster_env);
+      return Tile(ins->shape(), {0}, {mesh_dim}, device_mesh);
     } else {
       Array<int64_t> tile_assignment =
           strategy.output_sharding.tile_assignment();

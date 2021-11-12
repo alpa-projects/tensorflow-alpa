@@ -14,7 +14,7 @@ namespace spmd {
 // Create a HloSharding that tiles some tensor dims on some device mesh dims.
 HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
                  const std::vector<int64_t> mesh_dims,
-                 const ClusterEnvironment& cluster_env) {
+                 const Array<int64_t>& device_mesh) {
   CHECK_EQ(tensor_dims.size(), mesh_dims.size());
   CHECK(shape.IsArray());
 
@@ -24,29 +24,29 @@ HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
   int64_t split_prod = 1;
   for (size_t i = 0; i < tensor_dims.size(); ++i) {
     tile_assignment_dimensions[tensor_dims[i]] =
-        cluster_env.device_mesh.dim(mesh_dims[i]);
-    split_prod *= cluster_env.device_mesh.dim(mesh_dims[i]);
+        device_mesh.dim(mesh_dims[i]);
+    split_prod *= device_mesh.dim(mesh_dims[i]);
   }
 
   // Replicate on reminding mesh dimensions
   bool replicate_on_last_tile_dim = false;
-  if (split_prod < cluster_env.total_devices) {
-    tile_assignment_dimensions.push_back(cluster_env.total_devices /
+  if (split_prod < device_mesh.num_elements()) {
+    tile_assignment_dimensions.push_back(device_mesh.num_elements() /
                                          split_prod);
     replicate_on_last_tile_dim = true;
   }
 
   // Map device ids from device_mesh to tile_assignment_devices
   std::vector<int64_t> tile_assignment_devices;
-  tile_assignment_devices.reserve(cluster_env.total_devices);
+  tile_assignment_devices.reserve(device_mesh.num_elements());
 
-  std::vector<int64_t> tmp_indices(cluster_env.device_mesh.num_dimensions(), 0);
+  std::vector<int64_t> tmp_indices(device_mesh.num_dimensions(), 0);
   std::function<void(int64_t, std::vector<int64_t>)>
       generate_tile_assignment_devices;
   generate_tile_assignment_devices = [&](int64_t tensor_dim,
                                          std::vector<int64_t> mesh_indices) {
     if (tensor_dim == shape.rank() - 1) {
-      AppendFlattenElements(&tile_assignment_devices, cluster_env.device_mesh,
+      AppendFlattenElements(&tile_assignment_devices, device_mesh,
                             mesh_indices, -1, tmp_indices);
     } else {
       int64_t next_tensor_dim = tensor_dim + 1;
@@ -67,7 +67,7 @@ HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
     }
   };
 
-  std::vector<int64_t> mesh_indices(cluster_env.device_mesh.num_dimensions(),
+  std::vector<int64_t> mesh_indices(device_mesh.num_dimensions(),
                                     -1);
   generate_tile_assignment_devices(-1, mesh_indices);
 
@@ -173,10 +173,11 @@ std::unique_ptr<StrategyVector> FollowInsStrategyVector(
 
 // Enumerate all 1d partition strategies.
 void EnumerateAll1DPartition(const HloInstruction* ins,
-                             const Array<int64_t>& device_mesh,
                              const ClusterEnvironment& cluster_env,
                              const StrategyMap& strategy_map,
                              std::unique_ptr<StrategyVector>& strategies) {
+  const Array<int64_t>& device_mesh = cluster_env.device_mesh;
+
   // Split one dim
   for (int64_t i = 0; i < ins->shape().rank(); ++i) {
     for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
@@ -186,7 +187,7 @@ void EnumerateAll1DPartition(const HloInstruction* ins,
       }
 
       std::string name = absl::StrFormat("S%d @ %d", i, j);
-      HloSharding output_spec = Tile(ins->shape(), {i}, {j}, cluster_env);
+      HloSharding output_spec = Tile(ins->shape(), {i}, {j}, device_mesh);
       double compute_cost = 0, communication_cost = 0;
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
 
@@ -253,8 +254,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
 
         // Split 1 dim
-        EnumerateAll1DPartition(ins, device_mesh, cluster_env, strategy_map,
-                                strategies);
+        EnumerateAll1DPartition(ins, cluster_env, strategy_map, strategies);
 
         // Replicate
         strategies->leaf_vector.push_back(
@@ -328,7 +328,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
               std::string name = absl::StrFormat("S%d @ %d", i, j);
               HloSharding output_spec =
-                  Tile(ins->shape(), {i}, {j}, cluster_env);
+                  Tile(ins->shape(), {i}, {j}, device_mesh);
               double compute_cost = 0, communication_cost = 0;
               double memory_cost =
                   GetBytes(ins->shape()) / output_spec.NumTiles();
@@ -416,7 +416,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                 continue;
               }
               HloSharding output_spec =
-                  Tile(ins->shape(), {i}, {j}, cluster_env);
+                  Tile(ins->shape(), {i}, {j}, device_mesh);
 
               absl::optional<HloSharding> input_spec =
                   hlo_sharding_util::ReshapeSharding(
@@ -758,7 +758,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           }
 
           HloSharding output_spec =
-              Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims, cluster_env);
+              Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims, device_mesh);
           double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
           for (auto mesh_dim : all_reduce_dims) {
@@ -828,7 +828,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
             std::string name = absl::StrFormat("S{%d,%d} @ {0,1}", i, j);
             HloSharding output_spec =
-                Tile(ins->shape(), {i, j}, {0, 1}, cluster_env);
+                Tile(ins->shape(), {i, j}, {0, 1}, device_mesh);
             double compute_cost = 0, communication_cost = 0;
             double memory_cost =
                 GetBytes(ins->shape()) / output_spec.NumTiles();
@@ -1331,43 +1331,44 @@ void SetHloSharding(const HloInstructionSequence& sequence,
           GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
       const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
       const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
+      const Array<int64_t>& device_mesh = cluster_env.device_mesh;
 
       if (stra.name == "SR = SS x SR @ {0,1} (allreduce @ 1)") {
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {0, 1},
-                 cluster_env));
+                 device_mesh));
         ForceOperandSharding(
             inst, 1,
             Tile(lhs->shape(), {rhs_con_dims[0]}, {1},
-                 cluster_env));
+                 device_mesh));
       } else if (stra.name == "SR = SS x SR @ {1,0} (allreduce @ 0)") {
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]}, {1, 0},
-                 cluster_env));
+                 device_mesh));
         ForceOperandSharding(
             inst, 1,
             Tile(lhs->shape(), {rhs_con_dims[0]}, {0},
-                 cluster_env));
+                 device_mesh));
       } else if (stra.name == "RS = RS x SS @ {0,1} (allreduce @ 0)") {
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_con_dims[0]}, {0},
-                 cluster_env));
+                 device_mesh));
         ForceOperandSharding(
             inst, 1,
             Tile(lhs->shape(), {rhs_con_dims[0], rhs_space_dims[0]}, {0, 1},
-                 cluster_env));
+                 device_mesh));
       } else if (stra.name == "RS = RS x SS @ {1,0} (allreduce @ 1)") {
         ForceOperandSharding(
             inst, 0,
             Tile(lhs->shape(), {lhs_con_dims[0]}, {1},
-                 cluster_env));
+                 device_mesh));
         ForceOperandSharding(
             inst, 1,
             Tile(lhs->shape(), {rhs_con_dims[0], rhs_space_dims[0]}, {1, 0},
-                 cluster_env));
+                 device_mesh));
       }
 
 

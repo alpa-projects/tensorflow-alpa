@@ -270,6 +270,9 @@ inline std::string ToStringSimple(const HloSharding& spec) {
 inline void ForceOperandSharding(HloInstruction* inst, int operand_num,
                                  const HloSharding& sharding) {
   HloInstruction* operand = inst->mutable_operand(operand_num);
+  if (operand->sharding() == sharding) {
+    return;
+  }
   HloInstruction* replace_with = inst->parent()->AddInstruction(
       HloInstruction::CreateReshape(operand->shape(), operand));
   replace_with->set_sharding(sharding);
@@ -303,6 +306,15 @@ absl::optional<HloSharding> PropagateDimwiseSharding(
 absl::optional<HloSharding> PropagateReduceWindowSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Window& window);
+
+// Get the corresponding mesh dimension for every tensor dimension.
+// The first return value maps ith tensor dim to ith mesh dim.
+// A -1 means the tensor is replicated on that dimension.
+// The second value is the number of mesh dimensions.
+// -1 means the tensor is replicated on the whole the mesh
+// (i.e., we cannot decide the number of mesh dims in this function).
+std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
+    const Shape& shape, const HloSharding& spec);
 
 /*
  * Gradient accumulation

@@ -307,6 +307,15 @@ absl::optional<HloSharding> PropagateReduceWindowSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Window& window);
 
+// Get the corresponding mesh dimension for every tensor dimension.
+// The first return value maps ith tensor dim to ith mesh dim.
+// A -1 means the tensor is replicated on that dimension.
+// The second value is the number of mesh dimensions.
+// -1 means the tensor is replicated on the whole the mesh
+// (i.e., we cannot decide the number of mesh dims in this function).
+std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
+    const Shape& shape, const HloSharding& spec);
+
 /*
  * Gradient accumulation
  */

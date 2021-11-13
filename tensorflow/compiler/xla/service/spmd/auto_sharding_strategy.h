@@ -47,6 +47,9 @@ struct AutoShardingSolverOption {
   // to reduce communication.
   bool allow_recompute_heavy_op;
 
+  // If ture, allow strategies that mixes 2d mesh and 1d mesh shape.
+  bool allow_mixed_mesh_shape;
+
   // The number of micro batches if gradient accumulation is used.
   // If this is not 1, the cost of all-reduce for gradient synchronization
   // is divided by this number.
@@ -171,7 +174,7 @@ class ProfilingResult {
     // A penalty factor to make the theoretical cost match the
     // empirical cost on v100 + nvlink.
     int64_t num_devices = replica_groups.front().size();
-    double penalty_factor = num_devices / 2;
+    double penalty_factor = double(num_devices) / 4.0;
     return EstimateAllGatherCost(replica_groups, size / num_devices, dtype) *
            penalty_factor;
   }
@@ -323,6 +326,13 @@ class ClusterEnvironment {
       replica_groups.push_back(std::move(group));
     }
     cached_replica_groups.push_back(replica_groups);
+
+    if (device_mesh.dim(0) > 1) {
+      non_zero_mesh_dims.push_back(0);
+    }
+    if (device_mesh.dim(1) > 1) {
+      non_zero_mesh_dims.push_back(1);
+    }
   }
 
   double AllGatherCost(double num_bytes, int mesh_dim) const {
@@ -333,6 +343,12 @@ class ClusterEnvironment {
     if (prof_result.Enabled()) {
       return prof_result.EstimateAllGatherCost(cached_replica_groups[mesh_dim],
                                                num_bytes / 4, "float32");
+    }
+
+    if (solver_option.force_batch_dim_to_mesh_dim == mesh_dim) {
+      // if data-parallel is forced on this dim, we only allow all-reduce
+      // in this dimension.
+      return INFINITY_COST;
     }
 
     int64_t num_devices = device_mesh.dim(mesh_dim);
@@ -387,11 +403,16 @@ class ClusterEnvironment {
                                               num_bytes / 4, "float32");
     }
 
+    if (solver_option.force_batch_dim_to_mesh_dim == mesh_dim) {
+      // if data-parallel is forced on this dim, we only allow all-reduce
+      // in this dimension.
+      return INFINITY_COST;
+    }
+
     // A penalty factor to make the theoretical cost match the
     // empirical cost on v100 + nvlink.
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    //double penalty_factor = num_devices / 2;
-    double penalty_factor = 0.5;
+    double penalty_factor = double(num_devices) / 4.0;
     return (round(mesh_alpha[mesh_dim] +
                   mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
                       num_devices * num_bytes * penalty_factor) +
@@ -415,34 +436,10 @@ class ClusterEnvironment {
   // -1 means replicated on that dimension
   std::vector<int> GetTensorDimToMeshDim(const Shape& shape,
                                          const HloSharding& spec) const {
-    CHECK(shape.IsArray());
-    CHECK(!IsUndefined(spec));
-
-    if (spec.IsReplicated()) {
-      return std::vector<int>(shape.rank(), -1);
-    }
-
-    std::vector<int> tensor_dim_vals(shape.rank(), 0);
-    for (int64_t i = 0; i < shape.rank(); ++i) {
-      tensor_dim_vals[i] = GetDimLastValue(spec.tile_assignment(), i);
-    }
-
-    std::vector<int> mesh_dim_vals(device_mesh.num_dimensions(), 0);
-    for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
-      mesh_dim_vals[j] = GetDimLastValue(device_mesh, j);
-    }
-
-    std::vector<int> ret(shape.rank(), -1);
-    for (int64_t i = 0; i < shape.rank(); ++i) {
-      if (spec.tile_assignment().dim(i) != 1) {
-        for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
-          if (tensor_dim_vals[i] == mesh_dim_vals[j]) {
-            ret[i] = j;
-          }
-        }
-      }
-    }
-
+    std::vector<int> ret;
+    int n_dim;
+    std::tie(ret, n_dim) = GetTensorDimToMeshDimInternal(shape, spec);
+    AdjustTensorMeshDimMapping(ret, n_dim);
     return ret;
   }
 
@@ -455,10 +452,22 @@ class ClusterEnvironment {
     }
     CHECK(!IsUndefined(dst_spec));
 
-    std::vector<int> src_tensor_dim_to_mesh_dim =
-        GetTensorDimToMeshDim(shape, src_spec);
-    std::vector<int> dst_tensor_dim_to_mesh_dim =
-        GetTensorDimToMeshDim(shape, dst_spec);
+    int src_n_dim, dst_n_dim;
+    std::vector<int> src_tensor_dim_to_mesh_dim, dst_tensor_dim_to_mesh_dim;
+
+    std::tie(src_tensor_dim_to_mesh_dim, src_n_dim) =
+        GetTensorDimToMeshDimInternal(shape, src_spec);
+    std::tie(dst_tensor_dim_to_mesh_dim, dst_n_dim) =
+        GetTensorDimToMeshDimInternal(shape, dst_spec);
+
+    if (src_n_dim != dst_n_dim && src_n_dim != -1 && dst_n_dim != -1) {
+      return ReshardingCostMixedMeshShape(
+          shape, src_spec, dst_spec, src_tensor_dim_to_mesh_dim,
+          dst_tensor_dim_to_mesh_dim, src_n_dim, dst_n_dim);
+    }
+
+    AdjustTensorMeshDimMapping(src_tensor_dim_to_mesh_dim, src_n_dim);
+    AdjustTensorMeshDimMapping(dst_tensor_dim_to_mesh_dim, dst_n_dim);
 
     // Analyze the dims that need to dynamic-sliced or all-gather.
     std::vector<int> slice_dims;
@@ -511,6 +520,111 @@ class ClusterEnvironment {
     return cost;
   }
 
+  double ReshardingCostMixedMeshShape(
+      const Shape& shape, const HloSharding& src_spec,
+      const HloSharding& dst_spec, std::vector<int> src_tensor_dim_to_mesh_dim,
+      std::vector<int> dst_tensor_dim_to_mesh_dim, int src_n_dim,
+      int dst_n_dim) const {
+    // The type, volume, and mesh dim of the required communications
+    std::vector<int> comm_type;  // 0: slice,  1: all-to-all,  2: all-gather
+    std::vector<double> comm_bytes;
+    std::vector<double> comm_mesh_dim;
+
+    // Generate required communication primitives.
+    // lhs is the mesh with 2d shape and rhs is the mesh with 1d shape
+    bool compatible = true;
+    auto generate_comm =
+        [&](const std::vector<int>& lhs_tensor_dim_to_mesh_dim,
+            const std::vector<int>& rhs_tensor_dim_to_mesh_dim) {
+          double bytes = GetBytes(shape) / total_devices;
+
+          for (int i = 0; i < shape.rank(); ++i) {
+            int lhs_mesh_dim = lhs_tensor_dim_to_mesh_dim[i];
+            int rhs_mesh_dim = rhs_tensor_dim_to_mesh_dim[i];
+
+            if (lhs_mesh_dim == 1 && rhs_mesh_dim == -1) {
+              comm_type.push_back(1);  // all-to-all
+              comm_bytes.push_back(bytes);
+              comm_mesh_dim.push_back(1);
+            } else if (lhs_mesh_dim == -1) {
+              if (rhs_mesh_dim == -1) {
+                ;  // do nothing
+              } else {
+                comm_type.push_back(0);  // slice
+                comm_bytes.push_back(bytes);
+                comm_mesh_dim.push_back(0);
+              }
+            } else if (lhs_mesh_dim == rhs_mesh_dim) {
+              continue;
+            } else {
+              compatible = false;
+              break;
+            }
+          }
+
+          if (comm_type.empty()) {
+            comm_type.push_back(0);  // slice
+            comm_bytes.push_back(bytes);
+            comm_mesh_dim.push_back(1);
+          }
+        };
+
+    if (src_n_dim == 2) {
+      generate_comm(src_tensor_dim_to_mesh_dim, dst_tensor_dim_to_mesh_dim);
+    } else {
+      generate_comm(dst_tensor_dim_to_mesh_dim, src_tensor_dim_to_mesh_dim);
+
+      // Reverse communication pattern
+      for (int i = 0; i < comm_type.size(); ++i) {
+        if (comm_type[i] == 0) {  // if is slice, reverse it to all-gather
+          comm_type[i] = 2;
+        } else if (comm_type[i] ==
+                   2) {  // if is all-gather, reverse it to slice
+          comm_type[i] = 0;
+        }
+      }
+    }
+
+    std::cerr << src_spec.ToString() << " " << dst_spec.ToString() << std::endl;
+    std::cerr << ::xla::spmd::ToString<int>(src_tensor_dim_to_mesh_dim) << " "
+              << ::xla::spmd::ToString<int>(dst_tensor_dim_to_mesh_dim)
+              << std::endl;
+
+    double ret = 0;
+    if (compatible) {
+      // Sum up communication cost
+      int n_comm = 0;
+      for (int i = 0; i < comm_type.size(); ++i) {
+        if (comm_type[i] == 0) {  // slice
+          std::cerr << "slice" << std::endl;
+          ret += 0;
+        } else if (comm_type[i] == 1) {  // all-to-all
+          std::cerr << "all-to-all" << std::endl;
+          ret += AllToAllCost(comm_bytes[i], comm_mesh_dim[i]);
+          n_comm += 1;
+        } else if (comm_type[i] == 2) {  // all-gather
+          std::cerr << "all-gather" << std::endl;
+          ret += AllGatherCost(comm_bytes[i], comm_mesh_dim[i]);
+          n_comm += 1;
+        } else {
+          LOG(FATAL) << "Invalid communication type";
+        }
+      }
+
+      if (n_comm > 1) {
+        // Currently, SPMD partitioner do not support all-to-all + all-gather;
+        ret = INFINITY_COST;
+      }
+    } else {
+      ret = INFINITY_COST;
+    }
+
+    std::cerr << ret << std::endl;
+    std::cerr << std::endl;
+
+    return ret;
+  }
+
   // Print the information of this device mesh.
   std::string ToString() {
     std::ostringstream os;
@@ -534,6 +648,7 @@ class ClusterEnvironment {
   const std::vector<double> mesh_alpha;
   const std::vector<double> mesh_beta;
   const ProfilingResult& prof_result;
+  std::vector<int> non_zero_mesh_dims;
 
   // Disencourage the apperance of partial reduction
   const double partial_reduction_penalty = 10;
@@ -543,6 +658,18 @@ class ClusterEnvironment {
 
   // Cached replica groups. Shape: [mesh_dim, group_id, ids in this group].
   std::vector<std::vector<std::vector<int>>> cached_replica_groups;
+
+ private:
+  void AdjustTensorMeshDimMapping(std::vector<int>& mapping, int n_dim) const {
+    // Shift the non-zero dim for 1d mesh
+    if (n_dim == 1 && non_zero_mesh_dims.size() == 1) {
+      for (int i = 0; i < mapping.size(); ++i) {
+        if (mapping[i] == 0) {
+          mapping[i] = non_zero_mesh_dims.front();
+        }
+      }
+    }
+  }
 };
 
 // A graph data structure to simplify the edge cost graph.

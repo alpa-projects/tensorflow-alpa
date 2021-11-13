@@ -98,7 +98,8 @@ class DotHandler {
     //  return;  // The dimension length is to small to be parallelzied.
     //}
 
-    std::string name = absl::StrFormat("SS = SR x RS @ {%d,%d}");
+    std::string name =
+        absl::StrFormat("SS = SR x RS @ {%d,%d}", mesh_dim0, mesh_dim1);
     HloSharding output_spec =
         Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
              {mesh_dim0, mesh_dim1}, device_mesh);

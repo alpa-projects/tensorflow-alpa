@@ -178,7 +178,7 @@ class ProfilingResult {
     // A penalty factor to make the theoretical cost match the
     // empirical cost on v100 + nvlink.
     int64_t num_devices = replica_groups.front().size();
-    double penalty_factor = double(num_devices) / 4.0;
+    double penalty_factor = double(num_devices) / 2.0;
     return EstimateAllGatherCost(replica_groups, size / num_devices, dtype) *
            penalty_factor;
   }
@@ -301,11 +301,11 @@ class ClusterEnvironment {
                      const ProfilingResult& prof_result,
                      const AutoShardingSolverOption& solver_option)
       : device_mesh(device_mesh),
-        device_mesh_1d(device_mesh),
-        total_devices(device_mesh.num_elements()),
         mesh_alpha(mesh_alpha),
         mesh_beta(mesh_beta),
+        device_mesh_1d(device_mesh),
         prof_result(prof_result),
+        total_devices(device_mesh.num_elements()),
         solver_option(solver_option) {
     // Build replica group for each dimension.
     CHECK_EQ(device_mesh.num_dimensions(), 2);
@@ -419,7 +419,7 @@ class ClusterEnvironment {
     // A penalty factor to make the theoretical cost match the
     // empirical cost on v100 + nvlink.
     int64_t num_devices = device_mesh.dim(mesh_dim);
-    double penalty_factor = double(num_devices) / 4.0;
+    double penalty_factor = double(num_devices) / 2.0;
     return (round(mesh_alpha[mesh_dim] +
                   mesh_beta[mesh_dim] * (num_devices - 1) / num_devices /
                       num_devices * num_bytes * penalty_factor) +

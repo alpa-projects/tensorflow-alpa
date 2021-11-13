@@ -100,6 +100,9 @@ const HloInstruction* PassThroughCustomCallMarkerGetSource(
          IsCustomCallMarker(ins->operand(0))) {
     const HloInstruction* custom_call = ins->operand(0);
     const HloInstruction* tuple = custom_call->operand(0);
+    while (IsCustomCallMarker(tuple)) {
+      tuple = tuple->operand(0);
+    }
     ins = tuple->operand(ins->tuple_index());
   }
   return ins;

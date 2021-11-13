@@ -796,16 +796,17 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies->following = src_strategies;
 
         for (size_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
-          const auto& tensor_dim_to_mesh = cluster_env.GetTensorDimToMeshDim(
-              operand->shape(),
-              src_strategies->leaf_vector[sid].output_sharding);
+          const auto& tensor_dim_to_mesh_dim =
+              cluster_env.GetTensorDimToMeshDim(
+                  operand->shape(),
+                  src_strategies->leaf_vector[sid].output_sharding);
 
           std::vector<int64_t> tile_tensor_dims, tile_mesh_dims,
               all_reduce_dims;
 
           for (int64_t tensor_dim = 0; tensor_dim < operand->shape().rank();
                ++tensor_dim) {
-            int64_t mesh_dim = tensor_dim_to_mesh[tensor_dim];
+            int64_t mesh_dim = tensor_dim_to_mesh_dim[tensor_dim];
             if (absl::c_find(dimensions, tensor_dim) != dimensions.end()) {
               if (mesh_dim == -1) {  // Reduce on a replicated dim
                 continue;
@@ -1402,13 +1403,17 @@ void SetHloSharding(const HloInstructionSequence& sequence,
       const HloSharding& lhs_sharding = lhs->sharding();
       const HloSharding& rhs_sharding = rhs->sharding();
       const DotDimensionNumbers& dot_dnums = inst->dot_dimension_numbers();
-      std::vector<int64_t> lhs_space_dims, rhs_space_dims;
-      std::tie(lhs_space_dims, rhs_space_dims) =
-          GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
       const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
       const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
 
-      if (lhs_sharding.IsReplicated() || rhs_sharding.IsReplicated()) {
+      const auto& lhs_tensor_dim_to_mesh_dim =
+          cluster_env.GetTensorDimToMeshDim(lhs->shape(), lhs_sharding);
+      const auto& rhs_tensor_dim_to_mesh_dim =
+          cluster_env.GetTensorDimToMeshDim(rhs->shape(), rhs_sharding);
+
+      if (stra.name.find("allreduce") != std::string::npos &&
+          lhs_tensor_dim_to_mesh_dim[lhs_con_dims[0]] == -1 &&
+          rhs_tensor_dim_to_mesh_dim[rhs_con_dims[0]] == -1) {
         ;  // Allow duplicatd dot computation in this case to reduce
            // communication
       } else {

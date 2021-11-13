@@ -100,6 +100,9 @@ const HloInstruction* PassThroughCustomCallMarkerGetSource(
          IsCustomCallMarker(ins->operand(0))) {
     const HloInstruction* custom_call = ins->operand(0);
     const HloInstruction* tuple = custom_call->operand(0);
+    while (IsCustomCallMarker(tuple)) {
+      tuple = tuple->operand(0);
+    }
     ins = tuple->operand(ins->tuple_index());
   }
   return ins;
@@ -431,6 +434,8 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 HloSharding GetReduceScatterOutput(const HloInstruction* ins,
                                    const ShardingStrategy& strategy,
                                    const ClusterEnvironment& cluster_env) {
+  const Array<int64_t>& device_mesh = cluster_env.device_mesh;
+
   if (ins->opcode() == HloOpcode::kDot) {
     const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
     int64_t space_base_dim = dot_dnums.lhs_batch_dimensions_size();
@@ -442,7 +447,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       } else {
         mesh_dim = 1;
       }
-      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, cluster_env);
+      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh);
     } else {
       int mesh_dim0, mesh_dim1;
       if (strategy.name.find("{0,1}") != std::string::npos) {
@@ -466,7 +471,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       }
 
       return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
-                  {mesh_dim0, mesh_dim1}, cluster_env);
+                  {mesh_dim0, mesh_dim1}, device_mesh);
     }
   }
   if (ins->opcode() == HloOpcode::kConvolution) {
@@ -496,7 +501,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     }
 
     return Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
-                {mesh_dim0, mesh_dim1}, cluster_env);
+                {mesh_dim0, mesh_dim1}, device_mesh);
   } else if (ins->opcode() == HloOpcode::kReduce) {
     // TODO(lmzheng): support more cases.
     CHECK_EQ(ins->shape().rank(), 1);
@@ -509,7 +514,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     }
 
     if (strategy.output_sharding.IsReplicated()) {
-      return Tile(ins->shape(), {0}, {mesh_dim}, cluster_env);
+      return Tile(ins->shape(), {0}, {mesh_dim}, device_mesh);
     } else {
       Array<int64_t> tile_assignment =
           strategy.output_sharding.tile_assignment();
@@ -934,6 +939,103 @@ void RemoveCustomCallMarker(HloModule* module) {
       removed.insert(ins);
     }
   }
+}
+
+// Get the values in an array along a dimesion.
+// e.g., if dim == 1, this returns array[0,:,0,0] following the numpy syntax.
+std::vector<int64_t> GetValuesAlongOneDim(const Array<int64_t>& array,
+                                          int dim) {
+  std::vector<int64_t> ret;
+  std::vector<int64_t> indices(array.num_dimensions(), 0);
+
+  for (int i = 0; i < array.dim(dim); ++i) {
+    indices[dim] = i;
+    ret.push_back(array(indices));
+  }
+
+  return ret;
+}
+
+// Check whether a sequence is an arithmetic sequence.
+std::pair<int64_t, bool> CheckArithmeticSequence(
+    const std::vector<int64_t>& sequence) {
+  if (sequence.size() < 2) {
+    return std::make_pair(0, false);
+  }
+  int64_t delta = sequence[1] - sequence[0];
+  for (int i = 2; i < sequence.size(); ++i) {
+    if (sequence[i] - sequence[i - 1] != delta) {
+      return std::make_pair(delta, false);
+    }
+  }
+  return std::make_pair(delta, true);
+}
+
+std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
+    const Shape& shape, const HloSharding& spec) {
+  CHECK(shape.IsArray());
+  CHECK(!IsUndefined(spec));
+
+  if (spec.IsReplicated()) {
+    return std::make_pair(std::vector<int>(shape.rank(), -1), -1);
+  }
+
+  const Array<int64_t>& tile_assignment = spec.tile_assignment();
+
+  // Extract all tile dims
+  std::vector<int> tile_dims;
+  for (int i = 0; i < tile_assignment.num_dimensions(); i++) {
+    if (tile_assignment.dim(i) != 1) {
+      tile_dims.push_back(i);
+    }
+  }
+
+  // Sort the tile dims according to the device id delta along the tile
+  // dimension
+  bool success;
+  std::vector<int> tile_dims_delta;
+  for (int dim : tile_dims) {
+    std::vector<int64_t> device_ids =
+        GetValuesAlongOneDim(tile_assignment, dim);
+    int64_t delta;
+    std::tie(delta, success) = CheckArithmeticSequence(device_ids);
+
+    CHECK(success) << "Invalid device id assignment";
+    tile_dims_delta.push_back(delta);
+  }
+
+  std::vector<int> tile_dims_argsort(tile_dims.size(), 0);
+  std::iota(tile_dims_argsort.begin(), tile_dims_argsort.end(), 0);
+  std::sort(tile_dims_argsort.begin(), tile_dims_argsort.end(),
+            [&](int idx_a, int idx_b) {
+              return tile_dims_delta[idx_a] > tile_dims_delta[idx_b];
+            });
+  std::vector<int> tile_dims_rank(tile_dims.size());
+  for (int i = 0; i < tile_dims.size(); ++i) {
+    tile_dims_rank[tile_dims_argsort[i]] = i;
+  }
+
+  // Map tensor dims to mesh dims
+  std::vector<int> ret(shape.rank(), -1);
+  int ct = 0;
+  for (int i = 0; i < shape.rank(); ++i) {
+    if (tile_assignment.dim(i) == 1) {
+      ret[i] = -1;
+    } else {
+      ret[i] = tile_dims_rank[ct++];
+    }
+  }
+  if (spec.ReplicateOnLastTileDim()) {
+    ct++;
+  }
+  if (ct != tile_dims.size()) {
+    std::cerr << "shape:" << shape.ToString() << std::endl;
+    std::cerr << "spec:" << spec.ToString() << std::endl;
+    std::cerr << "tile_dims:" << ToString(tile_dims) << std::endl;
+  }
+  CHECK_EQ(ct, tile_dims.size());
+
+  return std::make_pair(ret, tile_dims.size());
 }
 
 }  // namespace spmd

@@ -45,8 +45,12 @@ void AppendNewStrategy(const HloInstruction* ins, const std::string& name,
   }
 
   strategies->leaf_vector.push_back(ShardingStrategy({
-      name, output_spec, compute_cost, communication_cost,
-      GetBytes(ins->shape()) / output_spec.NumTiles(), resharding_costs,
+      name,
+      output_spec,
+      compute_cost,
+      communication_cost,
+      GetBytes(ins->shape()) / output_spec.NumTiles(),
+      resharding_costs,
       input_specs,
   }));
 }

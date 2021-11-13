@@ -1025,6 +1025,11 @@ std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
   if (spec.ReplicateOnLastTileDim()) {
     ct++;
   }
+  if (ct != tile_dims.size()) {
+    std::cerr << "shape:" << shape.ToString() << std::endl;
+    std::cerr << "spec:" << spec.ToString() << std::endl;
+    std::cerr << "tile_dims:" << ToString(tile_dims) << std::endl;
+  }
   CHECK_EQ(ct, tile_dims.size());
 
   return std::make_pair(ret, tile_dims.size());

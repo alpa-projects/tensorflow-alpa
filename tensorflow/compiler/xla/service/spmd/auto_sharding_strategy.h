@@ -40,14 +40,14 @@ struct AutoShardingSolverOption {
   // If true, prefer reduce-scatter + all-gather over all-reduce
   bool prefer_reduce_scatter;
 
-  // If true, the batch matmul can only be parallelized on the batch dim.
+  // If true, the batch matmul will always be parallelized on the batch dim.
   bool batch_matmul_always_split_batch;
 
   // If ture, allow strategies that recompute heavy operators (e.g., dot)
   // to reduce communication.
   bool allow_recompute_heavy_op;
 
-  // If ture, allow strategies that mixes 2d mesh and 1d mesh shape.
+  // If ture, allow to add 1d strategies in 2d logical mesh.
   bool allow_mixed_mesh_shape;
 
   // The number of micro batches if gradient accumulation is used.
@@ -66,8 +66,12 @@ struct ShardingStrategy {
   double compute_cost;
   double communication_cost;
   double memory_cost;
-  // shape of resharding_costs: [#operands, #strategies of the operand]
+  // resharding_costs[i][j] is the resharding cost from the output of
+  // ith operand's jth strategy to this strategy.
   std::vector<std::vector<double>> resharding_costs;
+  // Optional: the required shardings of operands.
+  // This is used to guide the SPMD partitioner.
+  std::vector<HloSharding> input_shardings;
 };
 
 // The strategy for each instruction.
@@ -297,6 +301,7 @@ class ClusterEnvironment {
                      const ProfilingResult& prof_result,
                      const AutoShardingSolverOption& solver_option)
       : device_mesh(device_mesh),
+        device_mesh_1d(device_mesh),
         total_devices(device_mesh.num_elements()),
         mesh_alpha(mesh_alpha),
         mesh_beta(mesh_beta),
@@ -333,6 +338,8 @@ class ClusterEnvironment {
     if (device_mesh.dim(1) > 1) {
       non_zero_mesh_dims.push_back(1);
     }
+
+    device_mesh_1d.Reshape({device_mesh.num_elements(), 1});
   }
 
   double AllGatherCost(double num_bytes, int mesh_dim) const {
@@ -432,7 +439,7 @@ class ClusterEnvironment {
     return AllReduceCost(num_bytes, 0) + AllReduceCost(num_bytes, 1);
   }
 
-  // Get the corresponding mesh dimension for every tensor dimension
+  // Get the corresponding mesh dimension for every tensor dimension.
   // -1 means replicated on that dimension
   std::vector<int> GetTensorDimToMeshDim(const Shape& shape,
                                          const HloSharding& spec) const {
@@ -585,10 +592,11 @@ class ClusterEnvironment {
       }
     }
 
-    std::cerr << src_spec.ToString() << " " << dst_spec.ToString() << std::endl;
-    std::cerr << ::xla::spmd::ToString<int>(src_tensor_dim_to_mesh_dim) << " "
-              << ::xla::spmd::ToString<int>(dst_tensor_dim_to_mesh_dim)
-              << std::endl;
+    // std::cerr << src_spec.ToString() << " " << dst_spec.ToString() <<
+    // std::endl; std::cerr <<
+    // ::xla::spmd::ToString<int>(src_tensor_dim_to_mesh_dim) << " "
+    //          << ::xla::spmd::ToString<int>(dst_tensor_dim_to_mesh_dim)
+    //          << std::endl;
 
     double ret = 0;
     if (compatible) {
@@ -596,14 +604,11 @@ class ClusterEnvironment {
       int n_comm = 0;
       for (int i = 0; i < comm_type.size(); ++i) {
         if (comm_type[i] == 0) {  // slice
-          std::cerr << "slice" << std::endl;
           ret += 0;
         } else if (comm_type[i] == 1) {  // all-to-all
-          std::cerr << "all-to-all" << std::endl;
           ret += AllToAllCost(comm_bytes[i], comm_mesh_dim[i]);
           n_comm += 1;
         } else if (comm_type[i] == 2) {  // all-gather
-          std::cerr << "all-gather" << std::endl;
           ret += AllGatherCost(comm_bytes[i], comm_mesh_dim[i]);
           n_comm += 1;
         } else {
@@ -618,9 +623,6 @@ class ClusterEnvironment {
     } else {
       ret = INFINITY_COST;
     }
-
-    std::cerr << ret << std::endl;
-    std::cerr << std::endl;
 
     return ret;
   }
@@ -650,8 +652,9 @@ class ClusterEnvironment {
   const ProfilingResult& prof_result;
   std::vector<int> non_zero_mesh_dims;
 
-  // Disencourage the apperance of partial reduction
-  const double partial_reduction_penalty = 10;
+  // Cache a flatten 1d version of the device mesh.
+  // Used for mixed mesh shape strategies.
+  Array<int64_t> device_mesh_1d;
 
   // The solver option may override the cost of communication primitives
   const AutoShardingSolverOption& solver_option;

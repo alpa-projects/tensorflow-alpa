@@ -7,6 +7,8 @@
 namespace xla {
 namespace spmd {
 
+const HloInstruction* PassThroughCustomCallMarkerGetSource(const HloInstruction* ins);
+
 NullStream& NullStream::Global() {
   static NullStream stream;
   return stream;
@@ -232,8 +234,16 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
         if (batch_map.count(operand)) {
           int value = batch_map[operand];
-          if (value == 0 && !absl::c_linear_search(dimensions, value)) {
-            batch_map[ins] = value;
+          int old_dim = -1;
+          for (int i = 0; i < ins->shape().rank(); ++i) {
+            if (absl::c_linear_search(dimensions, i)) {
+              old_dim++;
+            }
+
+            if (old_dim == value) {
+              batch_map[ins] = i;
+              break;
+            }
           }
         }
         break;
@@ -243,7 +253,15 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
         if (batch_map.count(operand)) {
           int value = batch_map[operand];
-          if (value == 0) {
+          bool match = true;
+          for (int i = 0; i < value; ++i) {
+            if (operand->shape().dimensions(i) != ins->shape().dimensions(i)) {
+              match = false;
+              break;
+            }
+          }
+
+          if (match) {
             batch_map[ins] = value;
           }
         }
@@ -255,9 +273,8 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
         if (batch_map.count(operand)) {
           int value = batch_map[operand];
-          if (value == 0 && dimensions[0] == 0) {
-            batch_map[ins] = value;
-          }
+          auto it = absl::c_find(dimensions, value);
+          batch_map[ins] = it - dimensions.begin();
         }
         break;
       }
@@ -410,7 +427,13 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         }
         break;
       }
-      case HloOpcode::kGetTupleElement:
+      case HloOpcode::kGetTupleElement: {
+        const HloInstruction* source = PassThroughCustomCallMarkerGetSource(ins);
+        if (batch_map.count(source)) {
+          batch_map[ins] = batch_map[source];
+        }
+        break;
+      }
       case HloOpcode::kTuple:
       case HloOpcode::kCustomCall:
         break;
@@ -420,12 +443,15 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   }
 
   // Print batch map
-  // std::cerr << "Batch dim map" << std::endl;
-  // for (auto iter : batch_map) {
-  //   std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << "
-  //   "
-  //             << iter.second << std::endl;
-  // }
+  std::cerr << "Batch dim map" << std::endl;
+  for (const HloInstruction* ins : instructions) {
+    std::cerr << ins->ToString(HloPrintOptions::ShortParsable());
+    if (batch_map.count(ins)) {
+      std::cerr << " BATCH " << batch_map[ins] << std::endl;
+    } else {
+      std::cerr << " NOBATCH " << std::endl;
+    }
+  }
 
   return batch_map;
 }
@@ -1036,6 +1062,90 @@ std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
   CHECK_EQ(ct, tile_dims.size());
 
   return std::make_pair(ret, tile_dims.size());
+}
+
+void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
+                                 const HloSharding& dst_sharding,
+                                 const Array<int64_t>& device_mesh,
+                                 ReshardingCache& resharding_cache) {
+  HloInstruction* operand = inst->mutable_operand(operand_num);
+  if (operand->sharding() == dst_sharding) {
+    return;
+  }
+
+  const HloSharding& src_sharding = operand->sharding();
+  const Shape& shape = operand->shape();
+
+  std::vector<int> src_tensor_dim_to_mesh_dim, dst_tensor_dim_to_mesh_dim;
+  int src_n_dim, dst_n_dim;
+
+  std::tie(src_tensor_dim_to_mesh_dim, src_n_dim) =
+      GetTensorDimToMeshDimInternal(shape, src_sharding);
+  std::tie(dst_tensor_dim_to_mesh_dim, dst_n_dim) =
+      GetTensorDimToMeshDimInternal(shape, dst_sharding);
+
+  HloInstruction* replace_with = nullptr;
+
+  // Query cache first
+  auto& cache = resharding_cache[operand];
+  for (auto& entry : cache) {
+    if (entry.first == dst_sharding) {
+      replace_with = entry.second;
+    }
+  }
+
+  if (replace_with != nullptr) {
+    ;
+  } else if (src_n_dim != dst_n_dim && src_n_dim != -1 && dst_n_dim != -1) {
+    const HloSharding* sharding_1d;
+
+    if (src_n_dim == 1) {
+      sharding_1d = &src_sharding;
+    } else {
+      sharding_1d = &dst_sharding;
+    }
+
+    // Find an intermidiate shape
+    std::vector<int64_t> inter_shape_dims;
+
+    for (size_t i = 0; i < shape.rank(); ++i) {
+      if (sharding_1d->tile_assignment().dim(i) == 1) {
+        inter_shape_dims.push_back(shape.dimensions(i));
+      } else {
+        CHECK(shape.dimensions(i) % device_mesh.dim(0) == 0) << "Only support even partition";
+        inter_shape_dims.push_back(device_mesh.dim(0));
+        inter_shape_dims.push_back(shape.dimensions(i) / device_mesh.dim(0));
+      }
+    }
+    Shape inter_shape = ShapeUtil::MakeShape(shape.element_type(), inter_shape_dims);
+
+    absl::optional<HloSharding> src_inter_sharding =
+        hlo_sharding_util::ReshapeSharding(shape, inter_shape, src_sharding);
+    CHECK(src_inter_sharding.has_value());
+    absl::optional<HloSharding> dst_inter_sharding =
+        hlo_sharding_util::ReshapeSharding(shape, inter_shape, dst_sharding);
+    CHECK(dst_inter_sharding.has_value());
+
+    HloInstruction* src_inter = inst->parent()->AddInstruction(
+      HloInstruction::CreateReshape(inter_shape, operand));
+    src_inter->set_sharding(*src_inter_sharding);
+
+    HloInstruction* dst_inter = inst->parent()->AddInstruction(
+      HloInstruction::CreateReshape(inter_shape, src_inter));
+    dst_inter->set_sharding(*dst_inter_sharding);
+
+    replace_with = inst->parent()->AddInstruction(
+      HloInstruction::CreateReshape(shape, dst_inter));
+    replace_with->set_sharding(dst_sharding);
+    cache.push_back({dst_sharding, replace_with});
+  } else {
+    replace_with = inst->parent()->AddInstruction(
+      HloInstruction::CreateReshape(operand->shape(), operand));
+    replace_with->set_sharding(dst_sharding);
+    cache.push_back({dst_sharding, replace_with});
+  }
+
+  inst->ReplaceOperandWith(operand_num, replace_with);
 }
 
 }  // namespace spmd

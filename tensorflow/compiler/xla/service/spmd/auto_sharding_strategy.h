@@ -303,9 +303,9 @@ class ClusterEnvironment {
       : device_mesh(device_mesh),
         mesh_alpha(mesh_alpha),
         mesh_beta(mesh_beta),
-        device_mesh_1d(device_mesh),
         prof_result(prof_result),
         total_devices(device_mesh.num_elements()),
+        device_mesh_1d(device_mesh),
         solver_option(solver_option) {
     // Build replica group for each dimension.
     CHECK_EQ(device_mesh.num_dimensions(), 2);
@@ -646,11 +646,11 @@ class ClusterEnvironment {
 
   // Shape and bandwidth of the device mesh
   const Array<int64_t> device_mesh;
-  const int total_devices;
   const std::vector<double> mesh_alpha;
   const std::vector<double> mesh_beta;
   const ProfilingResult& prof_result;
   std::vector<int> non_zero_mesh_dims;
+  const int total_devices;
 
   // Cache a flatten 1d version of the device mesh.
   // Used for mixed mesh shape strategies.

@@ -251,7 +251,8 @@ class DotHandler {
     if (lhs_batch_dims.size() > 0 && device_mesh.dim(mesh_dim0) > 1 &&
         device_mesh.dim(mesh_dim1) > 1) {
       std::string name =
-          absl::StrFormat("SbR = SbSk x SbSk @ {%d,%d} (allreduce @ %d}", mesh_dim0, mesh_dim1, mesh_dim1);
+          absl::StrFormat("SbR = SbSk x SbSk @ {%d,%d} (allreduce @ %d}",
+                          mesh_dim0, mesh_dim1, mesh_dim1);
       HloSharding output_spec =
           Tile(ins->shape(), {0}, {mesh_dim0}, device_mesh);
       HloSharding lhs_spec =
@@ -264,8 +265,9 @@ class DotHandler {
       double communication_cost =
           cluster_env.AllReduceCost(memory_cost, mesh_dim1);
 
-      AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0, communication_cost,
-                        cluster_env, strategy_map, strategies);
+      AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
+                        communication_cost, cluster_env, strategy_map,
+                        strategies);
     }
   }
 
@@ -324,8 +326,10 @@ class DotHandler {
     if (device_mesh.dim(0) > 1 && device_mesh.dim(1) > 1) {
       int mesh_dim = 0;
       for (int64_t i = 0; i < lhs_batch_dims.size(); ++i) {
-        std::string name = absl::StrFormat("Sb_%d = Sb x Sb @ {%d} 1d", i, mesh_dim);
-        HloSharding output_spec = Tile(ins->shape(), {i}, {mesh_dim}, device_mesh_1d);
+        std::string name =
+            absl::StrFormat("Sb_%d = Sb x Sb @ {%d} 1d", i, mesh_dim);
+        HloSharding output_spec =
+            Tile(ins->shape(), {i}, {mesh_dim}, device_mesh_1d);
         HloSharding lhs_spec =
             Tile(lhs->shape(), {lhs_batch_dims[i]}, {mesh_dim}, device_mesh_1d);
         HloSharding rhs_spec =

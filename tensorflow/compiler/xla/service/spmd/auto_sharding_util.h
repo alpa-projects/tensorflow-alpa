@@ -22,8 +22,9 @@ using InstructionBatchDimMap = absl::flat_hash_map<const HloInstruction*, int>;
 // Map an instruction to its alias source parameter.
 using AliasMap = absl::flat_hash_map<const HloInstruction*, HloInstruction*>;
 // Map an instruction to its resharding cache.
-using ReshardingCache = absl::flat_hash_map<const HloInstruction*,
-    std::vector<std::pair<HloSharding, HloInstruction*>>>;
+using ReshardingCache =
+    absl::flat_hash_map<const HloInstruction*,
+                        std::vector<std::pair<HloSharding, HloInstruction*>>>;
 
 /*
  * Array/Vector/Matrix Utility

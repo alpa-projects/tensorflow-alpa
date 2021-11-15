@@ -105,6 +105,24 @@ class MultiDeviceAdapter : public DeviceMemoryAllocator {
     return per_device_allocators_[device_ordinal].GetStream(device_ordinal);
   }
 
+  int64_t bytes_available() const override {
+    int64_t min_available = -1;
+    for (auto& allocator : tf_allocators_) {
+      absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
+      if (!stat.has_value()) {
+        continue;
+      }
+      if (!stat->bytes_limit.has_value()) {
+        continue;
+      }
+      int64_t available_size = stat->bytes_limit.value() - stat->bytes_in_use;
+      if (min_available == -1 || available_size < min_available) {
+        min_available = available_size;
+      }
+    }
+    return min_available;
+  }
+
  private:
   std::vector<TfAllocatorAdapter> per_device_allocators_;
   // The wrapped TF allocators backing per_device_allocators_

@@ -132,19 +132,17 @@ PYBIND11_MODULE(xla_extension, m) {
           "client",
           [](const ClientAndPtr<PjRtDevice>& device) { return device.client; })
       .def_property_readonly(
-          "device_memory_usage",
+          "client_memory_usage",
           [](const PjRtDevice& device) {
-            const PjRtStreamExecutorDevice* stream_device =
-                dynamic_cast<const PjRtStreamExecutorDevice*>(&device);
-            CHECK_NE(stream_device, nullptr);
-            LocalDeviceState* local_device =
-                stream_device->GetLocalDeviceState().ValueOrDie();
-            int64_t free, total;
-            if (local_device->executor()->DeviceMemoryUsage(&free, &total)) {
-              return std::make_pair(free, total);
-            };
             const int64_t invalid = -1;
-            return std::make_pair(invalid, invalid);
+
+            xla::PjRtClient* client = device.client();
+            if (client->platform_name() != "gpu") {
+              return invalid;
+            }
+            xla::PjRtStreamExecutorClient *gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient *>(client);
+            return gpu_client->allocator()->bytes_available();
           })
       .def("__str__", &PjRtDevice::DebugString)
       .def("synchronize_all_activity", [](PjRtDevice& device) {

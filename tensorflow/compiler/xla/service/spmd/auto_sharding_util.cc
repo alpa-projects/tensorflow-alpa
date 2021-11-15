@@ -458,6 +458,14 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   return batch_map;
 }
 
+inline std::pair<int, int> ParseMeshDims(const std::string& strategy_name) {
+  if (strategy_name.find("{0,1}") != std::string::npos) {
+    return {0, 1};
+  } else {
+    return {1, 0};
+  }
+}
+
 // Return the output sharding of the reduce-scatter variant of a given strategy.
 HloSharding GetReduceScatterOutput(const HloInstruction* ins,
                                    const ShardingStrategy& strategy,
@@ -468,23 +476,10 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
     int64_t space_base_dim = dot_dnums.lhs_batch_dimensions_size();
 
-    if (StrStartsWith(strategy.name, "RR = RS x SR")) {
-      int mesh_dim;
-      if (strategy.name.find("{0}") != std::string::npos) {
-        mesh_dim = 0;
-      } else {
-        mesh_dim = 1;
-      }
-      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh);
-    } else {
+    if (StrStartsWith(strategy.name, "SR = SS x SR") ||
+        StrStartsWith(strategy.name, "RS = RS x SS")) {
       int mesh_dim0, mesh_dim1;
-      if (strategy.name.find("{0,1}") != std::string::npos) {
-        mesh_dim0 = 0;
-        mesh_dim1 = 1;
-      } else {
-        mesh_dim0 = 1;
-        mesh_dim1 = 0;
-      }
+      std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
 
       if (ins->shape().dimensions(space_base_dim) %
                   cluster_env.device_mesh.dim(mesh_dim0) !=
@@ -500,22 +495,48 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
 
       return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
                   {mesh_dim0, mesh_dim1}, device_mesh);
+    } else if (StrStartsWith(strategy.name, "SbR = SbSk x SbSk")) {
+      int mesh_dim0, mesh_dim1;
+      std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
+
+      if (ins->shape().dimensions(0) % cluster_env.device_mesh.dim(mesh_dim0) !=
+              0 ||
+          ins->shape().dimensions(space_base_dim) %
+                  cluster_env.device_mesh.dim(mesh_dim1) !=
+              0) {
+        return Undefined();
+      }
+
+      return Tile(ins->shape(), {0, space_base_dim}, {mesh_dim0, mesh_dim1},
+                  device_mesh);
+    } else if (StrStartsWith(strategy.name, "RR = RS x SR")) {
+      int mesh_dim = strategy.name.find("{0}") != std::string::npos ? 0 : 1;
+
+      if (ins->shape().dimensions(space_base_dim) %
+              cluster_env.device_mesh.dim(mesh_dim) !=
+          0) {
+        return Undefined();
+      }
+
+      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh);
+    } else if (StrStartsWith(strategy.name, "R = Sk x Sk")) {
+      int mesh_dim = 0;
+      if (ins->shape().dimensions(space_base_dim) %
+              cluster_env.device_mesh.dim(mesh_dim) !=
+          0) {
+        return Undefined();
+      }
+      return Tile(ins->shape(), {space_base_dim}, {0},
+                  cluster_env.device_mesh_1d);
     }
-  }
-  if (ins->opcode() == HloOpcode::kConvolution) {
+  } else if (ins->opcode() == HloOpcode::kConvolution) {
     const ConvolutionDimensionNumbers& conv_dnums =
         ins->convolution_dimension_numbers();
     int out_batch_dim = conv_dnums.output_batch_dimension();
     int out_out_channel_dim = conv_dnums.output_feature_dimension();
 
     int mesh_dim0, mesh_dim1;
-    if (strategy.name.find("{0,1}") != std::string::npos) {
-      mesh_dim0 = 0;
-      mesh_dim1 = 1;
-    } else {
-      mesh_dim0 = 1;
-      mesh_dim1 = 0;
-    }
+    std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
 
     if (ins->shape().dimensions(out_batch_dim) %
                 cluster_env.device_mesh.dim(mesh_dim0) !=
@@ -542,7 +563,11 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     }
 
     if (strategy.output_sharding.IsReplicated()) {
-      return Tile(ins->shape(), {0}, {mesh_dim}, device_mesh);
+      if (strategy.name.find("1d") != std::string::npos) {
+        return Tile(ins->shape(), {0}, {mesh_dim}, cluster_env.device_mesh_1d);
+      } else {
+        return Tile(ins->shape(), {0}, {mesh_dim}, device_mesh);
+      }
     } else {
       Array<int64_t> tile_assignment =
           strategy.output_sharding.tile_assignment();
@@ -566,8 +591,10 @@ bool HasReduceScatterOpportunity(const HloInstruction* inst,
     if (GetShardingStrategy(inst->operand(0)).output_sharding.IsReplicated() &&
         GetShardingStrategy(inst->operand(1)).output_sharding.IsReplicated()) {
       // This dot is replicated on all devices. Do not split it.
+      // TODO(lmzheng): improve this condition.
       return false;
     }
+
     return true;
   }
   if (inst->opcode() == HloOpcode::kConvolution) {
@@ -747,8 +774,11 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             UsersWithAlias(cur, alias_map, output);
         for (HloInstruction* consumer : users) {
           const HloInstruction* shape_inst = cur;
+
+          // Allow at most one transpose
           if (consumer->opcode() == HloOpcode::kTranspose &&
-              transpose_inst == nullptr) {
+              (transpose_inst == nullptr ||
+               DimensionsEqual(transpose_inst->shape(), consumer->shape()))) {
             shape_inst = consumer;
             transpose_inst = consumer;
             // TODO(lmzheng): fix output_sharding comparison.

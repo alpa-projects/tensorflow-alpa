@@ -40,7 +40,8 @@ struct AutoShardingSolverOption {
   // If true, prefer reduce-scatter + all-gather over all-reduce
   bool prefer_reduce_scatter;
 
-  // If true, the batch matmul will always be parallelized on the batch dim.
+  // If true, the batch matmul will always be parallelized on the batch dim in
+  // 2d mesh case.
   bool batch_matmul_always_split_batch;
 
   // If ture, allow strategies that recompute heavy operators (e.g., dot)

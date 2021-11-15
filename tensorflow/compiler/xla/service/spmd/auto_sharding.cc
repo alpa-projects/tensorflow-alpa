@@ -921,6 +921,10 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           }
 
           HloSharding output_spec = Undefined();
+          std::string name = ToStringSimple(output_spec);
+          if (!all_reduce_dims.empty()) {
+            name += " (allreduce @ " + ToString(all_reduce_dims) + ")";
+          }
 
           if (solver_option.allow_mixed_mesh_shape &&
               cluster_env.non_zero_mesh_dims.size() > 1) {
@@ -934,6 +938,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             if (n_dim == 1) {
               output_spec = Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims,
                                  device_mesh_1d);
+              name += " 1d";
             } else {
               output_spec = Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims,
                                  device_mesh);
@@ -949,10 +954,6 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                 cluster_env.AllReduceCost(memory_cost, mesh_dim);
           }
 
-          std::string name = ToStringSimple(output_spec);
-          if (!all_reduce_dims.empty()) {
-            name += " (allreduce @ " + ToString(all_reduce_dims) + ")";
-          }
           strategies->leaf_vector.push_back(ShardingStrategy(
               {name,
                output_spec,

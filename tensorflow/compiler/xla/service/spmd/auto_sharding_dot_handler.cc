@@ -24,7 +24,8 @@ void FilterStrategy(const HloInstruction* ins,
       new_leaf_vector.push_back(std::move(stra));
     }
   }
-  CHECK(!new_leaf_vector.empty());
+  CHECK(!new_leaf_vector.empty())
+      << ins->ToString() << " does not have any valid strategies";
   strategies->leaf_vector = std::move(new_leaf_vector);
 }
 
@@ -369,9 +370,10 @@ class DotHandler {
     }
 
     if (solver_option.batch_matmul_always_split_batch &&
-        lhs_batch_dims.size() > 0) {
-      // If there is a batch dim, always split on batch dim.
-      // Clear all old strategies.
+        lhs_batch_dims.size() > 0 &&
+        cluster_env.non_zero_mesh_dims.size() > 1) {
+      // If there is a batch dim and the device mesh is 2d, always split on
+      // batch dim. Clear all old strategies.
       strategies->leaf_vector.clear();
     }
 

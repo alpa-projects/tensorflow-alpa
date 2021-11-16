@@ -21,6 +21,10 @@ using InstructionDepthMap = absl::flat_hash_map<const HloInstruction*, int64_t>;
 using InstructionBatchDimMap = absl::flat_hash_map<const HloInstruction*, int>;
 // Map an instruction to its alias source parameter.
 using AliasMap = absl::flat_hash_map<const HloInstruction*, HloInstruction*>;
+// Map an instruction to its resharding cache.
+using ReshardingCache =
+    absl::flat_hash_map<const HloInstruction*,
+                        std::vector<std::pair<HloSharding, HloInstruction*>>>;
 
 /*
  * Array/Vector/Matrix Utility
@@ -315,6 +319,13 @@ absl::optional<HloSharding> PropagateReduceWindowSharding(
 // (i.e., we cannot decide the number of mesh dims in this function).
 std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
     const Shape& shape, const HloSharding& spec);
+
+// Forcely set the sharding of the operand of inst.
+// Also fix the resharding between 1d and 2d logical mesh.
+void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
+                                 const HloSharding& dst_sharding,
+                                 const Array<int64_t>& device_mesh,
+                                 ReshardingCache& resharding_cache);
 
 /*
  * Gradient accumulation

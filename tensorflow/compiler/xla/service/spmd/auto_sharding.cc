@@ -582,22 +582,20 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           }
 
           // Replicate
-          // HloSharding output_spec = HloSharding::Replicate();
-          // std::vector<std::vector<double>> resharding_costs{
-          //    ReshardingCostVector(strategy_map.at(ins->operand(0)).get(),
-          //                         ins->operand(0)->shape(), output_spec,
-          //                         cluster_env)};
-          // strategies->leaf_vector.push_back(
-          //    ShardingStrategy({"R",
-          //                      output_spec,
-          //                      replicated_penalty,
-          //                      0,
-          //                      GetBytes(ins->shape()),
-          //                      resharding_costs,
-          //                      {}}));
+          HloSharding output_spec = HloSharding::Replicate();
+          std::vector<std::vector<double>> resharding_costs{
+             ReshardingCostVector(strategy_map.at(ins->operand(0)).get(),
+                                  ins->operand(0)->shape(), output_spec,
+                                  cluster_env)};
+          strategies->leaf_vector.push_back(
+             ShardingStrategy({"R",
+                               output_spec,
+                               replicated_penalty,
+                               0,
+                               GetBytes(ins->shape()),
+                               resharding_costs,
+                               {}}));
         }
-
-        CHECK(!strategies->leaf_vector.empty());
         break;
       }
       case HloOpcode::kTranspose:
@@ -920,12 +918,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             }
           }
 
+          std::string name, suffix;
           HloSharding output_spec = Undefined();
-          std::string name = ToStringSimple(output_spec);
-          if (!all_reduce_dims.empty()) {
-            name += " (allreduce @ " + ToString(all_reduce_dims) + ")";
-          }
-
           if (solver_option.allow_mixed_mesh_shape &&
               cluster_env.non_zero_mesh_dims.size() > 1) {
             std::vector<int> operand_tensor_dim_to_mesh_dim;
@@ -938,7 +932,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             if (n_dim == 1) {
               output_spec = Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims,
                                  device_mesh_1d);
-              name += " 1d";
+              suffix = " 1d";
             } else {
               output_spec = Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims,
                                  device_mesh);
@@ -947,6 +941,13 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             output_spec = Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims,
                                device_mesh);
           }
+
+          name += ToStringSimple(output_spec);
+          if (!all_reduce_dims.empty()) {
+            name += " (allreduce @ " + ToString(all_reduce_dims) + ")";
+          }
+          name += suffix;
+
           double compute_cost = 0, communication_cost = 0;
           double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
           for (auto mesh_dim : all_reduce_dims) {

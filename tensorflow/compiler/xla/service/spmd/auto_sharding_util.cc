@@ -556,7 +556,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     CHECK_EQ(ins->shape().rank(), 1);
 
     int mesh_dim;
-    if (strategy.name.find("[0]") != std::string::npos) {
+    if (strategy.name.find("allreduce @ [0]") != std::string::npos) {
       mesh_dim = 0;
     } else {
       mesh_dim = 1;

@@ -7,6 +7,9 @@
 namespace xla {
 namespace spmd {
 
+const HloInstruction* PassThroughCustomCallMarkerGetSource(
+    const HloInstruction* ins);
+
 NullStream& NullStream::Global() {
   static NullStream stream;
   return stream;
@@ -232,8 +235,16 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
         if (batch_map.count(operand)) {
           int value = batch_map[operand];
-          if (value == 0 && !absl::c_linear_search(dimensions, value)) {
-            batch_map[ins] = value;
+          int old_dim = -1;
+          for (int i = 0; i < ins->shape().rank(); ++i) {
+            if (absl::c_linear_search(dimensions, i)) {
+              old_dim++;
+            }
+
+            if (old_dim == value) {
+              batch_map[ins] = i;
+              break;
+            }
           }
         }
         break;
@@ -243,7 +254,15 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
         if (batch_map.count(operand)) {
           int value = batch_map[operand];
-          if (value == 0) {
+          bool match = true;
+          for (int i = 0; i < value; ++i) {
+            if (operand->shape().dimensions(i) != ins->shape().dimensions(i)) {
+              match = false;
+              break;
+            }
+          }
+
+          if (match) {
             batch_map[ins] = value;
           }
         }
@@ -255,9 +274,8 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
         if (batch_map.count(operand)) {
           int value = batch_map[operand];
-          if (value == 0 && dimensions[0] == 0) {
-            batch_map[ins] = value;
-          }
+          auto it = absl::c_find(dimensions, value);
+          batch_map[ins] = it - dimensions.begin();
         }
         break;
       }
@@ -410,7 +428,14 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         }
         break;
       }
-      case HloOpcode::kGetTupleElement:
+      case HloOpcode::kGetTupleElement: {
+        const HloInstruction* source =
+            PassThroughCustomCallMarkerGetSource(ins);
+        if (batch_map.count(source)) {
+          batch_map[ins] = batch_map[source];
+        }
+        break;
+      }
       case HloOpcode::kTuple:
       case HloOpcode::kCustomCall:
         break;
@@ -419,15 +444,26 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
     }
   }
 
-  // Print batch map
+  // Print batch map for debugging
   // std::cerr << "Batch dim map" << std::endl;
-  // for (auto iter : batch_map) {
-  //   std::cerr << iter.first->ToString(HloPrintOptions::ShortParsable()) << "
-  //   "
-  //             << iter.second << std::endl;
+  // for (const HloInstruction* ins : instructions) {
+  //   std::cerr << ins->ToString(HloPrintOptions::ShortParsable());
+  //   if (batch_map.count(ins)) {
+  //     std::cerr << " BATCH " << batch_map[ins] << std::endl;
+  //   } else {
+  //     std::cerr << " NOBATCH " << std::endl;
+  //   }
   // }
 
   return batch_map;
+}
+
+inline std::pair<int, int> ParseMeshDims(const std::string& strategy_name) {
+  if (strategy_name.find("{0,1}") != std::string::npos) {
+    return {0, 1};
+  } else {
+    return {1, 0};
+  }
 }
 
 // Return the output sharding of the reduce-scatter variant of a given strategy.
@@ -440,23 +476,10 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
     int64_t space_base_dim = dot_dnums.lhs_batch_dimensions_size();
 
-    if (StrStartsWith(strategy.name, "RR = RS x SR")) {
-      int mesh_dim;
-      if (strategy.name.find("{0}") != std::string::npos) {
-        mesh_dim = 0;
-      } else {
-        mesh_dim = 1;
-      }
-      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh);
-    } else {
+    if (StrStartsWith(strategy.name, "SR = SS x SR") ||
+        StrStartsWith(strategy.name, "RS = RS x SS")) {
       int mesh_dim0, mesh_dim1;
-      if (strategy.name.find("{0,1}") != std::string::npos) {
-        mesh_dim0 = 0;
-        mesh_dim1 = 1;
-      } else {
-        mesh_dim0 = 1;
-        mesh_dim1 = 0;
-      }
+      std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
 
       if (ins->shape().dimensions(space_base_dim) %
                   cluster_env.device_mesh.dim(mesh_dim0) !=
@@ -472,22 +495,48 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
 
       return Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
                   {mesh_dim0, mesh_dim1}, device_mesh);
+    } else if (StrStartsWith(strategy.name, "SbR = SbSk x SbSk")) {
+      int mesh_dim0, mesh_dim1;
+      std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
+
+      if (ins->shape().dimensions(0) % cluster_env.device_mesh.dim(mesh_dim0) !=
+              0 ||
+          ins->shape().dimensions(space_base_dim) %
+                  cluster_env.device_mesh.dim(mesh_dim1) !=
+              0) {
+        return Undefined();
+      }
+
+      return Tile(ins->shape(), {0, space_base_dim}, {mesh_dim0, mesh_dim1},
+                  device_mesh);
+    } else if (StrStartsWith(strategy.name, "RR = RS x SR")) {
+      int mesh_dim = strategy.name.find("{0}") != std::string::npos ? 0 : 1;
+
+      if (ins->shape().dimensions(space_base_dim) %
+              cluster_env.device_mesh.dim(mesh_dim) !=
+          0) {
+        return Undefined();
+      }
+
+      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh);
+    } else if (StrStartsWith(strategy.name, "R = Sk x Sk")) {
+      int mesh_dim = 0;
+      if (ins->shape().dimensions(space_base_dim) %
+              cluster_env.device_mesh.dim(mesh_dim) !=
+          0) {
+        return Undefined();
+      }
+      return Tile(ins->shape(), {space_base_dim}, {0},
+                  cluster_env.device_mesh_1d);
     }
-  }
-  if (ins->opcode() == HloOpcode::kConvolution) {
+  } else if (ins->opcode() == HloOpcode::kConvolution) {
     const ConvolutionDimensionNumbers& conv_dnums =
         ins->convolution_dimension_numbers();
     int out_batch_dim = conv_dnums.output_batch_dimension();
     int out_out_channel_dim = conv_dnums.output_feature_dimension();
 
     int mesh_dim0, mesh_dim1;
-    if (strategy.name.find("{0,1}") != std::string::npos) {
-      mesh_dim0 = 0;
-      mesh_dim1 = 1;
-    } else {
-      mesh_dim0 = 1;
-      mesh_dim1 = 0;
-    }
+    std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
 
     if (ins->shape().dimensions(out_batch_dim) %
                 cluster_env.device_mesh.dim(mesh_dim0) !=
@@ -507,14 +556,18 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     CHECK_EQ(ins->shape().rank(), 1);
 
     int mesh_dim;
-    if (strategy.name.find("[0]") != std::string::npos) {
+    if (strategy.name.find("allreduce @ [0]") != std::string::npos) {
       mesh_dim = 0;
     } else {
       mesh_dim = 1;
     }
 
     if (strategy.output_sharding.IsReplicated()) {
-      return Tile(ins->shape(), {0}, {mesh_dim}, device_mesh);
+      if (strategy.name.find("1d") != std::string::npos) {
+        return Tile(ins->shape(), {0}, {mesh_dim}, cluster_env.device_mesh_1d);
+      } else {
+        return Tile(ins->shape(), {0}, {mesh_dim}, device_mesh);
+      }
     } else {
       Array<int64_t> tile_assignment =
           strategy.output_sharding.tile_assignment();
@@ -538,8 +591,10 @@ bool HasReduceScatterOpportunity(const HloInstruction* inst,
     if (GetShardingStrategy(inst->operand(0)).output_sharding.IsReplicated() &&
         GetShardingStrategy(inst->operand(1)).output_sharding.IsReplicated()) {
       // This dot is replicated on all devices. Do not split it.
+      // TODO(lmzheng): improve this condition.
       return false;
     }
+
     return true;
   }
   if (inst->opcode() == HloOpcode::kConvolution) {
@@ -719,8 +774,11 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             UsersWithAlias(cur, alias_map, output);
         for (HloInstruction* consumer : users) {
           const HloInstruction* shape_inst = cur;
+
+          // Allow at most one transpose
           if (consumer->opcode() == HloOpcode::kTranspose &&
-              transpose_inst == nullptr) {
+              (transpose_inst == nullptr ||
+               DimensionsEqual(transpose_inst->shape(), consumer->shape()))) {
             shape_inst = consumer;
             transpose_inst = consumer;
             // TODO(lmzheng): fix output_sharding comparison.
@@ -1028,14 +1086,95 @@ std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
   if (spec.ReplicateOnLastTileDim()) {
     ct++;
   }
-  if (ct != tile_dims.size()) {
-    std::cerr << "shape:" << shape.ToString() << std::endl;
-    std::cerr << "spec:" << spec.ToString() << std::endl;
-    std::cerr << "tile_dims:" << ToString(tile_dims) << std::endl;
-  }
   CHECK_EQ(ct, tile_dims.size());
 
   return std::make_pair(ret, tile_dims.size());
+}
+
+void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
+                                 const HloSharding& dst_sharding,
+                                 const Array<int64_t>& device_mesh,
+                                 ReshardingCache& resharding_cache) {
+  HloInstruction* operand = inst->mutable_operand(operand_num);
+  if (operand->sharding() == dst_sharding) {
+    return;
+  }
+
+  const HloSharding& src_sharding = operand->sharding();
+  const Shape& shape = operand->shape();
+
+  std::vector<int> src_tensor_dim_to_mesh_dim, dst_tensor_dim_to_mesh_dim;
+  int src_n_dim, dst_n_dim;
+
+  std::tie(src_tensor_dim_to_mesh_dim, src_n_dim) =
+      GetTensorDimToMeshDimInternal(shape, src_sharding);
+  std::tie(dst_tensor_dim_to_mesh_dim, dst_n_dim) =
+      GetTensorDimToMeshDimInternal(shape, dst_sharding);
+
+  HloInstruction* replace_with = nullptr;
+
+  // Query cache first
+  auto& cache = resharding_cache[operand];
+  for (auto& entry : cache) {
+    if (entry.first == dst_sharding) {
+      replace_with = entry.second;
+    }
+  }
+
+  if (replace_with != nullptr) {
+    ;
+  } else if (src_n_dim != dst_n_dim && src_n_dim != -1 && dst_n_dim != -1) {
+    const HloSharding* sharding_1d;
+
+    if (src_n_dim == 1) {
+      sharding_1d = &src_sharding;
+    } else {
+      sharding_1d = &dst_sharding;
+    }
+
+    // Find an intermidiate shape
+    std::vector<int64_t> inter_shape_dims;
+
+    for (size_t i = 0; i < shape.rank(); ++i) {
+      if (sharding_1d->tile_assignment().dim(i) == 1) {
+        inter_shape_dims.push_back(shape.dimensions(i));
+      } else {
+        CHECK(shape.dimensions(i) % device_mesh.dim(0) == 0)
+            << "Only support even partition";
+        inter_shape_dims.push_back(device_mesh.dim(0));
+        inter_shape_dims.push_back(shape.dimensions(i) / device_mesh.dim(0));
+      }
+    }
+    Shape inter_shape =
+        ShapeUtil::MakeShape(shape.element_type(), inter_shape_dims);
+
+    absl::optional<HloSharding> src_inter_sharding =
+        hlo_sharding_util::ReshapeSharding(shape, inter_shape, src_sharding);
+    CHECK(src_inter_sharding.has_value());
+    absl::optional<HloSharding> dst_inter_sharding =
+        hlo_sharding_util::ReshapeSharding(shape, inter_shape, dst_sharding);
+    CHECK(dst_inter_sharding.has_value());
+
+    HloInstruction* src_inter = inst->parent()->AddInstruction(
+        HloInstruction::CreateReshape(inter_shape, operand));
+    src_inter->set_sharding(*src_inter_sharding);
+
+    HloInstruction* dst_inter = inst->parent()->AddInstruction(
+        HloInstruction::CreateReshape(inter_shape, src_inter));
+    dst_inter->set_sharding(*dst_inter_sharding);
+
+    replace_with = inst->parent()->AddInstruction(
+        HloInstruction::CreateReshape(shape, dst_inter));
+    replace_with->set_sharding(dst_sharding);
+    cache.push_back({dst_sharding, replace_with});
+  } else {
+    replace_with = inst->parent()->AddInstruction(
+        HloInstruction::CreateReshape(operand->shape(), operand));
+    replace_with->set_sharding(dst_sharding);
+    cache.push_back({dst_sharding, replace_with});
+  }
+
+  inst->ReplaceOperandWith(operand_num, replace_with);
 }
 
 }  // namespace spmd

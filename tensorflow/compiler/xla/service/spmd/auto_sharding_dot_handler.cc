@@ -24,7 +24,8 @@ void FilterStrategy(const HloInstruction* ins,
       new_leaf_vector.push_back(std::move(stra));
     }
   }
-  CHECK(!new_leaf_vector.empty());
+  CHECK(!new_leaf_vector.empty())
+      << ins->ToString() << " does not have any valid strategies";
   strategies->leaf_vector = std::move(new_leaf_vector);
 }
 
@@ -251,7 +252,8 @@ class DotHandler {
     if (lhs_batch_dims.size() > 0 && device_mesh.dim(mesh_dim0) > 1 &&
         device_mesh.dim(mesh_dim1) > 1) {
       std::string name =
-          absl::StrFormat("SbR = SbSk x SbSk @ {%d,%d}", mesh_dim0, mesh_dim1);
+          absl::StrFormat("SbR = SbSk x SbSk @ {%d,%d} (allreduce @ %d}",
+                          mesh_dim0, mesh_dim1, mesh_dim1);
       HloSharding output_spec =
           Tile(ins->shape(), {0}, {mesh_dim0}, device_mesh);
       HloSharding lhs_spec =
@@ -260,9 +262,13 @@ class DotHandler {
       HloSharding rhs_spec =
           Tile(rhs->shape(), {rhs_batch_dims[0], rhs_con_dims[0]},
                {mesh_dim0, mesh_dim1}, device_mesh);
+      double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+      double communication_cost =
+          cluster_env.AllReduceCost(memory_cost, mesh_dim1);
 
-      AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0, 0,
-                        cluster_env, strategy_map, strategies);
+      AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
+                        communication_cost, cluster_env, strategy_map,
+                        strategies);
     }
   }
 
@@ -317,6 +323,24 @@ class DotHandler {
     }
   }
 
+  void Add1DBatchSplit() {
+    if (device_mesh.dim(0) > 1 && device_mesh.dim(1) > 1) {
+      int mesh_dim = 0;
+      for (int64_t i = 0; i < lhs_batch_dims.size(); ++i) {
+        std::string name =
+            absl::StrFormat("Sb_%d = Sb x Sb @ {%d} 1d", i, mesh_dim);
+        HloSharding output_spec =
+            Tile(ins->shape(), {i}, {mesh_dim}, device_mesh_1d);
+        HloSharding lhs_spec =
+            Tile(lhs->shape(), {lhs_batch_dims[i]}, {mesh_dim}, device_mesh_1d);
+        HloSharding rhs_spec =
+            Tile(rhs->shape(), {rhs_batch_dims[i]}, {mesh_dim}, device_mesh_1d);
+        AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0, 0,
+                          cluster_env, strategy_map, strategies);
+      }
+    }
+  }
+
   void RegisterStrategies() {
     // SS = SR x RS
     // Split lhs space dim and rhs space dim.
@@ -346,9 +370,10 @@ class DotHandler {
     }
 
     if (solver_option.batch_matmul_always_split_batch &&
-        lhs_batch_dims.size() > 0) {
-      // If there is a batch dim, always split on batch dim.
-      // Clear all old strategies.
+        lhs_batch_dims.size() > 0 &&
+        cluster_env.non_zero_mesh_dims.size() > 1) {
+      // If there is a batch dim and the device mesh is 2d, always split on
+      // batch dim. Clear all old strategies.
       strategies->leaf_vector.clear();
     }
 
@@ -383,6 +408,10 @@ class DotHandler {
     // Split batch dims.
     SplitTwoBatchDims(0, 1);
     SplitTwoBatchDims(1, 0);
+
+    if (solver_option.allow_mixed_mesh_shape) {
+      Add1DBatchSplit();
+    }
 
     // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies
     // and only keep the data parallel strategies.

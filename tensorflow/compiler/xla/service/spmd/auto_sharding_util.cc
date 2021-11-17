@@ -535,22 +535,35 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     int out_batch_dim = conv_dnums.output_batch_dimension();
     int out_out_channel_dim = conv_dnums.output_feature_dimension();
 
-    int mesh_dim0, mesh_dim1;
-    std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
+    if (StrStartsWith(strategy.name, "SR = SS x SR") ||
+        StrStartsWith(strategy.name, "RS = RS x SS")) {
+      int mesh_dim0, mesh_dim1;
+      std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
 
-    if (ins->shape().dimensions(out_batch_dim) %
-                cluster_env.device_mesh.dim(mesh_dim0) !=
-            0 ||
-        ins->shape().dimensions(out_out_channel_dim) %
-                cluster_env.device_mesh.dim(mesh_dim1) !=
-            0) {
-      // XLA supports uneven partitioning by adding padding.
-      // However, the ShardingSpec in Jax does not support uneven partitioning.
-      return Undefined();
+      if (ins->shape().dimensions(out_batch_dim) %
+                  cluster_env.device_mesh.dim(mesh_dim0) !=
+              0 ||
+          ins->shape().dimensions(out_out_channel_dim) %
+                  cluster_env.device_mesh.dim(mesh_dim1) !=
+              0) {
+        // XLA supports uneven partitioning by adding padding.
+        // However, the ShardingSpec in Jax does not support uneven
+        // partitioning.
+        return Undefined();
+      }
+
+      return Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
+                  {mesh_dim0, mesh_dim1}, device_mesh);
+    } else if (StrStartsWith(strategy.name, "R = Sk x Sk")) {
+      int mesh_dim = 0;
+      if (ins->shape().dimensions(out_batch_dim) %
+              cluster_env.device_mesh.dim(mesh_dim) !=
+          0) {
+        return Undefined();
+      }
+      return Tile(ins->shape(), {out_batch_dim}, {0},
+                  cluster_env.device_mesh_1d);
     }
-
-    return Tile(ins->shape(), {out_batch_dim, out_out_channel_dim},
-                {mesh_dim0, mesh_dim1}, device_mesh);
   } else if (ins->opcode() == HloOpcode::kReduce) {
     // TODO(lmzheng): support more cases.
     CHECK_EQ(ins->shape().rank(), 1);
@@ -577,16 +590,17 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
   } else {
     LOG(FATAL) << "Invalid instruction: " << ins->ToString();
   }
+
+  return Undefined();
 }
 
 // Return whether an instruction has the opportunity to generate redcue-scatter.
-bool HasReduceScatterOpportunity(const HloInstruction* inst,
-                                 const StrategyMap& strategy_map,
-                                 const CostGraph& cost_graph,
-                                 const std::vector<int64_t>& s_val,
-                                 const absl::flat_hash_set<const HloInstruction*>& modified) {
-  // If the operand is already modified by other ops, skip this instruction to avoid
-  // conflicts.
+bool HasReduceScatterOpportunity(
+    const HloInstruction* inst, const StrategyMap& strategy_map,
+    const CostGraph& cost_graph, const std::vector<int64_t>& s_val,
+    const absl::flat_hash_set<const HloInstruction*>& modified) {
+  // If the operand is already modified by other ops, skip this instruction to
+  // avoid conflicts.
   for (const HloInstruction* operand : inst->operands()) {
     if (modified.count(operand)) {
       return false;
@@ -761,7 +775,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   absl::flat_hash_set<const HloInstruction*> modified;
 
   for (HloInstruction* inst : instructions) {
-    if (HasReduceScatterOpportunity(inst, strategy_map, cost_graph, s_val, modified)) {
+    if (HasReduceScatterOpportunity(inst, strategy_map, cost_graph, s_val,
+                                    modified)) {
       const ShardingStrategy& strategy = GetShardingStrategy(inst);
 
       if (strategy.name.find("allreduce") == std::string::npos) {

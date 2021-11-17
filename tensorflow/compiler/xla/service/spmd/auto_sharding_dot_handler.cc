@@ -311,8 +311,10 @@ class DotHandler {
       name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)", mesh_dim,
                              mesh_dim);
       output_spec = HloSharding::Replicate();
-      lhs_spec = Tile(lhs->shape(), {lhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
-      rhs_spec = Tile(rhs->shape(), {rhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
+      lhs_spec =
+          Tile(lhs->shape(), {lhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
+      rhs_spec =
+          Tile(rhs->shape(), {rhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
                                   cluster_env.AllReduceCost(memory_cost, 1);
@@ -552,8 +554,7 @@ class ConvHandler {
     if (device_mesh.dim(0) > 1 && device_mesh.dim(1) > 1) {
       int mesh_dim = 0;
       // Si = Si x R @ 0
-      std::string name =
-          absl::StrFormat("Si = Si x R @ 0");
+      std::string name = absl::StrFormat("Si = Si x R @ 0");
       HloSharding output_spec =
           Tile(ins->shape(), {out_batch_dim}, {mesh_dim}, device_mesh_1d);
       HloSharding lhs_spec =
@@ -567,8 +568,10 @@ class ConvHandler {
       name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)", mesh_dim,
                              mesh_dim);
       output_spec = HloSharding::Replicate();
-      lhs_spec = Tile(lhs->shape(), {lhs_in_channel_dim}, {mesh_dim}, device_mesh_1d);
-      rhs_spec = Tile(rhs->shape(), {rhs_in_channel_dim}, {mesh_dim}, device_mesh_1d);
+      lhs_spec =
+          Tile(lhs->shape(), {lhs_in_channel_dim}, {mesh_dim}, device_mesh_1d);
+      rhs_spec =
+          Tile(rhs->shape(), {rhs_in_channel_dim}, {mesh_dim}, device_mesh_1d);
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
                                   cluster_env.AllReduceCost(memory_cost, 1);

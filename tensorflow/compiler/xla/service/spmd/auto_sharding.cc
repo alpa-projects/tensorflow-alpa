@@ -584,17 +584,17 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           // Replicate
           HloSharding output_spec = HloSharding::Replicate();
           std::vector<std::vector<double>> resharding_costs{
-             ReshardingCostVector(strategy_map.at(ins->operand(0)).get(),
-                                  ins->operand(0)->shape(), output_spec,
-                                  cluster_env)};
+              ReshardingCostVector(strategy_map.at(ins->operand(0)).get(),
+                                   ins->operand(0)->shape(), output_spec,
+                                   cluster_env)};
           strategies->leaf_vector.push_back(
-             ShardingStrategy({"R",
-                               output_spec,
-                               replicated_penalty,
-                               0,
-                               GetBytes(ins->shape()),
-                               resharding_costs,
-                               {}}));
+              ShardingStrategy({"R",
+                                output_spec,
+                                replicated_penalty,
+                                0,
+                                GetBytes(ins->shape()),
+                                resharding_costs,
+                                {}}));
         }
         break;
       }
@@ -1490,14 +1490,15 @@ void SetHloSharding(const HloInstructionSequence& sequence,
   // Post process: fix some corner cases.
   ReshardingCache resharding_cache;
   for (HloInstruction* inst : sequence.instructions()) {
-    if (inst->opcode() == HloOpcode::kDot) {
-      // For some dot instructions, our formulation thinks they are valid.
-      // But the the spmd partitioner cannot infer the correct dot algorithms
-      // from the input/output sharding. It then generates bad fallback code.
-      // Here we insert some extra annotated identiy instructions to help the
-      // spmd partitioner generate correct code.
-      const ShardingStrategy& stra = GetShardingStrategy(inst);
+    // For some dot instructions and resharding cases, our formulation thinks
+    // they are valid. But the the spmd partitioner cannot infer the correct
+    // dot algorithms or resharding algorithm from the input/output sharding.
+    // It then generates bad fallback code.
+    // Here we insert some extra annotated identiy instructions to help the
+    // spmd partitioner generate correct code.
 
+    if (inst->opcode() == HloOpcode::kDot) {
+      const ShardingStrategy& stra = GetShardingStrategy(inst);
       const HloInstruction* lhs = inst->operand(0);
       const HloInstruction* rhs = inst->operand(1);
       const HloSharding& lhs_sharding = lhs->sharding();
@@ -1522,12 +1523,35 @@ void SetHloSharding(const HloInstructionSequence& sequence,
         FixMixedMeshShapeResharding(inst, 1, stra.input_shardings[1],
                                     device_mesh, resharding_cache);
       }
+    } else if (inst->opcode() == HloOpcode::kConvolution) {
+      const ShardingStrategy& stra = GetShardingStrategy(inst);
+      const HloInstruction* lhs = inst->operand(0);
+      const HloInstruction* rhs = inst->operand(1);
+      const HloSharding& lhs_sharding = lhs->sharding();
+      const HloSharding& rhs_sharding = rhs->sharding();
+      const ConvolutionDimensionNumbers& conv_dnums =
+          inst->convolution_dimension_numbers();
+      const int lhs_in_channel_dim = conv_dnums.input_feature_dimension();
+      const int rhs_in_channel_dim =
+          conv_dnums.kernel_input_feature_dimension();
+
+      const auto& lhs_tensor_dim_to_mesh_dim =
+          cluster_env.GetTensorDimToMeshDim(lhs->shape(), lhs_sharding);
+      const auto& rhs_tensor_dim_to_mesh_dim =
+          cluster_env.GetTensorDimToMeshDim(rhs->shape(), rhs_sharding);
+
+      if (stra.name.find("allreduce") != std::string::npos &&
+          lhs_tensor_dim_to_mesh_dim[lhs_in_channel_dim] == -1 &&
+          rhs_tensor_dim_to_mesh_dim[rhs_in_channel_dim] == -1) {
+        ;  // Allow duplicatd conv computation in this case to reduce
+           // communication
+      } else {
+        FixMixedMeshShapeResharding(inst, 0, stra.input_shardings[0],
+                                    device_mesh, resharding_cache);
+        FixMixedMeshShapeResharding(inst, 1, stra.input_shardings[1],
+                                    device_mesh, resharding_cache);
+      }
     } else if (inst->opcode() == HloOpcode::kReshape) {
-      // For some resharding cases, our formulation thinks they are valid.
-      // But the the spmd partitioner cannot infer the correct resharding
-      // algorithms from the input/output sharding. It then generates bad
-      // fallback code. Here we insert some extra annotated identiy instructions
-      // to help the spmd partitioner generate correct code.
       const ShardingStrategy& stra = GetShardingStrategy(inst);
       if (!stra.input_shardings.empty()) {
         FixMixedMeshShapeResharding(inst, 0, stra.input_shardings[0],

@@ -325,7 +325,7 @@ std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
 void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
                                  const HloSharding& dst_sharding,
                                  const Array<int64_t>& device_mesh,
-                                 ReshardingCache& resharding_cache);
+                                 ReshardingCache* resharding_cache);
 
 /*
  * Gradient accumulation

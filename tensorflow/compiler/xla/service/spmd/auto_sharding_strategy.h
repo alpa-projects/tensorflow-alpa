@@ -37,8 +37,17 @@ struct AutoShardingSolverOption {
   bool override_all_to_all_cost;
   double all_to_all_cost;
 
-  // If true, prefer reduce-scatter + all-gather over all-reduce
+  // If true, allow replicated parameters. 
+  bool allow_replicated_parameters;
+
+  // If true, prefer reduce-scatter + all-gather over all-reduce.
+  // A post process will be applied to replace all-reduce with reduce-scater + all-gather
+  // if no communication overhead is introduced.
   bool prefer_reduce_scatter;
+
+  // If true, aggresively partition more tensors when generating reduce-scatter,
+  // even if it introduces more communicaton.
+  bool reduce_scatter_aggresive_partition;
 
   // If true, the batch matmul will always be parallelized on the batch dim in
   // 2d mesh case.
@@ -1003,7 +1012,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const StrategyMap& strategy_map,
                            const CostGraph& cost_graph,
                            const std::vector<int64_t>& s_val,
-                           const ClusterEnvironment& cluster_env);
+                           const ClusterEnvironment& cluster_env,
+                           const AutoShardingSolverOption& solver_option);
 
 }  // namespace spmd
 }  // namespace xla

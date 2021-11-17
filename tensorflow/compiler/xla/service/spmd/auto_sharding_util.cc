@@ -583,7 +583,16 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
 bool HasReduceScatterOpportunity(const HloInstruction* inst,
                                  const StrategyMap& strategy_map,
                                  const CostGraph& cost_graph,
-                                 const std::vector<int64_t>& s_val) {
+                                 const std::vector<int64_t>& s_val,
+                                 const absl::flat_hash_set<const HloInstruction*>& modified) {
+  // If the operand is already modified by other ops, skip this instruction to avoid
+  // conflicts.
+  for (const HloInstruction* operand : inst->operands()) {
+    if (modified.count(operand)) {
+      return false;
+    }
+  }
+
   if (inst->opcode() == HloOpcode::kReduce && inst->shape().rank() == 1) {
     return true;
   }
@@ -617,7 +626,9 @@ bool AllUsersAreReduce(const HloInstruction* inst) {
 // Set sharding, and apply transpose if necessary.
 void SetSharding(HloInstruction* to_split, const HloSharding& output_spec,
                  const HloInstruction* ref_inst,
-                 const HloInstruction* shape_inst) {
+                 const HloInstruction* shape_inst,
+                 absl::flat_hash_set<const HloInstruction*>& modified) {
+  modified.insert(to_split);
   if (DimensionsEqual(to_split->shape(), ref_inst->shape())) {
     to_split->set_sharding(output_spec);
   } else {
@@ -747,9 +758,10 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   int verbose = 0;
 
   std::vector<HloInstruction*> insert_all_gather;
+  absl::flat_hash_set<const HloInstruction*> modified;
 
   for (HloInstruction* inst : instructions) {
-    if (HasReduceScatterOpportunity(inst, strategy_map, cost_graph, s_val)) {
+    if (HasReduceScatterOpportunity(inst, strategy_map, cost_graph, s_val, modified)) {
       const ShardingStrategy& strategy = GetShardingStrategy(inst);
 
       if (strategy.name.find("allreduce") == std::string::npos) {
@@ -922,11 +934,11 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         }
 
         for (HloInstruction* to_split : replicated_set) {
-          SetSharding(to_split, output_spec, inst, transpose_inst);
+          SetSharding(to_split, output_spec, inst, transpose_inst, modified);
         }
 
         for (HloInstruction* to_split : need_all_gather) {
-          SetSharding(to_split, output_spec, inst, transpose_inst);
+          SetSharding(to_split, output_spec, inst, transpose_inst, modified);
 
           if (!do_all_gather_after_backward && to_split->users().size() == 1 &&
               to_split->users().front() == output &&
@@ -936,7 +948,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             // in the forward pass, which is not desired in gradient
             // accumulation.
             SetSharding(alias_map.at(to_split), output_spec, inst,
-                        transpose_inst);
+                        transpose_inst, modified);
             insert_all_gather.push_back(alias_map.at(to_split));
           } else {
             insert_all_gather.push_back(to_split);

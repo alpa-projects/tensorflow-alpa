@@ -429,6 +429,11 @@ void BuildXlaCompilerSubmodule(py::module& m) {
 
   py::class_<HloSharding> hlo_sharding_class(m, "HloSharding");
   hlo_sharding_class
+      .def(py::init([](const py::bytes& serialized_hlo_sharding_proto) {
+        OpSharding proto;
+        proto.ParseFromString(std::string(serialized_hlo_sharding_proto));
+        return ValueOrThrow(HloSharding::FromProto(proto));
+      }))
       .def("proto_tuple", [](const HloSharding& hlo_sharding) {
         return hlo_sharding.ToProto();
       });

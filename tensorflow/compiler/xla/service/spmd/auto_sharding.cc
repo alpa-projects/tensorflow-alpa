@@ -1039,14 +1039,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       case HloOpcode::kCustomCall: {
-        if (ins->IsCustomCall("xla_pipeline_marker")) {
-          const HloInstruction* operand = ins->operand(0);
-          const StrategyVector* src_strategies = strategy_map.at(operand).get();
-          CHECK(src_strategies->is_tuple);
-          strategies = FollowInsStrategyVector(
-              src_strategies, ins->shape(), instruction_id,
-              /* have_memory_cost= */ false, leaf_strategies);
-        } else if (ins->IsCustomCall("identity")) {
+        if (ins->IsCustomCall("xla_pipeline_marker") || ins->IsCustomCall("identity")) {
           const HloInstruction* operand = ins->operand(0);
           const StrategyVector* src_strategies = strategy_map.at(operand).get();
           CHECK(src_strategies->is_tuple);

@@ -404,15 +404,18 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                   strategy_map, strategies, " 1d");
         }
 
-        // Replicate
-        strategies->leaf_vector.push_back(
-            ShardingStrategy({"R",
-                              HloSharding::Replicate(),
-                              replicated_penalty,
-                              0,
-                              GetBytes(ins->shape()),
-                              {},
-                              {}}));
+        if (solver_option.allow_replicated_parameters ||
+            strategies->leaf_vector.empty()) {
+          // Replicate
+          strategies->leaf_vector.push_back(
+              ShardingStrategy({"R",
+                                HloSharding::Replicate(),
+                                replicated_penalty,
+                                0,
+                                GetBytes(ins->shape()),
+                                {},
+                                {}}));
+        }
         break;
       }
       case HloOpcode::kConstant: {
@@ -1420,7 +1423,8 @@ void SetHloSharding(const HloInstructionSequence& sequence,
                     const StrategyMap& strategy_map,
                     const CostGraph& cost_graph,
                     const std::vector<int64_t>& s_val,
-                    const ClusterEnvironment& cluster_env) {
+                    const ClusterEnvironment& cluster_env,
+                    const AutoShardingSolverOption& solver_option) {
   // Set the HloSharding for every instruction
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
   const Array<int64_t>& device_mesh = cluster_env.device_mesh;
@@ -1488,7 +1492,9 @@ void SetHloSharding(const HloInstructionSequence& sequence,
   }
 
   // Post process: fix some corner cases.
-  ReshardingCache resharding_cache;
+  ReshardingCache resharding_cache_entity;
+  ReshardingCache* resharding_cache = &resharding_cache_entity;
+
   for (HloInstruction* inst : sequence.instructions()) {
     // For some dot instructions and resharding cases, our formulation thinks
     // they are valid. But the the spmd partitioner cannot infer the correct
@@ -1720,8 +1726,12 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   }
   solver_option.force_batch_dim_to_mesh_dim =
       pass_context::GetInt("auto_sharding::force_batch_dim_to_mesh_dim", -1);
+  solver_option.allow_replicated_parameters =
+      pass_context::GetBool("auto_sharding::allow_replicated_parameters", true);
   solver_option.prefer_reduce_scatter =
       pass_context::GetBool("auto_sharding::prefer_reduce_scatter", false);
+  solver_option.reduce_scatter_aggresive_partition = pass_context::GetBool(
+      "auto_sharding::reduce_scatter_aggresive_partition", false);
   solver_option.batch_matmul_always_split_batch = pass_context::GetBool(
       "auto_sharding::batch_matmul_always_split_batch", false);
   solver_option.allow_recompute_heavy_op =
@@ -1822,12 +1832,13 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   // ----- Substitute all-reduce with reduce-scatter -----
   if (solver_option.prefer_reduce_scatter) {
-    GenerateReduceScatter(sequence, alias_map, strategy_map, cost_graph, s_val,
-                          cluster_env);
+    GenerateReduceScatter(sequence, alias_map, ins_depth_map, strategy_map,
+                          cost_graph, s_val, cluster_env, solver_option);
   }
 
   // ----- Set sharding for all instructions -----
-  SetHloSharding(sequence, strategy_map, cost_graph, s_val, cluster_env);
+  SetHloSharding(sequence, strategy_map, cost_graph, s_val, cluster_env,
+                 solver_option);
 
   // std::cerr << "===== Exit AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();

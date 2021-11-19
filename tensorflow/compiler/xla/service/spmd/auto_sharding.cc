@@ -404,7 +404,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                   strategy_map, strategies, " 1d");
         }
 
-        if (solver_option.allow_replicated_parameters || strategies->leaf_vector.empty()) {
+        if (solver_option.allow_replicated_parameters ||
+            strategies->leaf_vector.empty()) {
           // Replicate
           strategies->leaf_vector.push_back(
               ShardingStrategy({"R",
@@ -1493,10 +1494,6 @@ void SetHloSharding(const HloInstructionSequence& sequence,
   // Post process: fix some corner cases.
   ReshardingCache resharding_cache_entity;
   ReshardingCache* resharding_cache = &resharding_cache_entity;
-  if (solver_option.reduce_scatter_aggresive_partition) {
-    // Disable cache if we want to do aggresive partition to save memory.
-    resharding_cache = nullptr;
-  }
 
   for (HloInstruction* inst : sequence.instructions()) {
     // For some dot instructions and resharding cases, our formulation thinks
@@ -1733,8 +1730,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       pass_context::GetBool("auto_sharding::allow_replicated_parameters", true);
   solver_option.prefer_reduce_scatter =
       pass_context::GetBool("auto_sharding::prefer_reduce_scatter", false);
-  solver_option.reduce_scatter_aggresive_partition =
-      pass_context::GetBool("auto_sharding::reduce_scatter_aggresive_partition", false);
+  solver_option.reduce_scatter_aggresive_partition = pass_context::GetBool(
+      "auto_sharding::reduce_scatter_aggresive_partition", false);
   solver_option.batch_matmul_always_split_batch = pass_context::GetBool(
       "auto_sharding::batch_matmul_always_split_batch", false);
   solver_option.allow_recompute_heavy_op =
@@ -1835,12 +1832,13 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   // ----- Substitute all-reduce with reduce-scatter -----
   if (solver_option.prefer_reduce_scatter) {
-    GenerateReduceScatter(sequence, alias_map, strategy_map, cost_graph, s_val,
-                          cluster_env, solver_option);
+    GenerateReduceScatter(sequence, alias_map, ins_depth_map, strategy_map,
+                          cost_graph, s_val, cluster_env, solver_option);
   }
 
   // ----- Set sharding for all instructions -----
-  SetHloSharding(sequence, strategy_map, cost_graph, s_val, cluster_env, solver_option);
+  SetHloSharding(sequence, strategy_map, cost_graph, s_val, cluster_env,
+                 solver_option);
 
   // std::cerr << "===== Exit AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();

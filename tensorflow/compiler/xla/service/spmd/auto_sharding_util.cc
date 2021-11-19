@@ -606,6 +606,9 @@ bool HasReduceScatterOpportunity(
       return false;
     }
   }
+  if (modified.count(inst)) {
+    return false;
+  }
 
   if (inst->opcode() == HloOpcode::kReduce && inst->shape().rank() == 1) {
     return true;
@@ -749,23 +752,20 @@ inline absl::flat_hash_set<HloInstruction*> UsersWithAlias(
 }
 
 // DFS to find the replicated set starting from cur instruction.
-void FindReplicateSet(HloInstruction* cur,
-                      const AliasMap& alias_map,
-                      const CostGraph& cost_graph,
-                      const std::vector<int64_t>& s_val,
-                      const StrategyMap& strategy_map,
-                      const ShardingStrategy& strategy,
-                      const HloInstruction* output,
-                      bool do_all_gather_after_backward,
-                      HloInstruction*& transpose_inst,
-                      absl::flat_hash_set<HloInstruction*>& replicated_set,
-                      absl::flat_hash_set<HloInstruction*>& boundary_set,
-                      absl::flat_hash_set<HloInstruction*>& consumer_set,
-                      absl::flat_hash_set<const HloInstruction*>& visited) {
+void FindReplicateSet(
+    HloInstruction* cur, const AliasMap& alias_map, const CostGraph& cost_graph,
+    const std::vector<int64_t>& s_val, const StrategyMap& strategy_map,
+    const ShardingStrategy& strategy, const HloInstruction* output,
+    bool do_all_gather_after_backward, HloInstruction*& transpose_inst,
+    absl::flat_hash_set<HloInstruction*>& replicated_set,
+    absl::flat_hash_set<HloInstruction*>& boundary_set,
+    absl::flat_hash_set<HloInstruction*>& consumer_set,
+    absl::flat_hash_set<const HloInstruction*>& visited) {
   visited.insert(cur);
 
   // Check whether the node is a boundary node.
-  absl::flat_hash_set<HloInstruction*> users = UsersWithAlias(cur, alias_map, output);
+  absl::flat_hash_set<HloInstruction*> users =
+      UsersWithAlias(cur, alias_map, output);
   for (HloInstruction* consumer : users) {
     const HloInstruction* shape_inst = cur;
 
@@ -793,19 +793,10 @@ void FindReplicateSet(HloInstruction* cur,
   for (HloInstruction* consumer : users) {
     if (!visited.count(consumer)) {
       consumer_set.insert(consumer);
-      FindReplicateSet(consumer,
-                       alias_map,
-                       cost_graph,
-                       s_val,
-                       strategy_map,
-                       strategy,
-                       output,
-                       do_all_gather_after_backward,
-                       transpose_inst,
-                       replicated_set,
-                       boundary_set,
-                       consumer_set,
-                       visited);
+      FindReplicateSet(consumer, alias_map, cost_graph, s_val, strategy_map,
+                       strategy, output, do_all_gather_after_backward,
+                       transpose_inst, replicated_set, boundary_set,
+                       consumer_set, visited);
     }
   }
 
@@ -817,19 +808,10 @@ void FindReplicateSet(HloInstruction* cur,
         GetShardingStrategy(operand).output_sharding ==
             strategy.output_sharding &&
         DimensionsEqual(operand->shape(), cur->shape())) {
-      FindReplicateSet(operand,
-                       alias_map,
-                       cost_graph,
-                       s_val,
-                       strategy_map,
-                       strategy,
-                       output,
-                       do_all_gather_after_backward,
-                       transpose_inst,
-                       replicated_set,
-                       boundary_set,
-                       consumer_set,
-                       visited);
+      FindReplicateSet(operand, alias_map, cost_graph, s_val, strategy_map,
+                       strategy, output, do_all_gather_after_backward,
+                       transpose_inst, replicated_set, boundary_set,
+                       consumer_set, visited);
     }
   }
 }
@@ -837,6 +819,7 @@ void FindReplicateSet(HloInstruction* cur,
 // Substitute all-reduce strategies with their reduce-scatter variants.
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const AliasMap& alias_map,
+                           const InstructionDepthMap& depth_map,
                            const StrategyMap& strategy_map,
                            const CostGraph& cost_graph,
                            const std::vector<int64_t>& s_val,
@@ -856,14 +839,14 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   // gradient accumulation. If false, all-gather happends before forward pass,
   // which can partitions more tensors.
   bool do_all_gather_after_backward = true;
-  int verbose = 1;
+  int verbose = 0;
 
   std::vector<HloInstruction*> insert_all_gather;
   absl::flat_hash_set<const HloInstruction*> modified;
 
   for (HloInstruction* inst : instructions) {
     if (!HasReduceScatterOpportunity(inst, strategy_map, cost_graph, s_val,
-                                    modified)) {
+                                     modified)) {
       continue;
     }
     const ShardingStrategy& strategy = GetShardingStrategy(inst);
@@ -881,19 +864,9 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
     // Find the replicated set starting from the all-reduce instruction.
     visited.insert(output);
-    FindReplicateSet(inst,
-                     alias_map,
-                     cost_graph,
-                     s_val,
-                     strategy_map,
-                     strategy,
-                     output,
-                     do_all_gather_after_backward,
-                     transpose_inst,
-                     replicated_set,
-                     boundary_set,
-                     consumer_set,
-                     visited);
+    FindReplicateSet(inst, alias_map, cost_graph, s_val, strategy_map, strategy,
+                     output, do_all_gather_after_backward, transpose_inst,
+                     replicated_set, boundary_set, consumer_set, visited);
 
     // Analyze the instructions after which all-gather should be inserted.
     std::vector<HloInstruction*> need_all_gather;
@@ -966,16 +939,15 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
     StdCerr(verbose) << "replicated set (#parameter: "
                      << num_replicated_parameters << "):\n";
     for (auto x : replicated_set) {
-      StdCerr(verbose) << "  "
-                       << x->ToString(HloPrintOptions::ShortParsable())
+      StdCerr(verbose) << "  " << x->ToString(HloPrintOptions::ShortParsable())
                        << "\n";
     }
     StdCerr(verbose) << "boundary set (#incompatible: "
                      << need_all_gather.size() << "):\n";
     for (auto x : boundary_set) {
-      StdCerr(verbose) << "  "
-                       << x->ToString(HloPrintOptions::ShortParsable()) << " "
-                       << absl::c_linear_search(need_all_gather, x) << "\n";
+      StdCerr(verbose) << "  " << x->ToString(HloPrintOptions::ShortParsable())
+                       << " " << absl::c_linear_search(need_all_gather, x)
+                       << "\n";
     }
 
     // If applicable, replace all-reduce with reduce-scatter by
@@ -1029,8 +1001,49 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
               to_split->users().front() == output &&
               alias_map.count(to_split)) {
             // Move the all-gather to its alias parameter.
-            SetSharding(alias_map.at(to_split), output_spec, inst,
-                        transpose_inst, modified);
+            HloInstruction* param = alias_map.at(to_split);
+
+            // Find the branching point (i.e., skip elementwise ops like
+            // convert)
+            HloInstruction* cur = param;
+            while (cur->users().size() == 1) {
+              // TODO(lmzheng): handle tuple.
+              CHECK(cur->shape().IsArray());
+              SetSharding(cur, output_spec, inst, transpose_inst, modified);
+              cur = cur->users().front();
+            }
+            SetSharding(cur, output_spec, inst, transpose_inst, modified);
+
+            CHECK(!cur->users().empty());
+
+            // Find the first user
+            HloInstruction* first_user = nullptr;
+            int64_t min_depth = ((int64_t)1) << 50;
+            for (const auto& x : cur->users()) {
+              auto iter = depth_map.find(x);
+              if (iter == depth_map.end()) {
+                LOG(FATAL) << "ERROR: " << x->ToString() << std::endl;
+              }
+              if (x->opcode() != HloOpcode::kConvolution &&
+                  x->opcode() != HloOpcode::kDot) {
+                // only apply this aggressive optimization for dot and conv
+                continue;
+              }
+              if (iter->second < min_depth) {
+                first_user = x;
+                min_depth = iter->second;
+              }
+            }
+
+            if (first_user != nullptr) {
+              // Insert an identity to prevent CSE of all-gather
+              HloInstruction* identity = inst->parent()->AddInstruction(
+                  HloInstruction::CreateCustomCall(cur->shape(), {cur},
+                                                   "identity"));
+              SetSharding(identity, output_spec, inst, transpose_inst,
+                          modified);
+              ReplaceOperand(first_user, cur, identity);
+            }
           }
         }
       }

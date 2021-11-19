@@ -37,12 +37,12 @@ struct AutoShardingSolverOption {
   bool override_all_to_all_cost;
   double all_to_all_cost;
 
-  // If true, allow replicated parameters. 
+  // If true, allow replicated parameters.
   bool allow_replicated_parameters;
 
   // If true, prefer reduce-scatter + all-gather over all-reduce.
-  // A post process will be applied to replace all-reduce with reduce-scater + all-gather
-  // if no communication overhead is introduced.
+  // A post process will be applied to replace all-reduce with reduce-scater +
+  // all-gather if no communication overhead is introduced.
   bool prefer_reduce_scatter;
 
   // If true, aggresively partition more tensors when generating reduce-scatter,
@@ -1009,6 +1009,7 @@ void HandleConv(std::unique_ptr<StrategyVector>& strategies,
 
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const AliasMap& alias_map,
+                           const InstructionDepthMap& depth_map,
                            const StrategyMap& strategy_map,
                            const CostGraph& cost_graph,
                            const std::vector<int64_t>& s_val,

@@ -230,6 +230,17 @@ inline std::pair<std::vector<int64_t>, std::vector<int64_t>> GetSpaceDims(
   return std::make_pair(std::move(lhs_space_dims), std::move(rhs_space_dims));
 }
 
+// Replace old operand with the new one
+inline void ReplaceOperand(HloInstruction* inst,
+                           const HloInstruction* old_operand,
+                           HloInstruction* new_operand) {
+  for (int i = 0; i < inst->operand_count(); ++i) {
+    if (inst->operand(i) == old_operand) {
+      inst->ReplaceOperandWith(i, new_operand);
+    }
+  }
+}
+
 // Return whether this instruction is a custom call marker introduced by us.
 inline bool IsCustomCallMarker(const HloInstruction* inst) {
   return inst->IsCustomCall("xla_pipeline_marker") ||

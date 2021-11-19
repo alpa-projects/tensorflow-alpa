@@ -3891,7 +3891,6 @@ StatusOr<bool> SpmdPartitioner::Run(HloModule* module) {
   //std::cerr << module->ToString();
   //std::cerr << "=====================================" << std::endl;
 
-
   XLA_VLOG_LINES(1, SpmdLogger::ReportBeforePartition(
                         *module, options_.report_instruction_count));
 

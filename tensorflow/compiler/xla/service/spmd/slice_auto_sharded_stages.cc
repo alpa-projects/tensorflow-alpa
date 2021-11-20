@@ -3,7 +3,8 @@
 #include "pybind11/numpy.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
+#include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 
 namespace xla {
@@ -155,6 +156,28 @@ std::unique_ptr<HloModule> CreateStageModule(
   return std::move(module);
 }
 
+std::vector<std::string> HookShardingProto(HloModule* module) {
+  HloComputation* entry = module->entry_computation();
+  std::vector<std::string> shardings;
+  if (module->config().num_partitions() <= 1) {
+    return shardings;
+  }
+
+  for (HloInstruction* inst : entry->instructions()) {
+    if (inst->IsCustomCall("identity")) {
+      auto* custom_call = Cast<HloCustomCallInstruction>(inst);
+      if (custom_call->opaque() != "hook") {
+        continue;
+      }
+      for (HloInstruction* operand : custom_call->operands()) {
+        shardings.push_back(operand->sharding().ToProto().SerializeAsString());
+      }
+      return shardings;
+    }
+  }
+  return shardings;
+}
+
 std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
     HloModule* module) {
   // ----- Slice the hlo module according to the pipeline marker -----
@@ -206,6 +229,19 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
     py::object set_auto_sharded_hlo_stages =
         submodule.attr("set_auto_sharded_hlo_stages");
     py::object ret = set_auto_sharded_hlo_stages(stage_modules);
+    if (!ret.is_none()) {
+      PyGILState_Release(gstate);
+      exit(-1);
+    }
+    // Hook sharding proto. TODO(yonghao): support more than one hook
+    std::vector<std::string> hooked_sharding_protos = HookShardingProto(module);
+    py::list hooked_shardings;
+    for (const std::string sharding_proto : hooked_sharding_protos) {
+      hooked_shardings.append(py::bytes(sharding_proto));
+    }
+    py::object set_hooked_sharding_protos =
+        submodule.attr("set_hooked_sharding_protos");
+    ret = set_hooked_sharding_protos(hooked_shardings);
     if (!ret.is_none()) {
       PyGILState_Release(gstate);
       exit(-1);

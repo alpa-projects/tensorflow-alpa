@@ -6,7 +6,6 @@ namespace xla {
 
 StatusOr<bool> RematIdentityFixer::Run(HloModule* module) {
   bool changed = false;
-  return changed;
 
   for (HloComputation* computation : module->computations()) {
 

@@ -227,6 +227,10 @@ class DeviceMemoryAllocator {
     return -1;
   }
 
+  virtual int64_t bytes_used() const {
+    return -1;
+  }
+
  protected:
   const Platform* platform_;
 };

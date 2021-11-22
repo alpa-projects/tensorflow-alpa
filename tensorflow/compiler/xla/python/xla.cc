@@ -141,6 +141,19 @@ PYBIND11_MODULE(xla_extension, m) {
             }
             xla::PjRtStreamExecutorClient *gpu_client =
                 dynamic_cast<xla::PjRtStreamExecutorClient *>(client);
+            return gpu_client->allocator()->bytes_used();
+          })
+      .def_property_readonly(
+          "client_available_memory",
+          [](const PjRtDevice& device) {
+            const int64_t invalid = -1;
+
+            xla::PjRtClient* client = device.client();
+            if (client->platform_name() != "gpu") {
+              return invalid;
+            }
+            xla::PjRtStreamExecutorClient *gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient *>(client);
             return gpu_client->allocator()->bytes_available();
           })
       .def("__str__", &PjRtDevice::DebugString)

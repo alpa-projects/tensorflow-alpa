@@ -123,6 +123,34 @@ class MultiDeviceAdapter : public DeviceMemoryAllocator {
     return min_available;
   }
 
+  int64_t bytes_used() const override {
+    int64_t max_used = 0;
+    for (auto& allocator : tf_allocators_) {
+      absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
+      if (!stat.has_value()) {
+        continue;
+      }
+      if (stat->bytes_in_use > max_used) {
+        max_used = stat->bytes_in_use;
+      }
+    }
+    return max_used;
+  }
+
+  int64_t bytes_peak() const override {
+    int64_t max_used = 0;
+    for (auto& allocator : tf_allocators_) {
+      absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
+      if (!stat.has_value()) {
+        continue;
+      }
+      if (stat->peak_bytes_in_use > max_used) {
+        max_used = stat->peak_bytes_in_use;
+      }
+    }
+    return max_used;
+  }
+
  private:
   std::vector<TfAllocatorAdapter> per_device_allocators_;
   // The wrapped TF allocators backing per_device_allocators_

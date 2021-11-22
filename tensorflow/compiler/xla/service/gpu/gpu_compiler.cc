@@ -122,6 +122,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_subcomputation_unification.h"
 #include "tensorflow/compiler/xla/service/hlo_swap_insertion.h"
 #include "tensorflow/compiler/xla/service/hlo_verifier.h"
+#include "tensorflow/compiler/xla/service/identity_remover.h"
+#include "tensorflow/compiler/xla/service/remat_identity_fixer.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
 #include "tensorflow/compiler/xla/service/logistic_expander.h"
 #include "tensorflow/compiler/xla/service/loop_schedule_linearizer.h"
@@ -415,6 +417,7 @@ Status GpuCompiler::OptimizeHloModule(
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
+      spmd_pipeline.AddPass<RematIdentityFixer>();
       spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
     } else {
       spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();

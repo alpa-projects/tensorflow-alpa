@@ -130,8 +130,8 @@ PYBIND11_MODULE(xla_extension, m) {
       .def_property_readonly(
           "client",
           [](const ClientAndPtr<PjRtDevice>& device) { return device.client; })
-      .def_property_readonly(
-          "client_memory_usage",
+      .def(
+          "memory_allocated",
           [](const PjRtDevice& device) {
             const int64_t invalid = -1;
 
@@ -139,12 +139,12 @@ PYBIND11_MODULE(xla_extension, m) {
             if (client->platform_name() != "gpu") {
               return invalid;
             }
-            xla::PjRtStreamExecutorClient *gpu_client =
-                dynamic_cast<xla::PjRtStreamExecutorClient *>(client);
-            return gpu_client->allocator()->bytes_used();
+            xla::PjRtStreamExecutorClient* gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+            return gpu_client->allocator()->bytes_used(device.local_hardware_id());
           })
-      .def_property_readonly(
-          "client_memory_peak",
+      .def(
+          "max_memory_allocated",
           [](const PjRtDevice& device) {
             const int64_t invalid = -1;
 
@@ -152,12 +152,12 @@ PYBIND11_MODULE(xla_extension, m) {
             if (client->platform_name() != "gpu") {
               return invalid;
             }
-            xla::PjRtStreamExecutorClient *gpu_client =
-                dynamic_cast<xla::PjRtStreamExecutorClient *>(client);
-            return gpu_client->allocator()->bytes_peak();
+            xla::PjRtStreamExecutorClient* gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+            return gpu_client->allocator()->bytes_peak_in_use(device.local_hardware_id());
           })
-      .def_property_readonly(
-          "client_available_memory",
+      .def(
+          "available_memory",
           [](const PjRtDevice& device) {
             const int64_t invalid = -1;
 
@@ -165,9 +165,9 @@ PYBIND11_MODULE(xla_extension, m) {
             if (client->platform_name() != "gpu") {
               return invalid;
             }
-            xla::PjRtStreamExecutorClient *gpu_client =
-                dynamic_cast<xla::PjRtStreamExecutorClient *>(client);
-            return gpu_client->allocator()->bytes_available();
+            xla::PjRtStreamExecutorClient* gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+            return gpu_client->allocator()->bytes_available(device.local_hardware_id());
           })
       .def("__str__", &PjRtDevice::DebugString)
       .def("synchronize_all_activity", [](PjRtDevice& device) {

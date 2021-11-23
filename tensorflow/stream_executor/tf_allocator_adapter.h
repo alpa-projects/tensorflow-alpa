@@ -105,50 +105,34 @@ class MultiDeviceAdapter : public DeviceMemoryAllocator {
     return per_device_allocators_[device_ordinal].GetStream(device_ordinal);
   }
 
-  int64_t bytes_available() const override {
-    int64_t min_available = -1;
-    for (auto& allocator : tf_allocators_) {
-      absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
-      if (!stat.has_value()) {
-        continue;
-      }
-      if (!stat->bytes_limit.has_value()) {
-        continue;
-      }
-      int64_t available_size = stat->bytes_limit.value() - stat->bytes_in_use;
-      if (min_available == -1 || available_size < min_available) {
-        min_available = available_size;
-      }
+  int64_t bytes_available(int64_t device_ordinal) const override {
+    auto& allocator = tf_allocators_[device_ordinal];
+    absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
+    if (!stat.has_value()) {
+      return -1;
     }
-    return min_available;
+    if (!stat->bytes_limit.has_value()) {
+      return -1;
+    }
+    return stat->bytes_limit.value() - stat->bytes_in_use;
   }
 
-  int64_t bytes_used() const override {
-    int64_t max_used = 0;
-    for (auto& allocator : tf_allocators_) {
-      absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
-      if (!stat.has_value()) {
-        continue;
-      }
-      if (stat->bytes_in_use > max_used) {
-        max_used = stat->bytes_in_use;
-      }
+  int64_t bytes_used(int64_t device_ordinal) const override {
+    auto& allocator = tf_allocators_[device_ordinal];
+    absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
+    if (!stat.has_value()) {
+      return -1;
     }
-    return max_used;
+    return stat->bytes_in_use;
   }
 
-  int64_t bytes_peak() const override {
-    int64_t max_used = 0;
-    for (auto& allocator : tf_allocators_) {
-      absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
-      if (!stat.has_value()) {
-        continue;
-      }
-      if (stat->peak_bytes_in_use > max_used) {
-        max_used = stat->peak_bytes_in_use;
-      }
+  int64_t bytes_peak_in_use(int64_t device_ordinal) const override {
+    auto& allocator = tf_allocators_[device_ordinal];
+    absl::optional<tensorflow::AllocatorStats> stat = allocator->GetStats();
+    if (!stat.has_value()) {
+      return -1;
     }
-    return max_used;
+    return stat->peak_bytes_in_use;
   }
 
  private:

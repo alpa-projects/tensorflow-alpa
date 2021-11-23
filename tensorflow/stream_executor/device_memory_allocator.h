@@ -223,15 +223,15 @@ class DeviceMemoryAllocator {
   // a different stream.
   virtual port::StatusOr<Stream *> GetStream(int device_ordinal) = 0;
 
-  virtual int64_t bytes_available() const {
+  virtual int64_t bytes_available(int64_t device_ordinal) const {
     return -1;
   }
 
-  virtual int64_t bytes_used() const {
+  virtual int64_t bytes_used(int64_t device_ordinal) const {
     return -1;
   }
 
-  virtual int64_t bytes_peak() const {
+  virtual int64_t bytes_peak_in_use(int64_t device_ordinal) const {
     return -1;
   }
 

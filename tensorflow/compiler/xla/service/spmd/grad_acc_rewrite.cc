@@ -13,22 +13,6 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
     return false;
   }
 
-  // Rewrite for gradient accumulation. Note that this pass changes
-  // the semantics of the original HLO. To get correct results, this pass
-  // should be used together with XLA_SKIP_NCCL_COLLECTIVE_IDS.
-  //
-  // Before:
-  // d = dot(...)
-  // a = allreduce(d)
-  // new_grad = add(old_grad, a)
-  // return new_grad
-  //
-  // After:
-  // d = dot(...)
-  // new_grad = add(old_grad, d)
-  // a = allreduce(new_grad)
-  // return a
-
   // std::cerr << "===== Enter GradAccRewrite =====" << std::endl;
   // std::cerr << module->ToString();
   // std::cerr << "=====================================" << std::endl;
@@ -88,7 +72,7 @@ std::string GetGradSyncChannelIds(const HloModule* module,
   absl::flat_hash_set<int> channel_ids;
 
   HloInstruction* root = module->entry_computation()->root_instruction();
-  if (grad_idx){
+  if (grad_idx) {
     CHECK(root->opcode() == HloOpcode::kTuple) << "The root inst is not tuple";
     for (int idx : grad_idx.value()) {
       DfsSearch(root->operand(idx), channel_ids);

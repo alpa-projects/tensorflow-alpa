@@ -6294,6 +6294,34 @@ py_test(
     ] + xla_py_test_deps(),
 
 cc_library(
+    name = "identity_remover",
+    srcs = [
+        "identity_remover.cc",
+    ],
+    hdrs = [
+        "identity_remover.h",
+    ],
+    deps = [
+        ":hlo",
+        ":hlo_pass",
+    ],
+)
+
+cc_library(
+    name = "remat_identity_fixer",
+    srcs = [
+        "remat_identity_fixer.cc",
+    ],
+    hdrs = [
+        "remat_identity_fixer.h",
+    ],
+    deps = [
+        ":hlo",
+        ":hlo_pass",
+    ],
+)
+
+cc_library(
     name = "pass_context",
     srcs = [
         "pass_context.cc",

@@ -416,6 +416,13 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                 {},
                                 {}}));
         }
+
+        // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies
+        // and only keep the data parallel strategies.
+        if (solver_option.force_batch_dim_to_mesh_dim >= 0 &&
+            batch_dim_map.count(ins)) {
+          FilterStrategy(ins, strategies, cluster_env, batch_dim_map, solver_option);
+        }
         break;
       }
       case HloOpcode::kConstant: {
@@ -1652,16 +1659,23 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
   size_t N = leaf_strategies.size();
 
+  absl::flat_hash_map<const HloInstruction*, int> tuple_elem_counter;
+
   // Print the choosen strategy
   os << "=== Auto sharding strategy ===\n";
   for (size_t i = 0; i < N; ++i) {
     int stra_idx = cost_graph.RemapIndex(i, s_val[i]);
     const ShardingStrategy& stra = leaf_strategies[i]->leaf_vector[stra_idx];
+    const HloInstruction* ins = instructions[leaf_strategies[i]->instruction_id];
 
-    os << i << " "
-       << instructions[leaf_strategies[i]->instruction_id]->ToString(
-              HloPrintOptions::ShortParsable())
-       << "  ";
+    int ct = tuple_elem_counter[ins]++;
+    if (ct == 0) {
+      os << i << " " << ins->ToString(HloPrintOptions::ShortParsable()) << "  ";
+    } else {
+      // Only print tuple once
+      os << i << " tuple." << ct << "  ";
+    }
+
     if (cost_graph.follow_idx[i] < 0) {
       os << stra.name << " ";
     } else {

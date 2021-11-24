@@ -222,6 +222,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   bool first_dot_conv = true;
   int batch_dim_of_source = 0;
 
+  // Forward propagation: propagate from operand
   for (const HloInstruction* ins : instructions) {
     switch (ins->opcode()) {
       case HloOpcode::kParameter:
@@ -444,18 +445,116 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
     }
   }
 
+  // Backward propagation: propagete to operands
+  for (int64_t i = instructions.size() - 1; i >= 0; i--) {
+    const HloInstruction* ins = instructions[i];
+    switch (ins->opcode()) {
+      // Unary elementwise operations.
+      case HloOpcode::kAbs:
+      case HloOpcode::kRoundNearestAfz:
+      case HloOpcode::kCeil:
+      case HloOpcode::kClz:
+      case HloOpcode::kConvert:
+      case HloOpcode::kBitcastConvert:
+      case HloOpcode::kCopy:
+      case HloOpcode::kCos:
+      case HloOpcode::kExp:
+      case HloOpcode::kExpm1:
+      case HloOpcode::kFloor:
+      case HloOpcode::kImag:
+      case HloOpcode::kIsFinite:
+      case HloOpcode::kLog:
+      case HloOpcode::kLog1p:
+      case HloOpcode::kNot:
+      case HloOpcode::kNegate:
+      case HloOpcode::kPopulationCount:
+      case HloOpcode::kReal:
+      case HloOpcode::kReducePrecision:
+      case HloOpcode::kRsqrt:
+      case HloOpcode::kLogistic:
+      case HloOpcode::kSign:
+      case HloOpcode::kSin:
+      case HloOpcode::kSqrt:
+      case HloOpcode::kCbrt:
+      case HloOpcode::kTanh:
+      // Binary elementwise operations
+      case HloOpcode::kAdd:
+      case HloOpcode::kAtan2:
+      case HloOpcode::kCompare:
+      case HloOpcode::kComplex:
+      case HloOpcode::kDivide:
+      case HloOpcode::kMaximum:
+      case HloOpcode::kMinimum:
+      case HloOpcode::kMultiply:
+      case HloOpcode::kPower:
+      case HloOpcode::kRemainder:
+      case HloOpcode::kSubtract:
+      case HloOpcode::kAnd:
+      case HloOpcode::kOr:
+      case HloOpcode::kXor:
+      case HloOpcode::kShiftLeft:
+      case HloOpcode::kShiftRightArithmetic:
+      case HloOpcode::kShiftRightLogical:
+      // Ternary elementwise operations.
+      case HloOpcode::kSelect:
+      case HloOpcode::kClamp: {
+        auto iter = batch_map.find(ins);
+        if (iter != batch_map.end()) {
+          for (const HloInstruction* operand : ins->unique_operands()) {
+            batch_map[operand] = iter->second;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kGetTupleElement: {
+        const HloInstruction* source =
+            PassThroughCustomCallMarkerGetSource(ins);
+        if (batch_map.count(ins)) {
+          batch_map[source] = batch_map[ins];
+        }
+        break;
+      }
+    }
+  }
+
   // Print batch map for debugging
-  // std::cerr << "Batch dim map" << std::endl;
-  // for (const HloInstruction* ins : instructions) {
-  //   std::cerr << ins->ToString(HloPrintOptions::ShortParsable());
-  //   if (batch_map.count(ins)) {
-  //     std::cerr << " BATCH " << batch_map[ins] << std::endl;
-  //   } else {
-  //     std::cerr << " NOBATCH " << std::endl;
-  //   }
-  // }
+  //std::cerr << "Batch dim map" << std::endl;
+  //for (const HloInstruction* ins : instructions) {
+  //  std::cerr << ins->ToString(HloPrintOptions::ShortParsable());
+  //  if (batch_map.count(ins)) {
+  //    std::cerr << " BATCH " << batch_map[ins] << std::endl;
+  //  } else {
+  //    std::cerr << " NOBATCH " << std::endl;
+  //  }
+  //}
+  //exit(-1);
 
   return batch_map;
+}
+
+// Filter strategies according to the solver_option.force_batch_dim_to_mesh_dim.
+// This can be used to forcibly generate data-parallel strategies.
+void FilterStrategy(const HloInstruction* ins,
+                    std::unique_ptr<StrategyVector>& strategies,
+                    const ClusterEnvironment& cluster_env,
+                    const InstructionBatchDimMap& batch_map,
+                    const AutoShardingSolverOption& solver_option) {
+  int mesh_dim = solver_option.force_batch_dim_to_mesh_dim;
+  int batch_dim = batch_map.at(ins);
+  CHECK_GE(ins->shape().dimensions(batch_dim),
+           cluster_env.device_mesh.dim(mesh_dim));
+
+  std::vector<ShardingStrategy> new_leaf_vector;
+  for (auto& stra : strategies->leaf_vector) {
+    std::vector<int> tensor_dim_to_mesh_dim =
+        cluster_env.GetTensorDimToMeshDim(ins->shape(), stra.output_sharding);
+    if (tensor_dim_to_mesh_dim[batch_dim] == mesh_dim) {
+      new_leaf_vector.push_back(std::move(stra));
+    }
+  }
+  CHECK(!new_leaf_vector.empty())
+      << ins->ToString() << " does not have any valid strategies";
+  strategies->leaf_vector = std::move(new_leaf_vector);
 }
 
 inline std::pair<int, int> ParseMeshDims(const std::string& strategy_name) {

@@ -993,6 +993,12 @@ void SetInNodesWithInstruction(std::unique_ptr<StrategyVector>& strategies,
                                const HloInstruction* ins,
                                const StrategyMap& strategy_map);
 
+void FilterStrategy(const HloInstruction* ins,
+                    std::unique_ptr<StrategyVector>& strategies,
+                    const ClusterEnvironment& cluster_env,
+                    const InstructionBatchDimMap& batch_map,
+                    const AutoShardingSolverOption& solver_option);
+
 void HandleDot(std::unique_ptr<StrategyVector>& strategies,
                LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
                const HloInstruction* ins, size_t instruction_id,

@@ -377,7 +377,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
             GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
 
         if (batch_map.count(lhs)) {
-          int value = batch_map.at(lhs);
+          int value = batch_map[lhs];
           for (int i = 0; i < lhs_batch_dims.size(); ++i) {
             if (value == lhs_batch_dims[i]) {
               batch_map[ins] = i;
@@ -390,7 +390,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         }
 
         if (batch_map.count(rhs)) {
-          int value = batch_map.at(rhs);
+          int value = batch_map[rhs];
           for (int i = 0; i < rhs_batch_dims.size(); ++i) {
             if (value == rhs_batch_dims[i]) {
               batch_map[ins] = i;
@@ -415,14 +415,14 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         const auto& conv_dnums = ins->convolution_dimension_numbers();
 
         if (batch_map.count(lhs)) {
-          int value = batch_map.at(lhs);
+          int value = batch_map[lhs];
           if (value == conv_dnums.input_batch_dimension()) {
             batch_map[ins] = conv_dnums.output_batch_dimension();
           }
         }
 
         if (batch_map.count(rhs)) {
-          int value = batch_map.at(rhs);
+          int value = batch_map[rhs];
           if (value == conv_dnums.kernel_output_feature_dimension()) {
             batch_map[ins] = conv_dnums.output_feature_dimension();
           }
@@ -449,6 +449,64 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   for (int64_t i = instructions.size() - 1; i >= 0; i--) {
     const HloInstruction* ins = instructions[i];
     switch (ins->opcode()) {
+      case HloOpcode::kBroadcast: {
+        const HloInstruction* operand = ins->operand(0);
+        const auto& dimensions = ins->dimensions();
+
+        if (batch_map.count(ins) && !batch_map.count(operand)) {
+          int value = batch_map[ins];
+          int old_dim = -1;
+          for (int i = 0; i < ins->shape().rank(); ++i) {
+            if (absl::c_linear_search(dimensions, i)) {
+              old_dim++;
+            }
+
+            if (i == value && old_dim >= 0) {
+              batch_map[operand] = old_dim;
+              break;
+            }
+          }
+        }
+        break;
+      }
+      case HloOpcode::kReshape: {
+        const HloInstruction* operand = ins->operand(0);
+
+        if (batch_map.count(ins) && !batch_map.count(operand)) {
+          int value = batch_map[ins];
+          bool match = true;
+          for (int i = 0; i < value; ++i) {
+            if (operand->shape().dimensions(i) != ins->shape().dimensions(i)) {
+              match = false;
+              break;
+            }
+          }
+
+          if (match) {
+            batch_map[operand] = value;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kTranspose: {
+        const HloInstruction* operand = ins->operand(0);
+        const auto& dimensions = ins->dimensions();
+
+        if (batch_map.count(ins) && !batch_map.count(operand)) {
+          batch_map[operand] = dimensions[batch_map[ins]];
+        }
+        break;
+      }
+      case HloOpcode::kReverse:
+      case HloOpcode::kPad:
+      case HloOpcode::kSlice:
+      case HloOpcode::kConcatenate:
+      case HloOpcode::kDynamicSlice:
+      case HloOpcode::kDynamicUpdateSlice:
+      case HloOpcode::kReduceWindow:
+      case HloOpcode::kSelectAndScatter:
+        // TODO(lmzheng): support these
+        break;
       // Unary elementwise operations.
       case HloOpcode::kAbs:
       case HloOpcode::kRoundNearestAfz:
@@ -498,36 +556,115 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       // Ternary elementwise operations.
       case HloOpcode::kSelect:
       case HloOpcode::kClamp: {
-        auto iter = batch_map.find(ins);
-        if (iter != batch_map.end()) {
+        if (batch_map.count(ins)) {
+          int value = batch_map[ins];
           for (const HloInstruction* operand : ins->unique_operands()) {
-            batch_map[operand] = iter->second;
+            if (!batch_map.count(operand)) {
+              batch_map[operand] = value;
+            }
           }
         }
+        break;
+      }
+      case HloOpcode::kReduce: {
+        const HloInstruction* operand = ins->operand(0);
+        const auto& dimensions = ins->dimensions();
+
+        if (batch_map.count(ins) && !batch_map.count(operand)) {
+          int value = batch_map[ins];
+          if (value == 0 && !absl::c_linear_search(dimensions, value)) {
+            batch_map[operand] = value;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kDot: {
+        const HloInstruction* lhs = ins->operand(0);
+        const HloInstruction* rhs = ins->operand(1);
+        const auto& dot_dnums = ins->dot_dimension_numbers();
+        int64_t space_base_dim = dot_dnums.lhs_batch_dimensions_size();
+        const auto& lhs_batch_dims =
+            ins->dot_dimension_numbers().lhs_batch_dimensions();
+        const auto& rhs_batch_dims =
+            ins->dot_dimension_numbers().rhs_batch_dimensions();
+        std::vector<int64_t> lhs_space_dims, rhs_space_dims;
+        std::tie(lhs_space_dims, rhs_space_dims) =
+            GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
+
+        if (batch_map.count(ins)) {
+          int value = batch_map[ins];
+          if (!batch_map.count(lhs)) {
+            for (int i = 0; i < lhs_batch_dims.size(); ++i) {
+              if (value == i) {
+                batch_map[lhs] = lhs_batch_dims[i];
+                break;
+              }
+            }
+            if (value == space_base_dim) {
+              batch_map[lhs] = lhs_space_dims[0];
+            }
+          }
+
+          if (!batch_map.count(rhs)) {
+            for (int i = 0; i < rhs_batch_dims.size(); ++i) {
+              if (value == i) {
+                batch_map[rhs] = rhs_batch_dims[i];
+                break;
+              }
+            }
+            if (value == space_base_dim + 1) {
+              batch_map[rhs] = rhs_space_dims[0];
+            }
+          }
+        }
+
+        break;
+      }
+      case HloOpcode::kConvolution: {
+        const HloInstruction* lhs = ins->operand(0);
+        const HloInstruction* rhs = ins->operand(1);
+        const auto& conv_dnums = ins->convolution_dimension_numbers();
+
+        if (batch_map.count(ins)) {
+          int value = batch_map[ins];
+          if (value == conv_dnums.output_batch_dimension() &&
+              !batch_map.count(lhs)) {
+            batch_map[lhs] = conv_dnums.input_batch_dimension();
+          }
+
+          if (value == conv_dnums.output_feature_dimension() &&
+              !batch_map.count(rhs)) {
+            batch_map[rhs] = conv_dnums.kernel_output_feature_dimension();
+          }
+        }
+
         break;
       }
       case HloOpcode::kGetTupleElement: {
         const HloInstruction* source =
             PassThroughCustomCallMarkerGetSource(ins);
-        if (batch_map.count(ins)) {
+        if (batch_map.count(ins) && !batch_map.count(source)) {
           batch_map[source] = batch_map[ins];
         }
         break;
       }
+      case HloOpcode::kTuple:
+      case HloOpcode::kCustomCall:
+        break;
     }
   }
 
   // Print batch map for debugging
-  //std::cerr << "Batch dim map" << std::endl;
-  //for (const HloInstruction* ins : instructions) {
-  //  std::cerr << ins->ToString(HloPrintOptions::ShortParsable());
-  //  if (batch_map.count(ins)) {
-  //    std::cerr << " BATCH " << batch_map[ins] << std::endl;
-  //  } else {
-  //    std::cerr << " NOBATCH " << std::endl;
-  //  }
-  //}
-  //exit(-1);
+  // std::cerr << "Batch dim map" << std::endl;
+  // for (const HloInstruction* ins : instructions) {
+  //   std::cerr << ins->ToString(HloPrintOptions::ShortParsable());
+  //   if (batch_map.count(ins)) {
+  //     std::cerr << " BATCH " << batch_map[ins] << std::endl;
+  //   } else {
+  //     std::cerr << " NOBATCH " << std::endl;
+  //   }
+  // }
+  // exit(-1);
 
   return batch_map;
 }

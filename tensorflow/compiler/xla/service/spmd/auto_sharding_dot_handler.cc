@@ -4,31 +4,6 @@
 namespace xla {
 namespace spmd {
 
-// Filter strategies according to the solver_option.force_batch_dim_to_mesh_dim.
-// This can be used to forcibly generate data-parallel strategies.
-void FilterStrategy(const HloInstruction* ins,
-                    std::unique_ptr<StrategyVector>& strategies,
-                    const ClusterEnvironment& cluster_env,
-                    const InstructionBatchDimMap& batch_map,
-                    const AutoShardingSolverOption& solver_option) {
-  int mesh_dim = solver_option.force_batch_dim_to_mesh_dim;
-  int batch_dim = batch_map.at(ins);
-  CHECK_GE(ins->shape().dimensions(batch_dim),
-           cluster_env.device_mesh.dim(mesh_dim));
-
-  std::vector<ShardingStrategy> new_leaf_vector;
-  for (auto& stra : strategies->leaf_vector) {
-    std::vector<int> tensor_dim_to_mesh_dim =
-        cluster_env.GetTensorDimToMeshDim(ins->shape(), stra.output_sharding);
-    if (tensor_dim_to_mesh_dim[batch_dim] == mesh_dim) {
-      new_leaf_vector.push_back(std::move(stra));
-    }
-  }
-  CHECK(!new_leaf_vector.empty())
-      << ins->ToString() << " does not have any valid strategies";
-  strategies->leaf_vector = std::move(new_leaf_vector);
-}
-
 void AppendNewStrategy(const HloInstruction* ins, const std::string& name,
                        const HloSharding& output_spec,
                        const std::vector<HloSharding>& input_specs,

@@ -74,7 +74,8 @@ std::string GetGradSyncChannelIds(const HloModule* module,
 
   HloInstruction* root = module->entry_computation()->root_instruction();
   if (grad_idx) {
-    CHECK(root->opcode() == HloOpcode::kTuple) << "The root inst is not tuple";
+    CHECK(root->opcode() == HloOpcode::kTuple ||
+          root->opcode() == HloOpcode::kAllReduce) << "The root inst is not tuple";
     for (int idx : grad_idx.value()) {
       DfsSearch(root->operand(idx), channel_ids);
     }

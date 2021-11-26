@@ -65,7 +65,7 @@ StatusOr<bool> CommonComputationElimination::Run(HloModule* module) {
     }
   }
 
-  std::cerr << "Total fused ins: " << total_ct << ", Replaced fused ins: " << replaced_ct << std::endl;
+  //std::cerr << "Total fused ins: " << total_ct << ", Replaced fused ins: " << replaced_ct << std::endl;
 
   return changed;
 };

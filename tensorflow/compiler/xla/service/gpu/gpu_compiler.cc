@@ -73,6 +73,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gather_expander.h"
 #include "tensorflow/compiler/xla/service/gpu/alias_passthrough_params.h"
 #include "tensorflow/compiler/xla/service/gpu/cudnn_batchnorm_rewriter.h"
+#include "tensorflow/compiler/xla/service/gpu/common_computation_elimination.h"
 #include "tensorflow/compiler/xla/service/gpu/fusion_bitcast_lift.h"
 #include "tensorflow/compiler/xla/service/gpu/fusion_merger.h"
 #include "tensorflow/compiler/xla/service/gpu/gemm_broadcast_folding_rewriter.h"
@@ -509,6 +510,7 @@ Status GpuCompiler::OptimizeHloModule(
 
   {
     HloPassPipeline pipeline("post-fusion optimization");
+    pipeline.AddPass<CommonComputationElimination>();
     pipeline.AddPass<AllGatherCombiner>(
         pass_context::GetInt("combiner::all_gather_threshold", 1024 * 1024 * 1024),
         /*combine_threshold_count=*/512);

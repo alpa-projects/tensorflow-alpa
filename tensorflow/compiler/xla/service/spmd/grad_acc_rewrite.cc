@@ -52,6 +52,7 @@ void DfsSearch(const HloInstruction* cur, absl::flat_hash_set<int>& ret) {
   switch (cur->opcode()) {
     case HloOpcode::kTuple:
     case HloOpcode::kSlice:
+    case HloOpcode::kGetTupleElement:
     case HloOpcode::kBitcast: {
       for (size_t i = 0; i < cur->operand_count(); ++i) {
         DfsSearch(cur->operand(i), ret);
@@ -73,7 +74,8 @@ std::string GetGradSyncChannelIds(const HloModule* module,
 
   HloInstruction* root = module->entry_computation()->root_instruction();
   if (grad_idx) {
-    CHECK(root->opcode() == HloOpcode::kTuple) << "The root inst is not tuple";
+    CHECK(root->opcode() == HloOpcode::kTuple ||
+          root->opcode() == HloOpcode::kAllReduce) << "The root inst is not tuple";
     for (int idx : grad_idx.value()) {
       DfsSearch(root->operand(idx), channel_ids);
     }

@@ -1624,6 +1624,7 @@ cc_library(
         ":all_reduce_blueconnect",
         ":auto_sharding",
         ":cudnn_batchnorm_rewriter",
+        ":common_computation_elimination",
         ":fusion_bitcast_lift",
         ":fusion_merger",
         ":gemm_broadcast_folding_rewriter",
@@ -2642,5 +2643,17 @@ test_suite(
         "//tensorflow/compiler/xla/tests:multioutput_fusion_test_gpu",
         "//tensorflow/compiler/xla/tests:scatter_test_gpu",
         "//tensorflow/compiler/xla/tests:triangular_solve_test_gpu",
+
+cc_library(
+    name = "common_computation_elimination",
+    srcs = [
+        "common_computation_elimination.cc",
+    ],
+    hdrs = [
+        "common_computation_elimination.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
     ],
 )

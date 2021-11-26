@@ -607,6 +607,7 @@ Status GpuCompiler::OptimizeHloModule(
 
   {
     HloPassPipeline pipeline("post-fusion optimization");
+    pipeline.AddPass<CommonComputationElimination>();
     pipeline.AddPass<AllGatherCombiner>(
         pass_context::GetInt("combiner::all_gather_threshold", 1024 * 1024 * 1024),
         /*combine_threshold_count=*/512);
@@ -1004,13 +1005,8 @@ static Status CompileModuleToLlvmIrImpl(
       &results->output_shape, &results->entry_func_attrs));
 
   IrEmitterContext ir_emitter_context(
-<<<<<<< HEAD
-      /*hlo_module=*/nullptr, /*buffer_assignment=*/nullptr, platform_name,
-      gpu_device_info, cuda_compute_capability, rocm_compute_capability,
-=======
       /*hlo_module=*/hlo_module, /*buffer_assignment=*/nullptr, platform_name,
-      gpu_device_info, cuda_compute_capability, profile_index_map,
->>>>>>> Fix conflicts of env var XLA_SKIP_NCCL_COLLECTIVE_IDS (#40)
+      gpu_device_info, cuda_compute_capability, rocm_compute_capability,
       &mlir_context, results->llvm_module.get());
 
   ir_emitter_context.set_allocations(results->allocations);

@@ -1521,6 +1521,7 @@ cc_library(
         ":alias_passthrough_params",
         ":all_reduce_blueconnect",
         ":cudnn_batchnorm_rewriter",
+        ":common_computation_elimination",
         ":fusion_bitcast_lift",
         ":fusion_merger",
         ":gemm_broadcast_folding_rewriter",
@@ -2743,5 +2744,19 @@ cc_library(
         "//tensorflow/compiler/xla/service:hlo_creation_utils",
         "//tensorflow/compiler/xla/service:hlo_pass",
         "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "common_computation_elimination",
+    srcs = [
+        "common_computation_elimination.cc",
+    ],
+    hdrs = [
+        "common_computation_elimination.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
     ],
 )

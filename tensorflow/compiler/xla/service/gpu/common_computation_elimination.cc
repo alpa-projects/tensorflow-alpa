@@ -3,12 +3,10 @@
 namespace xla {
 namespace gpu {
 
-
 template <class T>
 inline void hash_combine(std::size_t& seed, const T& value) {
     seed ^= value + 0x9e3779b9 + (seed<<6) + (seed>>2);
 }
-
 
 struct HloComputationPtrHash {
    size_t operator() (const HloComputation *computation) const {
@@ -37,9 +35,6 @@ StatusOr<bool> CommonComputationElimination::Run(HloModule* module) {
     return false;
   }
 
-  //std::cerr << "===== Enter =====" << std::endl;
-  //std::cerr << module->ToString() << std::endl;
-
   for (HloComputation* computation : module->computations()) {
     auto iter = unique.find(computation);
     if (iter == unique.end()) {
@@ -58,7 +53,6 @@ StatusOr<bool> CommonComputationElimination::Run(HloModule* module) {
       HloComputation* src = ins->called_computations().front();
       auto iter = replace_with.find(src);
       if (iter != replace_with.end()) {
-        //std::cerr << "replace " << src->name() << " with "  << iter->second->name() << std::endl;
         changed = true;
         replaced_ct++;
         ins->ReplaceCalledComputations([&](HloComputation* call_target){
@@ -72,9 +66,6 @@ StatusOr<bool> CommonComputationElimination::Run(HloModule* module) {
   }
 
   std::cerr << "Total fused ins: " << total_ct << ", Replaced fused ins: " << replaced_ct << std::endl;
-
-  //std::cerr << "===== Exit =====" << std::endl;
-  //std::cerr << module->ToString() << std::endl;
 
   return changed;
 };

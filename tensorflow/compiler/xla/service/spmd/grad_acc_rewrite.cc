@@ -52,6 +52,7 @@ void DfsSearch(const HloInstruction* cur, absl::flat_hash_set<int>& ret) {
   switch (cur->opcode()) {
     case HloOpcode::kTuple:
     case HloOpcode::kSlice:
+    case HloOpcode::kGetTupleElement:
     case HloOpcode::kBitcast: {
       for (size_t i = 0; i < cur->operand_count(); ++i) {
         DfsSearch(cur->operand(i), ret);

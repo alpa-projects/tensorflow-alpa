@@ -5,30 +5,32 @@ namespace gpu {
 
 template <class T>
 inline void hash_combine(std::size_t& seed, const T& value) {
-    seed ^= value + 0x9e3779b9 + (seed<<6) + (seed>>2);
+  seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
 struct HloComputationPtrHash {
-   size_t operator() (const HloComputation *computation) const {
-     size_t ret = 0x1234;
-     for (const HloInstruction* ins : computation->instructions()) {
-       hash_combine(ret, int(ins->opcode()));
-     }
-     return ret;
-   }
+  size_t operator()(const HloComputation* computation) const {
+    size_t ret = 0x1234;
+    for (const HloInstruction* ins : computation->instructions()) {
+      hash_combine(ret, int(ins->opcode()));
+    }
+    return ret;
+  }
 };
 
 struct HloComputationPtrEqual {
-   size_t operator() (const HloComputation *lhs, const HloComputation *rhs) const {
-     return *lhs == *rhs;
-   }
+  size_t operator()(const HloComputation* lhs,
+                    const HloComputation* rhs) const {
+    return *lhs == *rhs;
+  }
 };
 
 StatusOr<bool> CommonComputationElimination::Run(HloModule* module) {
   bool changed = false;
 
-  absl::flat_hash_map<HloComputation*, HloComputation*,
-                      HloComputationPtrHash, HloComputationPtrEqual> unique;
+  absl::flat_hash_map<HloComputation*, HloComputation*, HloComputationPtrHash,
+                      HloComputationPtrEqual>
+      unique;
   absl::flat_hash_map<HloComputation*, HloComputation*> replace_with;
 
   if (module->computation_count() < 5) {
@@ -55,7 +57,7 @@ StatusOr<bool> CommonComputationElimination::Run(HloModule* module) {
       if (iter != replace_with.end()) {
         changed = true;
         replaced_ct++;
-        ins->ReplaceCalledComputations([&](HloComputation* call_target){
+        ins->ReplaceCalledComputations([&](HloComputation* call_target) {
           CHECK_EQ(call_target, src);
           return iter->second;
         });
@@ -65,7 +67,8 @@ StatusOr<bool> CommonComputationElimination::Run(HloModule* module) {
     }
   }
 
-  //std::cerr << "Total fused ins: " << total_ct << ", Replaced fused ins: " << replaced_ct << std::endl;
+  // std::cerr << "Total fused ins: " << total_ct << ", Replaced fused ins: " <<
+  // replaced_ct << std::endl;
 
   return changed;
 };

@@ -8,13 +8,16 @@
 namespace xla {
 namespace gpu {
 
-// Eliminate common subcomputation
+// Eliminate common subcomputation for fused computations.
+// This can accelerate compilation speed and reduce the number of kernels.
 class CommonComputationElimination : public HloModulePass {
  public:
   CommonComputationElimination() = default;
   ~CommonComputationElimination() override = default;
 
-  absl::string_view name() const override { return "common-computation-elimination"; }
+  absl::string_view name() const override {
+    return "common-computation-elimination";
+  }
 
   StatusOr<bool> Run(HloModule* module) override;
 };

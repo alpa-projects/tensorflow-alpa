@@ -1122,7 +1122,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   // gradient accumulation. If false, all-gather happends before forward pass,
   // which can partitions more tensors.
   bool do_all_gather_after_backward = true;
-  int verbose = 1;
+  int verbose = 0;
 
   std::vector<HloInstruction*> insert_all_gather;
   absl::flat_hash_set<const HloInstruction*> modified;

@@ -651,6 +651,8 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       case HloOpcode::kTuple:
       case HloOpcode::kCustomCall:
         break;
+      default:
+        break;
     }
   }
 
@@ -1052,6 +1054,51 @@ void FindReplicateSet(
   }
 }
 
+// Try to reduce the boundary set to its common ancestor
+void TryReduceWithCommonAncesstor(absl::flat_hash_set<HloInstruction*>& replicated_set,
+                                  absl::flat_hash_set<HloInstruction*>& boundary_set,
+                                  absl::flat_hash_set<HloInstruction*>& consumer_set,
+                                  const AliasMap& alias_map) {
+  if (boundary_set.size() != 2) {
+    return;
+  }
+
+  HloInstruction* ancestor = nullptr;
+  absl::flat_hash_set<HloInstruction*> path;
+  for (HloInstruction* node : boundary_set) {
+    HloInstruction* cur = node;
+    while (cur->operand_count() == 1) {
+      HloInstruction* operand =
+        PassThroughCustomCallMarkerOperand(cur->mutable_operand(0), cur);
+      if (replicated_set.count(operand)) {
+        path.insert(cur);
+      }
+      cur = operand;
+    }
+
+    if (ancestor == nullptr) {
+      ancestor = cur;
+    } else {
+      if (ancestor != cur) {
+        // The nodes in boundary set do not have a common ancestor.
+        // This reduction fails.
+        return;
+      }
+    }
+  }
+  if (ancestor == nullptr) {
+    return;
+  }
+
+  // Find a common ancestor, reduce the boundary set
+  boundary_set.clear();
+  boundary_set.insert(ancestor);
+  for (auto x : path) {
+    replicated_set.erase(x);
+  }
+  consumer_set.insert(ancestor);
+}
+
 // Substitute all-reduce strategies with their reduce-scatter variants.
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const AliasMap& alias_map,
@@ -1075,7 +1122,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   // gradient accumulation. If false, all-gather happends before forward pass,
   // which can partitions more tensors.
   bool do_all_gather_after_backward = true;
-  int verbose = 0;
+  int verbose = 1;
 
   std::vector<HloInstruction*> insert_all_gather;
   absl::flat_hash_set<const HloInstruction*> modified;
@@ -1103,6 +1150,9 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
     FindReplicateSet(inst, alias_map, cost_graph, s_val, strategy_map, strategy,
                      output, do_all_gather_after_backward, transpose_inst,
                      replicated_set, boundary_set, consumer_set, visited);
+
+    // Try to reduce the boundary set to its common ancestor
+    TryReduceWithCommonAncesstor(replicated_set, boundary_set, consumer_set, alias_map);
 
     // Analyze the instructions after which all-gather should be inserted.
     std::vector<HloInstruction*> need_all_gather;
@@ -1225,6 +1275,12 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             insert_all_gather.push_back(alias_map.at(to_split));
           } else {
             insert_all_gather.push_back(to_split);
+
+            if (to_split->opcode() == HloOpcode::kGetTupleElement && IsCustomCallMarker(to_split->operand(0))
+                && to_split->users().size() == 1 && to_split->users().front() == output) {
+              insert_all_gather.push_back(PassThroughCustomCallMarkerOperand(
+                to_split->mutable_operand(0), to_split));
+            }
           }
         }
       } else {

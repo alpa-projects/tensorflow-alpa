@@ -1111,7 +1111,7 @@ void UseAllReduceForGradAcc(
     CHECK_EQ(add->users().size(), 1);
     add = PassThroughCustomCallMarkerUser(add->users().front(), add);
 
-    std::function<void(const HloInstruction* cur)> dfs_remove;
+    std::function<void(const HloInstruction*)> dfs_remove;
     dfs_remove = [&](const HloInstruction* cur) {
       if (!replicated_set.count(cur)) {
         return;

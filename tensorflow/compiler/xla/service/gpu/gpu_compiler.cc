@@ -418,8 +418,6 @@ Status GpuCompiler::OptimizeHloModule(
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
-      spmd_pipeline.AddPass<RematIdentityFixer>();
-      spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
     } else {
       spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
@@ -435,7 +433,9 @@ Status GpuCompiler::OptimizeHloModule(
     HloPassPipeline collectives_pipeline("collective-optimizations");
     collectives_pipeline.AddPass<AllReduceFolder>();
     collectives_pipeline.AddPass<ReduceScatterCreator>();
+    collectives_pipeline.AddPass<RematIdentityFixer>();
     collectives_pipeline.AddPass<AllReduceReassociate>();
+    collectives_pipeline.AddPass<xla::spmd::GradAccRewrite>();
 
     // Run algebraic simplifier to reshape(broadcast) into a broadcast when
     // the reshape is just adding a unit dimension. This will help with the

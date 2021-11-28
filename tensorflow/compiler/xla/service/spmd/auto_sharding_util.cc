@@ -1055,10 +1055,11 @@ void FindReplicateSet(
 }
 
 // Try to reduce the boundary set to its common ancestor
-void TryReduceWithCommonAncesstor(absl::flat_hash_set<HloInstruction*>& replicated_set,
-                                  absl::flat_hash_set<HloInstruction*>& boundary_set,
-                                  absl::flat_hash_set<HloInstruction*>& consumer_set,
-                                  const AliasMap& alias_map) {
+void TryReduceWithCommonAncesstor(
+    absl::flat_hash_set<HloInstruction*>& replicated_set,
+    absl::flat_hash_set<HloInstruction*>& boundary_set,
+    absl::flat_hash_set<HloInstruction*>& consumer_set,
+    const AliasMap& alias_map) {
   if (boundary_set.size() != 2) {
     return;
   }
@@ -1069,7 +1070,7 @@ void TryReduceWithCommonAncesstor(absl::flat_hash_set<HloInstruction*>& replicat
     HloInstruction* cur = node;
     while (cur->operand_count() == 1) {
       HloInstruction* operand =
-        PassThroughCustomCallMarkerOperand(cur->mutable_operand(0), cur);
+          PassThroughCustomCallMarkerOperand(cur->mutable_operand(0), cur);
       if (replicated_set.count(operand)) {
         path.insert(cur);
       }
@@ -1099,6 +1100,33 @@ void TryReduceWithCommonAncesstor(absl::flat_hash_set<HloInstruction*>& replicat
   consumer_set.insert(ancestor);
 }
 
+void UseAllReduceForGradAcc(
+    absl::flat_hash_set<HloInstruction*>& replicated_set,
+    const HloInstruction* inst) {
+  if (inst->users().size() == 1 &&
+      inst->users().front()->opcode() == HloOpcode::kAdd) {
+    // Do not partition the dot, add and parameter, so we can generate
+    // all-reduce for grad accumulation.
+    const HloInstruction* add = inst->users().front();
+    CHECK_EQ(add->users().size(), 1);
+    add = PassThroughCustomCallMarkerUser(add->users().front(), add);
+
+    std::function<void(const HloInstruction* cur)> dfs_remove;
+    dfs_remove = [&](const HloInstruction* cur) {
+      if (!replicated_set.count(cur)) {
+        return;
+      }
+
+      replicated_set.erase(cur);
+      for (auto x : cur->operands()) {
+        dfs_remove(PassThroughCustomCallMarkerOperand(x, cur));
+      }
+    };
+
+    dfs_remove(add);
+  }
+}
+
 // Substitute all-reduce strategies with their reduce-scatter variants.
 void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const AliasMap& alias_map,
@@ -1122,6 +1150,18 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   // gradient accumulation. If false, all-gather happends before forward pass,
   // which can partitions more tensors.
   bool do_all_gather_after_backward = true;
+
+  // If true, do not acutally generate reduce-scatter + all-gather,
+  // but generate all-reduce + all-gather instead.
+  // This saves less memory but is more friendly to gradient accumulation.
+  // This is a temporary walkaround due to impelmentation difficutly.
+  // Ideally, we should be able to generate a gradient-accumulation-friendly
+  // reduce-scatter + all-gather, but for now it is not easy to implement this
+  // our current system. So we generate a gradient-accumulation-friendly
+  // all-reduce + all-gather, which has the same memory consumption but with 50%
+  // communication overhead.
+  bool use_all_reduce_for_grad_acc =
+      solver_option.reduce_scatter_grad_acc_friendly;
   int verbose = 0;
 
   std::vector<HloInstruction*> insert_all_gather;
@@ -1152,7 +1192,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
                      replicated_set, boundary_set, consumer_set, visited);
 
     // Try to reduce the boundary set to its common ancestor
-    TryReduceWithCommonAncesstor(replicated_set, boundary_set, consumer_set, alias_map);
+    TryReduceWithCommonAncesstor(replicated_set, boundary_set, consumer_set,
+                                 alias_map);
 
     // Analyze the instructions after which all-gather should be inserted.
     std::vector<HloInstruction*> need_all_gather;
@@ -1254,6 +1295,10 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         replicated_set.erase(inst);
       }
 
+      if (use_all_reduce_for_grad_acc) {
+        UseAllReduceForGradAcc(replicated_set, inst);
+      }
+
       for (HloInstruction* to_split : replicated_set) {
         SetSharding(to_split, output_spec, inst, transpose_inst, modified);
       }
@@ -1276,16 +1321,20 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           } else {
             insert_all_gather.push_back(to_split);
 
-            if (to_split->opcode() == HloOpcode::kGetTupleElement && IsCustomCallMarker(to_split->operand(0))
-                && to_split->users().size() == 1 && to_split->users().front() == output) {
+            if (to_split->opcode() == HloOpcode::kGetTupleElement &&
+                IsCustomCallMarker(to_split->operand(0)) &&
+                to_split->users().size() == 1 &&
+                to_split->users().front() == output) {
               insert_all_gather.push_back(PassThroughCustomCallMarkerOperand(
-                to_split->mutable_operand(0), to_split));
+                  to_split->mutable_operand(0), to_split));
             }
           }
         }
       } else {
         // Aggresivelly partition more parameter tensors.
         // This can result in a strategy similar to ZeRO stage 3.
+        // NOTE: The combination of this branch with pipeline parallel is not
+        // tested.
         for (HloInstruction* to_split : need_all_gather) {
           SetSharding(to_split, output_spec, inst, transpose_inst, modified);
 

@@ -1737,7 +1737,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       pass_context::GetBool("auto_sharding::allow_replicated_parameters", true);
   solver_option.prefer_reduce_scatter =
       pass_context::GetBool("auto_sharding::prefer_reduce_scatter", false);
-  solver_option.prefer_reduce_scatter =
+  solver_option.reduce_scatter_grad_acc_friendly =
       pass_context::GetBool("auto_sharding::reduce_scatter_grad_acc_friendly", false);
   solver_option.reduce_scatter_aggresive_partition = pass_context::GetBool(
       "auto_sharding::reduce_scatter_aggresive_partition", false);

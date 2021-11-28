@@ -45,6 +45,9 @@ struct AutoShardingSolverOption {
   // all-gather if no communication overhead is introduced.
   bool prefer_reduce_scatter;
 
+  // If True, generate a gradient-accumulation friendly variant of reduce-scatter
+  bool reduce_scatter_grad_acc_friendly;
+
   // If true, aggresively partition more tensors when generating reduce-scatter,
   // even if it introduces more communicaton.
   bool reduce_scatter_aggresive_partition;

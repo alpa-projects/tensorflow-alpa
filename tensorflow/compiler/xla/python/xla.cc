@@ -170,6 +170,19 @@ PYBIND11_MODULE(xla_extension, m) {
                 dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
             return gpu_client->allocator()->bytes_available(device.local_hardware_id());
           })
+      .def(
+        "clear_memory_stats",
+        [](const PjRtDevice& device) {
+            const bool invalid = false;
+
+            xla::PjRtClient* client = device.client();
+            if (client->platform_name() != "gpu") {
+              return invalid;
+            }
+            xla::PjRtStreamExecutorClient* gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+            return gpu_client->allocator()->ClearStats(device.local_hardware_id());
+          })
       .def("__str__", &PjRtDevice::DebugString)
       .def("synchronize_all_activity", [](PjRtDevice& device) {
              PjRtStreamExecutorDevice* stream_device =

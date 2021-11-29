@@ -170,7 +170,7 @@ PYBIND11_MODULE(xla_extension, m) {
             return gpu_client->allocator()->bytes_available(device.local_hardware_id());
           })
       .def(
-        "clear_stats",
+        "clear_memory_stats",
         [](const PjRtDevice& device) {
             const bool invalid = false;
 

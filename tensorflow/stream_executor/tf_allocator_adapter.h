@@ -135,6 +135,11 @@ class MultiDeviceAdapter : public DeviceMemoryAllocator {
     return stat->peak_bytes_in_use;
   }
 
+  bool ClearStats(int64_t device_ordinal) const override {
+    auto& allocator = tf_allocators_[device_ordinal];
+    return allocator->ClearStats();
+  }
+
  private:
   std::vector<TfAllocatorAdapter> per_device_allocators_;
   // The wrapped TF allocators backing per_device_allocators_

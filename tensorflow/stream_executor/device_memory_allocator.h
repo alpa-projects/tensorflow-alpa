@@ -235,6 +235,10 @@ class DeviceMemoryAllocator {
     return -1;
   }
 
+  virtual bool ClearStats(int64_t device_ordinal) const {
+    return false;
+  }
+
  protected:
   const Platform* platform_;
 };

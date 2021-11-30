@@ -1103,15 +1103,33 @@ void TryReduceWithCommonAncesstor(
 void UseAllReduceForGradAcc(
     absl::flat_hash_set<HloInstruction*>& replicated_set,
     const HloInstruction* inst) {
-  if (inst->users().size() == 1 &&
-      inst->users().front()->opcode() == HloOpcode::kAdd) {
-    // Do not partition the dot, add and parameter, so we can generate
-    // all-reduce for grad accumulation.
-    const HloInstruction* add = inst->users().front();
+  if (inst->users().size() != 1) {
+    return;
+  }
+  // Find the add instruction for grad accumulation, skip the identity marker
+  // for remat.
+  const HloInstruction* add =
+      PassThroughCustomCallMarkerUser(inst->users().front(), inst);
+  if (add->opcode() == HloOpcode::kGetTupleElement) {
+    if (add->users().size() != 1) {
+      return;
+    }
+    add = add->users().front();
+  }
+
+  if (add->opcode() == HloOpcode::kAdd) {
+    // Skip multiple adds introduced by AllReduceReassociate.
+    while (add->users().size() == 1 &&
+           add->users().front()->opcode() == HloOpcode::kAdd) {
+      add = add->users().front();
+    }
     CHECK_EQ(add->users().size(), 1);
+    // Skip the end marker of backward computation
     add = PassThroughCustomCallMarkerUser(add->users().front(), add);
 
-    std::function<void(const HloInstruction* cur)> dfs_remove;
+    // Do not partition the dot, add and parameter, so we can generate
+    // all-reduce for grad accumulation.
+    std::function<void(const HloInstruction*)> dfs_remove;
     dfs_remove = [&](const HloInstruction* cur) {
       if (!replicated_set.count(cur)) {
         return;
@@ -1157,7 +1175,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
   // This is a temporary walkaround due to impelmentation difficutly.
   // Ideally, we should be able to generate a gradient-accumulation-friendly
   // reduce-scatter + all-gather, but for now it is not easy to implement this
-  // our current system. So we generate a gradient-accumulation-friendly
+  // in our current system. So we generate a gradient-accumulation-friendly
   // all-reduce + all-gather, which has the same memory consumption but with 50%
   // communication overhead.
   bool use_all_reduce_for_grad_acc =

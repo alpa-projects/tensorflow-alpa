@@ -347,26 +347,22 @@ inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
     const std::vector<HloInstruction*>& instructions) {
   std::vector<const HloInstruction*> ret;
 
-  // Find the second pipeline_marker, which marks all gradient values.
-  int ct = 0;
   for (size_t i = 0; i < instructions.size(); ++i) {
     const HloInstruction* ins = instructions[i];
 
-    if (ins->IsCustomCall("xla_pipeline_marker")) {
-      if (++ct == 2) {
-        const HloInstruction* tuple = ins->operand(0);
+    if (ins->IsCustomCall("xla_pipeline_marker") &&
+        ins->metadata().op_name().find("grad_acc_boundary") != std::string::npos) {
+      const HloInstruction* tuple = ins->operand(0);
+      for (size_t j = 0; j < tuple->operand_count(); ++j) {
+        const HloInstruction* add = tuple->operand(j);
+        while (add->opcode() == HloOpcode::kAdd) {
+          ret.push_back(add->operand(0));
+          ret.push_back(add->operand(1));
 
-        for (size_t j = 0; j < tuple->operand_count(); ++j) {
-          const HloInstruction* add = tuple->operand(j);
-          while (add->opcode() == HloOpcode::kAdd) {
-            ret.push_back(add->operand(0));
-            ret.push_back(add->operand(1));
-
-            if (add->operand(0)->opcode() == HloOpcode::kAdd) {
-              add = add->operand(0);
-            } else {
-              add = add->operand(1);
-            }
+          if (add->operand(0)->opcode() == HloOpcode::kAdd) {
+            add = add->operand(0);
+          } else {
+            add = add->operand(1);
           }
         }
       }

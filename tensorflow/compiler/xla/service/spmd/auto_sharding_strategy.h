@@ -12,7 +12,7 @@ namespace spmd {
 namespace py = pybind11;
 
 // A constant to represent infinity cost.
-constexpr double INFINITY_COST = 1e10;
+constexpr double INFINITY_COST = 1e15;
 
 // Options for the auto-sharding solver.
 struct AutoShardingSolverOption {

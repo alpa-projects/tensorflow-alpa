@@ -343,6 +343,33 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
   }
 }
 
+// Whether the reshape is a special reshape that switches the batch dim of a dot
+bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
+  if (inst->opcode() != HloOpcode::kReshape) {
+    return false;
+  }
+  if (inst->users().size() != 1) {
+    return false;
+  }
+  const HloInstruction* operand = inst->operand(0);
+  const HloInstruction* user = inst->users().front();
+
+  if (operand->opcode() != HloOpcode::kDot) {
+    return false;
+  }
+
+  int batch_dims = operand->dot_dimension_numbers().lhs_batch_dimensions_size();
+  if (batch_dims <= 0) {
+    return false;
+  }
+
+  if (user->opcode() != HloOpcode::kTranspose) {
+    return false;
+  }
+
+  return true;
+}
+
 // Build possible sharding strategies and their costs for all instructions
 std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>
 BuildStrategyAndCost(const HloInstructionSequence& sequence,
@@ -536,7 +563,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
 
-        if (ins->users().size() == 1 ||
+        if ((ins->users().size() == 1 && !IsBatchDimSwitchReshape(ins)) ||
             (mesh_nn_dims >= 2 && !solver_option.allow_mixed_mesh_shape)) {
           for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
                ++sid) {

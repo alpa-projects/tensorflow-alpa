@@ -12,7 +12,7 @@ namespace spmd {
 namespace py = pybind11;
 
 // A constant to represent infinity cost.
-constexpr double INFINITY_COST = 1e15;
+constexpr double INFINITY_COST = 1e13;
 
 // Options for the auto-sharding solver.
 struct AutoShardingSolverOption {
@@ -33,7 +33,7 @@ struct AutoShardingSolverOption {
   bool override_reduce_scatter_cost;
   double reduce_scatter_cost;
 
-  // If true, override the cost of reduce-scatter with the given value.
+  // If true, override the cost of all-to-all with the given value.
   bool override_all_to_all_cost;
   double all_to_all_cost;
 
@@ -565,7 +565,7 @@ class ClusterEnvironment {
 
             if (lhs_mesh_dim == 1 && rhs_mesh_dim == -1) {
               comm_type.push_back(1);  // all-to-all
-              comm_bytes.push_back(bytes);
+              comm_bytes.push_back(bytes);  // FIXME(lmzheng): this bytes is wrong
               comm_mesh_dim.push_back(1);
             } else if (lhs_mesh_dim == -1) {
               if (rhs_mesh_dim == -1) {

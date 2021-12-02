@@ -1106,11 +1106,13 @@ void UseAllReduceForGradAcc(
   if (inst->users().size() != 1) {
     return;
   }
+
   // Find the add instruction for grad accumulation, skip the identity marker
-  // for remat.
+  // for remat and other elementwise ops.
   const HloInstruction* add =
       PassThroughCustomCallMarkerUser(inst->users().front(), inst);
-  if (add->opcode() == HloOpcode::kGetTupleElement) {
+  if (add->opcode() == HloOpcode::kGetTupleElement ||
+      add->opcode() == HloOpcode::kTranspose) {
     if (add->users().size() != 1) {
       return;
     }

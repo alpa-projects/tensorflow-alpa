@@ -565,7 +565,8 @@ class ClusterEnvironment {
 
             if (lhs_mesh_dim == 1 && rhs_mesh_dim == -1) {
               comm_type.push_back(1);  // all-to-all
-              comm_bytes.push_back(bytes);  // FIXME(lmzheng): this bytes is wrong
+              comm_bytes.push_back(
+                  bytes);  // FIXME(lmzheng): this bytes is wrong
               comm_mesh_dim.push_back(1);
             } else if (lhs_mesh_dim == -1) {
               if (rhs_mesh_dim == -1) {

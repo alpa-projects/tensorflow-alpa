@@ -351,7 +351,8 @@ inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
     const HloInstruction* ins = instructions[i];
 
     if (ins->IsCustomCall("xla_pipeline_marker") &&
-        ins->metadata().op_name().find("grad_acc_boundary") != std::string::npos) {
+        ins->metadata().op_name().find("grad_acc_boundary") !=
+            std::string::npos) {
       const HloInstruction* tuple = ins->operand(0);
       for (size_t j = 0; j < tuple->operand_count(); ++j) {
         const HloInstruction* add = tuple->operand(j);

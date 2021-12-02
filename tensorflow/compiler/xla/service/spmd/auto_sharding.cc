@@ -563,7 +563,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         CHECK(!src_strategies->is_tuple);
         strategies->following = src_strategies;
 
-        if ((ins->users().size() == 1 || (mesh_nn_dims >= 2)) && !IsBatchDimSwitchReshape(ins)) {
+        if ((ins->users().size() == 1 && !IsBatchDimSwitchReshape(ins)) ||
+            (mesh_nn_dims >= 2 && !solver_option.allow_mixed_mesh_shape)) {
           for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
                ++sid) {
             absl::optional<HloSharding> output_spec =

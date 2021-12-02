@@ -562,12 +562,6 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                  {FollowInsCostVector(src_strategies->leaf_vector.size(), sid)},
                  {}}));
           }
-
-          if (strategies->leaf_vector.empty()) {
-            LOG(WARNING) << "Failed to generate follow strategies for ins: "
-                         << ins->ToString()
-                         << ". This is mostly due to uneven partition.";
-          }
         }
 
         // Fail to create follow strategies, enumerate all possible cases

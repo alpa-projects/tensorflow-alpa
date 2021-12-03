@@ -247,6 +247,10 @@ inline bool IsCustomCallMarker(const HloInstruction* inst) {
          inst->IsCustomCall("identity");
 }
 
+// Pass through the custom call marker and get the acutal user.
+inline HloInstruction* PassThroughCustomCallMarkerUser(
+    HloInstruction* raw_user, const HloInstruction* inst);
+
 // Depth analysis (breadth first search) that compute the depth of each
 // instruction. We also assign a much larger distance to heavey operators (e.g.,
 // dot, convolution).

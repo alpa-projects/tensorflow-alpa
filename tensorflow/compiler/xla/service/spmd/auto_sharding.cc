@@ -370,6 +370,9 @@ bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
   return true;
 }
 
+std::string PrintStrategyVector(const StrategyVector* strategies,
+                                size_t indention);
+
 // Build possible sharding strategies and their costs for all instructions
 std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>
 BuildStrategyAndCost(const HloInstructionSequence& sequence,
@@ -573,6 +576,10 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                     src_strategies->leaf_vector[sid].output_sharding);
 
             if (!output_spec.has_value()) {
+              continue;
+            }
+
+            if (!IsValidTileAssignment(*output_spec)) {
               continue;
             }
 
@@ -1130,6 +1137,12 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
     CHECK(strategies->is_tuple || !strategies->leaf_vector.empty())
         << ins->ToString() << " does not have any valid strategies.";
     strategy_map[ins] = std::move(strategies);
+
+
+    // Print 
+    int i = instruction_id;
+    std::cerr << "Instruction " << i << ": " << instructions[i]->ToString() << "\n";
+    std::cerr << PrintStrategyVector(strategy_map.at(instructions[i]).get(), 0);
   }
 
   // If gradient accumulation is used, adjust the cost of all-reduce for

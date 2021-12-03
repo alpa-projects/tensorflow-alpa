@@ -322,6 +322,14 @@ absl::optional<HloSharding> PropagateReduceWindowSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Window& window);
 
+// Check whether the tile assignment of a HloSharding is valid for our system.
+// Definition of validity:
+// For every tile dimension, the device id sequence along that dimension has to
+// be an arithmetic sequence.
+//
+// e.g., we don't allow specs like sharding={devices=[8,1] 0,4,1,5,2,7,3,8}
+bool IsValidTileAssignment(const HloSharding& spec);
+
 // Get the corresponding mesh dimension for every tensor dimension.
 // The first return value maps ith tensor dim to ith mesh dim.
 // A -1 means the tensor is replicated on that dimension.

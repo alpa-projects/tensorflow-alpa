@@ -680,15 +680,27 @@ void FilterStrategy(const HloInstruction* ins,
                     const AutoShardingSolverOption& solver_option) {
   int mesh_dim = solver_option.force_batch_dim_to_mesh_dim;
   int batch_dim = batch_map.at(ins);
+  const Array<int64_t>& device_mesh = cluster_env.device_mesh;
   CHECK_GE(ins->shape().dimensions(batch_dim),
-           cluster_env.device_mesh.dim(mesh_dim));
+           device_mesh.dim(mesh_dim));
 
   std::vector<ShardingStrategy> new_leaf_vector;
   for (auto& stra : strategies->leaf_vector) {
     std::vector<int> tensor_dim_to_mesh_dim =
         cluster_env.GetTensorDimToMeshDim(ins->shape(), stra.output_sharding);
-    if (tensor_dim_to_mesh_dim[batch_dim] == mesh_dim) {
-      new_leaf_vector.push_back(std::move(stra));
+
+    if (device_mesh.dim(mesh_dim) > 1) {
+      // If the mesh dim is not one, the output tensor must be
+      // tiled along the mesh dim.
+      if (tensor_dim_to_mesh_dim[batch_dim] == mesh_dim) {
+        new_leaf_vector.push_back(std::move(stra));
+      }
+    } else {
+      // If the mesh dim is one, the output tensor must be replicated
+      // on the mesh dim.
+      if (tensor_dim_to_mesh_dim[batch_dim] == -1) {
+        new_leaf_vector.push_back(std::move(stra));
+      }
     }
   }
   CHECK(!new_leaf_vector.empty())

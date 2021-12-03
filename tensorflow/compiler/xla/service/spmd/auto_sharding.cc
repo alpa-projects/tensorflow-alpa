@@ -1138,11 +1138,10 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         << ins->ToString() << " does not have any valid strategies.";
     strategy_map[ins] = std::move(strategies);
 
-
-    // Print 
-    int i = instruction_id;
-    std::cerr << "Instruction " << i << ": " << instructions[i]->ToString() << "\n";
-    std::cerr << PrintStrategyVector(strategy_map.at(instructions[i]).get(), 0);
+    // Print strategy vector
+    // int i = instruction_id;
+    // std::cerr << "Instruction " << i << ": " << instructions[i]->ToString() << "\n";
+    // std::cerr << PrintStrategyVector(strategy_map.at(instructions[i]).get(), 0);
   }
 
   // If gradient accumulation is used, adjust the cost of all-reduce for

@@ -372,12 +372,12 @@ bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
 
 // Whether the instruction is followed by a broadcast
 bool IsFollowedByBroadcast(const HloInstruction* ins) {
-  int max_depth = 8;
+  int max_depth = 6;
   for (int i = 0; i < max_depth; ++i) {
     if (ins->users().empty()) {
       return false;
     }
-    ins = ins->users().front();
+    ins = PassThroughCustomCallMarkerUser(ins->users().front(), ins);
     if (ins->opcode() == HloOpcode::kBroadcast) {
       return true;
     }
@@ -1068,7 +1068,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                   strategy_map, strategies, " 1d");
         }
 
-        if (IsFollowedByBroadcast(ins)) {
+        if (strategies->leaf_vector.empty() || IsFollowedByBroadcast(ins)) {
           // Replicate
           strategies->leaf_vector.push_back(
               ShardingStrategy({"R",

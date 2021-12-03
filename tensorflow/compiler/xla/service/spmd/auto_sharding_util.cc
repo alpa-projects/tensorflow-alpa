@@ -949,7 +949,7 @@ inline bool IsCustomCallMarkerTuple(const HloInstruction* inst) {
          IsCustomCallMarker(inst->users().front());
 }
 
-// Pass through the custom call marker and get the acutal user
+// Pass through the custom call marker and get the acutal user.
 inline HloInstruction* PassThroughCustomCallMarkerUser(
     HloInstruction* raw_user, const HloInstruction* inst) {
   if (!IsCustomCallMarkerTuple(raw_user)) {

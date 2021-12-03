@@ -1494,6 +1494,33 @@ std::pair<int64_t, bool> CheckArithmeticSequence(
   return std::make_pair(delta, true);
 }
 
+bool IsValidTileAssignment(const HloSharding& spec) {
+  if (IsUndefined(spec)) {
+    return false;
+  }
+
+  if (spec.IsReplicated()) {
+    return true;
+  }
+
+  // Check all tile dims
+  const Array<int64_t>& tile_assignment = spec.tile_assignment();
+  for (int i = 0; i < tile_assignment.num_dimensions(); i++) {
+    if (tile_assignment.dim(i) != 1) {
+      std::vector<int64_t> device_ids =
+          GetValuesAlongOneDim(tile_assignment, i);
+      int64_t delta;
+      bool success;
+      std::tie(delta, success) = CheckArithmeticSequence(device_ids);
+      if (!success) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
     const Shape& shape, const HloSharding& spec) {
   CHECK(shape.IsArray());

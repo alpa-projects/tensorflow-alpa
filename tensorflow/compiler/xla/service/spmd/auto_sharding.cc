@@ -370,8 +370,21 @@ bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
   return true;
 }
 
-std::string PrintStrategyVector(const StrategyVector* strategies,
-                                size_t indention);
+// Whether the instruction is followed by a broadcast
+bool IsFollowedByBroadcast(const HloInstruction* ins) {
+  int max_depth = 8;
+  for (int i = 0; i < max_depth; ++i) {
+    if (ins->users().empty()) {
+      return false;
+    }
+    ins = ins->users().front();
+    if (ins->opcode() == HloOpcode::kBroadcast) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // Build possible sharding strategies and their costs for all instructions
 std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>
@@ -1055,15 +1068,17 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                   strategy_map, strategies, " 1d");
         }
 
-        // Replicate
-        strategies->leaf_vector.push_back(
-            ShardingStrategy({"R",
-                              HloSharding::Replicate(),
-                              replicated_penalty * 5,
-                              0,
-                              GetBytes(ins->shape()),
-                              {},
-                              {}}));
+        if (IsFollowedByBroadcast(ins)) {
+          // Replicate
+          strategies->leaf_vector.push_back(
+              ShardingStrategy({"R",
+                                HloSharding::Replicate(),
+                                replicated_penalty * 5,
+                                0,
+                                GetBytes(ins->shape()),
+                                {},
+                                {}}));
+        }
         break;
       }
       case HloOpcode::kGetTupleElement: {

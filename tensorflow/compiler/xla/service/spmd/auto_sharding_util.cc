@@ -224,7 +224,8 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   // Find the source of batch_dim propagation
   bool set_the_next_dot_conv = true;
   for (const HloInstruction* ins : instructions) {
-    if (ins->opcode() == HloOpcode::kDot || ins->opcode() == HloOpcode::kConvolution) {
+    if (ins->opcode() == HloOpcode::kDot ||
+        ins->opcode() == HloOpcode::kConvolution) {
       if (set_the_next_dot_conv) {
         set_the_next_dot_conv = false;
         batch_map[ins] = batch_dim_of_source;
@@ -686,8 +687,7 @@ void FilterStrategy(const HloInstruction* ins,
   int mesh_dim = solver_option.force_batch_dim_to_mesh_dim;
   int batch_dim = batch_map.at(ins);
   const Array<int64_t>& device_mesh = cluster_env.device_mesh;
-  CHECK_GE(ins->shape().dimensions(batch_dim),
-           device_mesh.dim(mesh_dim));
+  CHECK_GE(ins->shape().dimensions(batch_dim), device_mesh.dim(mesh_dim));
 
   std::vector<ShardingStrategy> new_leaf_vector;
   for (auto& stra : strategies->leaf_vector) {

@@ -288,8 +288,8 @@ class DotHandler {
       // R = Sk x Sk @ (allreduce @ 0)
       if (lhs->shape().dimensions(lhs_con_dims[0]) % num_devices == 0 &&
           rhs->shape().dimensions(rhs_con_dims[0]) % num_devices == 0) {
-        std::string name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)", mesh_dim,
-                               mesh_dim);
+        std::string name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)",
+                                           mesh_dim, mesh_dim);
         HloSharding output_spec = HloSharding::Replicate();
         HloSharding lhs_spec =
             Tile(lhs->shape(), {lhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
@@ -298,7 +298,7 @@ class DotHandler {
         double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
         double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
                                     cluster_env.AllReduceCost(memory_cost, 1);
-  
+
         AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
                           communication_cost, cluster_env, strategy_map,
                           strategies);
@@ -544,7 +544,7 @@ class ConvHandler {
         HloSharding lhs_spec =
             Tile(lhs->shape(), {lhs_batch_dim}, {mesh_dim}, device_mesh_1d);
         HloSharding rhs_spec = HloSharding::Replicate();
-  
+
         AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0, 0,
                           cluster_env, strategy_map, strategies);
       }
@@ -552,13 +552,13 @@ class ConvHandler {
       // R = Sk x Sk @ (allreduce @ 0)
       if (lhs->shape().dimensions(lhs_in_channel_dim) % num_devices == 0 &&
           rhs->shape().dimensions(rhs_in_channel_dim) % num_devices == 0) {
-        std::string name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)", mesh_dim,
-                               mesh_dim);
+        std::string name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)",
+                                           mesh_dim, mesh_dim);
         HloSharding output_spec = HloSharding::Replicate();
-        HloSharding lhs_spec =
-            Tile(lhs->shape(), {lhs_in_channel_dim}, {mesh_dim}, device_mesh_1d);
-        HloSharding rhs_spec =
-            Tile(rhs->shape(), {rhs_in_channel_dim}, {mesh_dim}, device_mesh_1d);
+        HloSharding lhs_spec = Tile(lhs->shape(), {lhs_in_channel_dim},
+                                    {mesh_dim}, device_mesh_1d);
+        HloSharding rhs_spec = Tile(rhs->shape(), {rhs_in_channel_dim},
+                                    {mesh_dim}, device_mesh_1d);
         double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
         double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
                                     cluster_env.AllReduceCost(memory_cost, 1);

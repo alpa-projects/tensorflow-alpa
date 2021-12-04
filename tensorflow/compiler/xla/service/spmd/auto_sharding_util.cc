@@ -1662,10 +1662,10 @@ void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
 
     absl::optional<HloSharding> src_inter_sharding =
         hlo_sharding_util::ReshapeSharding(shape, inter_shape, src_sharding);
-    CHECK(src_inter_sharding.has_value());
+    CHECK(src_inter_sharding.has_value()) << "Only support even partition";
     absl::optional<HloSharding> dst_inter_sharding =
         hlo_sharding_util::ReshapeSharding(shape, inter_shape, dst_sharding);
-    CHECK(dst_inter_sharding.has_value());
+    CHECK(dst_inter_sharding.has_value()) << "Only support even partition";
 
     HloInstruction* src_inter = inst->parent()->AddInstruction(
         HloInstruction::CreateReshape(inter_shape, operand));

@@ -386,13 +386,31 @@ bool IsFollowedByBroadcast(const HloInstruction* ins) {
   return false;
 }
 
+// Disable mixed mesh shape if the batch dim is not divisible by the
+// number of devices
+void DisableIncompatibleMixedMeshShape(
+  const InstructionBatchDimMap& batch_dim_map,
+  const Array<int64_t>& device_mesh_1d,
+  AutoShardingSolverOption& solver_option) {
+  int64_t batch_size = 0;
+  for (auto iter : batch_dim_map) {
+    batch_size = iter.first->shape().dimensions(iter.second);
+    break;
+  }
+
+  if (batch_size % device_mesh_1d.dim(0) != 0) {
+    solver_option.allow_mixed_mesh_shape = false;
+    LOG(WARNING) << "Mixed mesh shape is disabled due to indivisible batch size.";
+  }
+}
+
 // Build possible sharding strategies and their costs for all instructions
 std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>
 BuildStrategyAndCost(const HloInstructionSequence& sequence,
                      const InstructionDepthMap& depth_map,
                      const AliasMap& alias_map,
                      const ClusterEnvironment& cluster_env,
-                     const AutoShardingSolverOption& solver_option) {
+                     AutoShardingSolverOption& solver_option) {
   const Array<int64_t>& device_mesh = cluster_env.device_mesh;
   const Array<int64_t>& device_mesh_1d = cluster_env.device_mesh_1d;
   StrategyMap strategy_map;
@@ -414,6 +432,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
   InstructionBatchDimMap batch_dim_map;
   if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
     batch_dim_map = BuildInstructionBatchDimMap(sequence);
+    DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh_1d, solver_option);
   }
 
   // Gather all output values

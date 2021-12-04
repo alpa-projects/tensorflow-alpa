@@ -271,32 +271,38 @@ class DotHandler {
   void Add1DDataParallel() {
     if (device_mesh.dim(0) > 1 && device_mesh.dim(1) > 1) {
       int mesh_dim = 0;
+      int64_t num_devices = device_mesh_1d.dim(mesh_dim);
 
       // Si = Si x R @ 0
-      std::string name = absl::StrFormat("Si = Si x R @ %d", mesh_dim);
-      HloSharding output_spec =
-          Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh_1d);
-      HloSharding lhs_spec =
-          Tile(lhs->shape(), {lhs_space_dims[0]}, {mesh_dim}, device_mesh_1d);
-      HloSharding rhs_spec = HloSharding::Replicate();
-      AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0, 0,
-                        cluster_env, strategy_map, strategies);
+      if (lhs->shape().dimensions(lhs_space_dims[0]) % num_devices == 0) {
+        std::string name = absl::StrFormat("Si = Si x R @ %d", mesh_dim);
+        HloSharding output_spec =
+            Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh_1d);
+        HloSharding lhs_spec =
+            Tile(lhs->shape(), {lhs_space_dims[0]}, {mesh_dim}, device_mesh_1d);
+        HloSharding rhs_spec = HloSharding::Replicate();
+        AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0, 0,
+                          cluster_env, strategy_map, strategies);
+      }
 
       // R = Sk x Sk @ (allreduce @ 0)
-      name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)", mesh_dim,
-                             mesh_dim);
-      output_spec = HloSharding::Replicate();
-      lhs_spec =
-          Tile(lhs->shape(), {lhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
-      rhs_spec =
-          Tile(rhs->shape(), {rhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
-      double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
-      double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
-                                  cluster_env.AllReduceCost(memory_cost, 1);
+      if (lhs->shape().dimensions(lhs_con_dims[0]) % num_devices == 0 &&
+          rhs->shape().dimensions(rhs_con_dims[0]) % num_devices == 0) {
+        std::string name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)",
+                                           mesh_dim, mesh_dim);
+        HloSharding output_spec = HloSharding::Replicate();
+        HloSharding lhs_spec =
+            Tile(lhs->shape(), {lhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
+        HloSharding rhs_spec =
+            Tile(rhs->shape(), {rhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
+        double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+        double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
+                                    cluster_env.AllReduceCost(memory_cost, 1);
 
-      AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
-                        communication_cost, cluster_env, strategy_map,
-                        strategies);
+        AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
+                          communication_cost, cluster_env, strategy_map,
+                          strategies);
+      }
     }
   }
 
@@ -528,32 +534,39 @@ class ConvHandler {
   void Add1DDataParallel() {
     if (device_mesh.dim(0) > 1 && device_mesh.dim(1) > 1) {
       int mesh_dim = 0;
-      // Si = Si x R @ 0
-      std::string name = absl::StrFormat("Si = Si x R @ 0");
-      HloSharding output_spec =
-          Tile(ins->shape(), {out_batch_dim}, {mesh_dim}, device_mesh_1d);
-      HloSharding lhs_spec =
-          Tile(lhs->shape(), {lhs_batch_dim}, {mesh_dim}, device_mesh_1d);
-      HloSharding rhs_spec = HloSharding::Replicate();
+      int64_t num_devices = device_mesh_1d.dim(mesh_dim);
 
-      AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0, 0,
-                        cluster_env, strategy_map, strategies);
+      // Si = Si x R @ 0
+      if (lhs->shape().dimensions(lhs_batch_dim) % num_devices == 0) {
+        std::string name = absl::StrFormat("Si = Si x R @ 0");
+        HloSharding output_spec =
+            Tile(ins->shape(), {out_batch_dim}, {mesh_dim}, device_mesh_1d);
+        HloSharding lhs_spec =
+            Tile(lhs->shape(), {lhs_batch_dim}, {mesh_dim}, device_mesh_1d);
+        HloSharding rhs_spec = HloSharding::Replicate();
+
+        AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0, 0,
+                          cluster_env, strategy_map, strategies);
+      }
 
       // R = Sk x Sk @ (allreduce @ 0)
-      name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)", mesh_dim,
-                             mesh_dim);
-      output_spec = HloSharding::Replicate();
-      lhs_spec =
-          Tile(lhs->shape(), {lhs_in_channel_dim}, {mesh_dim}, device_mesh_1d);
-      rhs_spec =
-          Tile(rhs->shape(), {rhs_in_channel_dim}, {mesh_dim}, device_mesh_1d);
-      double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
-      double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
-                                  cluster_env.AllReduceCost(memory_cost, 1);
+      if (lhs->shape().dimensions(lhs_in_channel_dim) % num_devices == 0 &&
+          rhs->shape().dimensions(rhs_in_channel_dim) % num_devices == 0) {
+        std::string name = absl::StrFormat("R = Sk x Sk @ %d (allreduce @ %d)",
+                                           mesh_dim, mesh_dim);
+        HloSharding output_spec = HloSharding::Replicate();
+        HloSharding lhs_spec = Tile(lhs->shape(), {lhs_in_channel_dim},
+                                    {mesh_dim}, device_mesh_1d);
+        HloSharding rhs_spec = Tile(rhs->shape(), {rhs_in_channel_dim},
+                                    {mesh_dim}, device_mesh_1d);
+        double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+        double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
+                                    cluster_env.AllReduceCost(memory_cost, 1);
 
-      AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
-                        communication_cost, cluster_env, strategy_map,
-                        strategies);
+        AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
+                          communication_cost, cluster_env, strategy_map,
+                          strategies);
+      }
     }
   }
 

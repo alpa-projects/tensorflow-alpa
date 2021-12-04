@@ -1721,7 +1721,7 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
       os << i << " " << ins->ToString(HloPrintOptions::ShortParsable()) << "  ";
     } else {
       // Only print tuple once
-      os << i << " tuple." << ct << "  ";
+      os << i << " tuple." << ct << " " << ins->shape().tuple_shapes(ct).ToString() << "  ";
     }
 
     if (cost_graph.follow_idx[i] < 0) {

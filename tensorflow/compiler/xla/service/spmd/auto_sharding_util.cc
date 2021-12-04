@@ -219,8 +219,24 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
   // We use the first dot or convolution as the source to start batch dim
   // propagation. Assume the first dim of the first dot is the batch dim.
-  bool first_dot_conv = true;
   int batch_dim_of_source = 0;
+
+  // Find the source of batch_dim propagation
+  bool set_the_next_dot_conv = true;
+  for (const HloInstruction* ins : instructions) {
+    if (ins->opcode() == HloOpcode::kDot || ins->opcode() == HloOpcode::kConvolution) {
+      if (set_the_next_dot_conv) {
+        set_the_next_dot_conv = false;
+        batch_map[ins] = batch_dim_of_source;
+      }
+    }
+
+    if (ins->IsCustomCall("xla_pipeline_marker") &&
+        ins->metadata().op_type().find("start") != std::string::npos) {
+      // Reset the status after meet a new pipeline marker.
+      set_the_next_dot_conv = true;
+    }
+  }
 
   // Forward propagation: propagate from operand
   for (const HloInstruction* ins : instructions) {
@@ -358,12 +374,6 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         break;
       }
       case HloOpcode::kDot: {
-        if (first_dot_conv) {
-          first_dot_conv = false;
-          batch_map[ins] = batch_dim_of_source;
-          break;
-        }
-
         const HloInstruction* lhs = ins->operand(0);
         const HloInstruction* rhs = ins->operand(1);
         const auto& dot_dnums = ins->dot_dimension_numbers();
@@ -404,12 +414,6 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         break;
       }
       case HloOpcode::kConvolution: {
-        if (first_dot_conv) {
-          first_dot_conv = false;
-          batch_map[ins] = batch_dim_of_source;
-          break;
-        }
-
         const HloInstruction* lhs = ins->operand(0);
         const HloInstruction* rhs = ins->operand(1);
         const auto& conv_dnums = ins->convolution_dimension_numbers();
@@ -657,7 +661,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   }
 
   // Print batch map for debugging
-  // std::cerr << "Batch dim map" << std::endl;
+  // std::cerr << "Batch dim map begin" << std::endl;
   // for (const HloInstruction* ins : instructions) {
   //   std::cerr << ins->ToString(HloPrintOptions::ShortParsable());
   //   if (batch_map.count(ins)) {
@@ -666,6 +670,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   //     std::cerr << " NOBATCH " << std::endl;
   //   }
   // }
+  // std::cerr << "Batch dim map end" << std::endl;
   // exit(-1);
 
   return batch_map;

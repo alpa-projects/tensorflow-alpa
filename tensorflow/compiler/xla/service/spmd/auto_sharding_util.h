@@ -30,7 +30,7 @@ using ReshardingCache =
  * Array/Vector/Matrix Utility
  */
 // Append elements of `array` to `result`. The `indices` is a generalized
-// multi-dimensional index that can index a whole row (use -1 to indicate this)
+// multi-dimensional index that can index a whole row (use -1 to indicate this).
 template <typename T>
 void AppendFlattenElements(std::vector<T>* result, const Array<T>& array,
                            const std::vector<int64_t> indices, int cur_depth,
@@ -65,15 +65,7 @@ int64_t GetIndex(const std::vector<T>& v, const T& key) {
   }
 }
 
-// Get the value of the last elemet in a dimension
-template <typename T>
-T GetDimLastValue(const Array<T>& array, int dim) {
-  std::vector<int64_t> indices(array.num_dimensions(), 0);
-  indices[dim] = array.dim(dim) - 1;
-  return array(indices);
-}
-
-// Print a vector as string
+// Print a vector as string.
 template <typename T>
 std::string ToString(const std::vector<T>& vector) {
   std::ostringstream os;
@@ -174,7 +166,7 @@ inline bool StrStartsWith(const std::string& a, const std::string& b) {
  * Shape Utility
  */
 // Get the bytes of an array shape without checking its layout.
-// This is modified from ShapeUtil::ByteSizeOfElements (shape_util.cc)
+// This is modified from ShapeUtil::ByteSizeOfElements (shape_util.cc).
 inline int64_t ByteSizeOfElementsNoCheck(const Shape& shape) {
   TF_DCHECK_OK(ShapeUtil::ValidateShape(shape));
   CHECK(shape.IsArray());
@@ -188,7 +180,7 @@ inline int64_t ByteSizeOfElementsNoCheck(const Shape& shape) {
          ShapeUtil::ByteSizeOfPrimitiveType(shape.element_type());
 }
 
-// Get the number of bytes of a shape
+// Get the number of bytes of a shape.
 inline double GetBytes(const Shape& shape) {
   if (shape.IsArray()) {
     return ByteSizeOfElementsNoCheck(shape);
@@ -205,7 +197,7 @@ inline bool DimensionsEqual(const Shape& a, const Shape& b) {
 /*
  * HloInstruction Utility
  */
-// Get the space dimensions of a dot instruction
+// Get the space dimensions of a dot instruction.
 inline std::pair<std::vector<int64_t>, std::vector<int64_t>> GetSpaceDims(
     const Shape& lhs_shape, const Shape& rhs_shape,
     const DotDimensionNumbers& dnums) {
@@ -230,7 +222,7 @@ inline std::pair<std::vector<int64_t>, std::vector<int64_t>> GetSpaceDims(
   return std::make_pair(std::move(lhs_space_dims), std::move(rhs_space_dims));
 }
 
-// Replace old operand with the new one
+// Replace old operand with the new one.
 inline void ReplaceOperand(HloInstruction* inst,
                            const HloInstruction* old_operand,
                            HloInstruction* new_operand) {
@@ -247,9 +239,15 @@ inline bool IsCustomCallMarker(const HloInstruction* inst) {
          inst->IsCustomCall("identity");
 }
 
-// Pass through the custom call marker and get the acutal user.
-inline HloInstruction* PassThroughCustomCallMarkerUser(
-    HloInstruction* raw_user, const HloInstruction* inst);
+// Return whether the reshape is a special reshape that switches the batch dim
+// of a dot.
+bool IsBatchDimSwitchReshape(const HloInstruction* inst);
+
+// Return whether the instruction is followed by a broadcast.
+bool IsFollowedByBroadcast(const HloInstruction* inst);
+
+// Return whether the instruction is followed by a reduce.
+bool IsFollowedByReduce(const HloInstruction* inst);
 
 // Depth analysis (breadth first search) that compute the depth of each
 // instruction. We also assign a much larger distance to heavey operators (e.g.,
@@ -285,7 +283,7 @@ inline std::string ToStringSimple(const HloSharding& spec) {
   return ToString(spec.tile_assignment().dimensions());
 }
 
-// Insert a copy of the operand to force the sharding of the operand
+// Insert a copy of the operand to force the sharding of the operand.
 inline void ForceOperandSharding(HloInstruction* inst, int operand_num,
                                  const HloSharding& sharding) {
   HloInstruction* operand = inst->mutable_operand(operand_num);
@@ -330,7 +328,6 @@ absl::optional<HloSharding> PropagateReduceWindowSharding(
 // Definition of validity:
 // For every tile dimension, the device id sequence along that dimension has to
 // be an arithmetic sequence.
-//
 // e.g., we don't allow specs like sharding={devices=[8,1] 0,4,1,5,2,7,3,8}
 bool IsValidTileAssignment(const HloSharding& spec);
 

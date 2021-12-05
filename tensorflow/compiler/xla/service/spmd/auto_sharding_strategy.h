@@ -81,7 +81,7 @@ struct ShardingStrategy {
   double communication_cost;
   double memory_cost;
   // resharding_costs[i][j] is the resharding cost from the output of
-  // ith operand's jth strategy to this strategy.
+  // i-th operand's j-th strategy to this strategy.
   std::vector<std::vector<double>> resharding_costs;
   // Optional: the required shardings of operands.
   // This is used to guide the SPMD partitioner.

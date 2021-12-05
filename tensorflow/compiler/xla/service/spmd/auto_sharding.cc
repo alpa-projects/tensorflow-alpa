@@ -79,7 +79,7 @@ HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
 }
 
 // Compute the resharding cost vector from multiple possible strategies
-// to a desired sharding spec
+// to a desired sharding spec.
 std::vector<double> ReshardingCostVector(
     const StrategyVector* strategies, const Shape& shape,
     const HloSharding& required_sharding,
@@ -94,13 +94,14 @@ std::vector<double> ReshardingCostVector(
   return ret;
 }
 
+// Create the resharding cost vector for a follow strategy.
 std::vector<double> FollowInsCostVector(int64_t source_len, int64_t index) {
   std::vector<double> ret(source_len, INFINITY_COST);
   ret[index] = 0;
   return ret;
 }
 
-// Factory functions for StrategyVector
+// Factory functions for StrategyVector.
 std::unique_ptr<StrategyVector> CreateLeafStrategyVector(
     size_t instruction_id, LeafStrategies& leaf_strategies) {
   std::unique_ptr<StrategyVector> strategies =
@@ -122,7 +123,7 @@ std::unique_ptr<StrategyVector> CreateTupleStrategyVector(
   return std::move(strategies);
 }
 
-// TODO(lmzheng,zhuohan): merge this into CreateLeafStrategyVector
+// TODO(lmzheng,zhuohan): merge this into CreateLeafStrategyVector.
 void SetInNodesWithInstruction(std::unique_ptr<StrategyVector>& strategies,
                                const HloInstruction* ins,
                                const StrategyMap& strategy_map) {
@@ -343,51 +344,8 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
   }
 }
 
-// Whether the reshape is a special reshape that switches the batch dim of a dot
-bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
-  if (inst->opcode() != HloOpcode::kReshape) {
-    return false;
-  }
-  if (inst->users().size() != 1) {
-    return false;
-  }
-  const HloInstruction* operand = inst->operand(0);
-  const HloInstruction* user = inst->users().front();
-
-  if (operand->opcode() != HloOpcode::kDot) {
-    return false;
-  }
-
-  int batch_dims = operand->dot_dimension_numbers().lhs_batch_dimensions_size();
-  if (batch_dims <= 0) {
-    return false;
-  }
-
-  if (user->opcode() != HloOpcode::kTranspose) {
-    return false;
-  }
-
-  return true;
-}
-
-// Whether the instruction is followed by a broadcast
-bool IsFollowedByBroadcast(const HloInstruction* ins) {
-  int max_depth = 6;
-  for (int i = 0; i < max_depth; ++i) {
-    if (ins->users().empty()) {
-      return false;
-    }
-    ins = PassThroughCustomCallMarkerUser(ins->users().front(), ins);
-    if (ins->opcode() == HloOpcode::kBroadcast) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 // Disable mixed mesh shape if the batch dim is not divisible by the
-// number of devices
+// number of devices.
 void DisableIncompatibleMixedMeshShape(
   const InstructionBatchDimMap& batch_dim_map,
   const Array<int64_t>& device_mesh_1d,
@@ -404,7 +362,7 @@ void DisableIncompatibleMixedMeshShape(
   }
 }
 
-// Build possible sharding strategies and their costs for all instructions
+// Build possible sharding strategies and their costs for all instructions.
 std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>
 BuildStrategyAndCost(const HloInstructionSequence& sequence,
                      const InstructionDepthMap& depth_map,
@@ -461,13 +419,18 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
         if (solver_option.allow_mixed_mesh_shape &&
             cluster_env.non_zero_mesh_dims.size() > 1) {
+          // Set penalty for 1d partial tiled layout
+          for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
+            strategies->leaf_vector[i].compute_cost += replicated_penalty * 0.8;
+          }
+
           // Split 1 dim, but for 1d mesh
           EnumerateAll1DPartition(ins, device_mesh_1d, cluster_env,
                                   strategy_map, strategies, " 1d");
         }
 
-        if (solver_option.allow_replicated_parameters ||
-            strategies->leaf_vector.empty()) {
+        if ((solver_option.allow_replicated_parameters && !IsFollowedByReduce(ins))
+            || strategies->leaf_vector.empty()) {
           // Replicate
           strategies->leaf_vector.push_back(
               ShardingStrategy({"R",
@@ -1111,7 +1074,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       case HloOpcode::kCustomCall: {
-        if (ins->IsCustomCall("xla_pipeline_marker") || ins->IsCustomCall("identity")) {
+        if (IsCustomCallMarker(ins)) {
           const HloInstruction* operand = ins->operand(0);
           const StrategyVector* src_strategies = strategy_map.at(operand).get();
           CHECK(src_strategies->is_tuple);
@@ -1126,23 +1089,6 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
       default:
         LOG(FATAL) << "Unhandled instruction: " + ins->name();
     }
-
-    // For instructions without any registered strategies,
-    // set its strategy as "undefined".
-    // Its sharding spec will be annotaed later by the ShardingPropagation pass.
-    // if (!strategies->is_tuple && strategies->leaf_vector.empty()) {
-    //  std::vector<std::vector<double>> resharding_costs;
-    //  for (size_t i = 0; i < ins->operand_count(); ++i) {
-    //    const HloInstruction* operand = ins->operand(i);
-    //    const StrategyVector* src_strategies = strategy_map.at(operand).get();
-    //    CHECK(!src_strategies->is_tuple);
-    //    resharding_costs.push_back(
-    //        std::vector<double>(src_strategies->leaf_vector.size(), 0));
-    //  }
-    //  strategies->leaf_vector.push_back(ShardingStrategy(
-    //      {"undefined", Undefined(), 0, 0, 0, resharding_costs}));
-    //  undefined_set.insert(ins);
-    //}
 
     // Debug options: forcibly set the the strategy of some instructions.
     if (pass_context::GetBool("auto_sharding::force_strategy", false)) {
@@ -1171,11 +1117,6 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
     CHECK(strategies->is_tuple || !strategies->leaf_vector.empty())
         << ins->ToString() << " does not have any valid strategies.";
     strategy_map[ins] = std::move(strategies);
-
-    // Print strategy vector
-    // int i = instruction_id;
-    // std::cerr << "Instruction " << i << ": " << instructions[i]->ToString() << "\n";
-    // std::cerr << PrintStrategyVector(strategy_map.at(instructions[i]).get(), 0);
   }
 
   // If gradient accumulation is used, adjust the cost of all-reduce for
@@ -1200,11 +1141,14 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                          std::move(associative_dot_pairs));
 }
 
-// Note for dealing with alias:
+// Handle alias: alias pairs must have the same HloSharding.
 // To deal with alias, we do special process both before and after
 // BuildStrategyAndCost. Because it is easier to handle elementwise instructions
 // before BuildStrategyAndCost and it is easier to handle dot/conv instructions
 // after BuildStrategyAndCost.
+// Before BuildStrategyAndCost, we build an AliasMap to guide the generation of
+// strategies. After BuildStrategyAndCost, we use AliasSet to add alias
+// constraints in the ILP problem.
 
 AliasMap BuildAliasMap(const HloModule* module,
                        const HloDataflowAnalysis& dataflow_analysis) {
@@ -1664,16 +1608,7 @@ std::string PrintLivenessSet(const LivenessSet& liveness_set) {
   return os.str();
 }
 
-// Print sorted instructions.
-std::string PrintInstructions(const HloInstructionSequence& sequence) {
-  std::ostringstream os;
-  const std::vector<HloInstruction*>& instructions = sequence.instructions();
-  for (size_t i = 0; i < instructions.size(); ++i) {
-    os << "Instruction " << i << ": " << instructions[i]->ToString() << "\n";
-  }
-  return os.str();
-}
-
+// Print strategy map for debugging.
 std::string PrintStrategyVector(const StrategyVector* strategies,
                                 size_t indention = 0) {
   std::ostringstream os;
@@ -1714,7 +1649,7 @@ std::string PrintStrategyMap(const StrategyMap& strategy_map,
   return os.str();
 }
 
-// Print the choosen auto sharding strategy for debugging.
+// Print the choosen sharding strategy for debugging.
 std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
                                       const LivenessSet& liveness_set,
                                       const StrategyMap& strategy_map,
@@ -1849,7 +1784,6 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       liveness_set[i].push_back(iter.first);
     }
   }
-  // std::cerr << hlo_live_range->ToString() << std::endl;
   // std::cerr << PrintLivenessSet(liveness_set);
 
   // ----- Analyze depth -----

@@ -1147,8 +1147,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 // before BuildStrategyAndCost and it is easier to handle dot/conv instructions
 // after BuildStrategyAndCost.
 // Before BuildStrategyAndCost, we build an AliasMap to guide the generation of
-// strategies. After BuildAliasMap, we use AliasSet to add alias constraints in
-// the ILP problem.
+// strategies. After BuildStrategyAndCost, we use AliasSet to add alias
+// constraints in the ILP problem.
 
 AliasMap BuildAliasMap(const HloModule* module,
                        const HloDataflowAnalysis& dataflow_analysis) {

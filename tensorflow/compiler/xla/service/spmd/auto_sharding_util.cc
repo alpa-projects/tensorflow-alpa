@@ -7,12 +7,91 @@
 namespace xla {
 namespace spmd {
 
-const HloInstruction* PassThroughCustomCallMarkerGetSource(
+inline const HloInstruction* PassThroughCustomCallMarkerGetSource(
     const HloInstruction* ins);
+inline HloInstruction* PassThroughCustomCallMarkerUser(
+    HloInstruction* raw_user, const HloInstruction* inst);
 
 NullStream& NullStream::Global() {
   static NullStream stream;
   return stream;
+}
+
+// Return whether the reshape is a special reshape that switches the batch dim
+// of a dot.
+bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
+  if (inst->opcode() != HloOpcode::kReshape) {
+    return false;
+  }
+  if (inst->users().size() != 1) {
+    return false;
+  }
+  const HloInstruction* operand = inst->operand(0);
+  const HloInstruction* user = inst->users().front();
+
+  if (operand->opcode() != HloOpcode::kDot) {
+    return false;
+  }
+
+  int batch_dims = operand->dot_dimension_numbers().lhs_batch_dimensions_size();
+  if (batch_dims <= 0) {
+    return false;
+  }
+
+  if (user->opcode() != HloOpcode::kTranspose) {
+    return false;
+  }
+
+  return true;
+}
+
+// Return whether the instruction is followed by a broadcast.
+bool IsFollowedByBroadcast(const HloInstruction* ins) {
+  int max_depth = 6;
+  for (int i = 0; i < max_depth; ++i) {
+    if (ins->users().empty()) {
+      return false;
+    }
+    ins = PassThroughCustomCallMarkerUser(ins->users().front(), ins);
+    if (ins->opcode() == HloOpcode::kBroadcast) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Return whether the instruction is followed by a reduce.
+bool IsFollowedByReduce(const HloInstruction* ins) {
+  int max_depth = 1;
+  bool found = false;
+
+  std::function<void(const HloInstruction*, int)> dfs;
+
+  dfs = [&](const HloInstruction* cur, int depth) {
+    if (found) {
+      return;
+    }
+
+    if (cur->opcode() == HloOpcode::kReduce) {
+      found = true;
+      return;
+    }
+
+    if (cur->opcode() == HloOpcode::kGetTupleElement) {
+      depth -= 1;
+    }
+
+    if (depth < max_depth) {
+      for (auto user : cur->users()) {
+        dfs(PassThroughCustomCallMarkerUser(user, cur), depth + 1);
+      }
+    }
+  };
+
+  dfs(ins, 0);
+
+  return found;
 }
 
 // Propagate sharding for broadcast.
@@ -97,7 +176,7 @@ absl::optional<HloSharding> PropagateReduceWindowSharding(
 }
 
 // Pass through the custom call marker and get the source instruction
-const HloInstruction* PassThroughCustomCallMarkerGetSource(
+inline const HloInstruction* PassThroughCustomCallMarkerGetSource(
     const HloInstruction* ins) {
   while (ins->opcode() == HloOpcode::kGetTupleElement &&
          IsCustomCallMarker(ins->operand(0))) {

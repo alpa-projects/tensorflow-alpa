@@ -2483,3 +2483,18 @@ cc_library(
         "//tensorflow/compiler/xla/service:hlo_pass",
     ],
 )
+
+cc_library(
+    name = "gpu_cost_model",
+    srcs = [
+        "gpu_cost_model.cc",
+    ],
+    hdrs = [
+        "gpu_cost_model.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:pass_context",
+        "//tensorflow/compiler/xla/service/gpu:ir_emission_utils",
+    ],
+)

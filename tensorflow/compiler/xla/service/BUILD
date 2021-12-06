@@ -6194,20 +6194,6 @@ cc_library(
 )
 
 cc_library(
-    name = "hlo_cost_model",
-    srcs = [
-        "hlo_cost_model.cc",
-    ],
-    hdrs = [
-        "hlo_cost_model.h",
-    ],
-    deps = [
-        ":hlo",
-        ":pass_context",
-    ],
-)
-
-cc_library(
     name = "pass_context",
     srcs = [
         "pass_context.cc",

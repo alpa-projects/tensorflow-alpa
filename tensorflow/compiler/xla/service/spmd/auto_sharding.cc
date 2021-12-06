@@ -180,12 +180,17 @@ void EnumerateAll1DPartition(const HloInstruction* ins,
                              const ClusterEnvironment& cluster_env,
                              const StrategyMap& strategy_map,
                              std::unique_ptr<StrategyVector>& strategies,
+                             bool only_allow_divisible,
                              const std::string& suffix) {
   // Split one dim
   for (int64_t i = 0; i < ins->shape().rank(); ++i) {
     for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
       if (device_mesh.dim(j) == 1 ||
           ins->shape().dimensions(i) < device_mesh.dim(j)) {
+        continue;
+      }
+
+      if (only_allow_divisible && ins->shape().dimensions(i) % device_mesh.dim(j) != 0) {
         continue;
       }
 
@@ -357,8 +362,10 @@ void DisableIncompatibleMixedMeshShape(
   }
 
   if (batch_size % device_mesh_1d.dim(0) != 0) {
-    solver_option.allow_mixed_mesh_shape = false;
-    LOG(WARNING) << "Mixed mesh shape is disabled due to indivisible batch size.";
+    if (solver_option.allow_mixed_mesh_shape) {
+      solver_option.allow_mixed_mesh_shape = false;
+      LOG(WARNING) << "Mixed mesh shape is disabled due to indivisible batch size.";
+    }
   }
 }
 
@@ -415,7 +422,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
         // Split 1 dim
         EnumerateAll1DPartition(ins, device_mesh, cluster_env, strategy_map,
-                                strategies, "");
+                                strategies, true, "");
 
         if (solver_option.allow_mixed_mesh_shape &&
             cluster_env.non_zero_mesh_dims.size() > 1) {
@@ -426,7 +433,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
           // Split 1 dim, but for 1d mesh
           EnumerateAll1DPartition(ins, device_mesh_1d, cluster_env,
-                                  strategy_map, strategies, " 1d");
+                                  strategy_map, strategies, true, " 1d");
         }
 
         if ((solver_option.allow_replicated_parameters && !IsFollowedByReduce(ins))
@@ -1047,7 +1054,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             cluster_env.non_zero_mesh_dims.size() > 1) {
           // Split 1 dim for 1d mesh
           EnumerateAll1DPartition(ins, device_mesh_1d, cluster_env,
-                                  strategy_map, strategies, " 1d");
+                                  strategy_map, strategies, false, " 1d");
         }
 
         if (strategies->leaf_vector.empty() || IsFollowedByBroadcast(ins)) {

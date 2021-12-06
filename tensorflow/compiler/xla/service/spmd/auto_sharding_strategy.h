@@ -124,7 +124,7 @@ using AliasSet = absl::flat_hash_set<std::pair<int64_t, int64_t>>;
 class ProfilingResult {
  public:
   // Construct the class from the corresponding python object
-  // parax/profile_communication.py::ProfilingResult .
+  // parax/mesh_profiling.py::ProfilingResult.
   ProfilingResult(py::object prof_result) {
     if (!prof_result.is_none()) {
       PyGILState_STATE gstate = PyGILState_Ensure();
@@ -153,7 +153,7 @@ class ProfilingResult {
 
   double EstimateAllGatherCost(
       const std::vector<std::vector<int>>& replica_groups, int64_t size,
-      std::string dtype) const {
+      const std::string& dtype) const {
     if (all_gather_cost_dict_.empty()) {
       // Use all-reduce to approximate all-gather.
       return EstimateAllReduceCost(replica_groups, size, dtype) / 2;
@@ -166,7 +166,7 @@ class ProfilingResult {
 
   double EstimateAllReduceCost(
       const std::vector<std::vector<int>>& replica_groups, int64_t size,
-      std::string dtype) const {
+      const std::string& dtype) const {
     return EstimateInternal(replica_groups, size, dtype,
                             all_reduce_cost_dict_) -
            EstimateInternal(replica_groups, 0, dtype, all_reduce_cost_dict_);
@@ -174,9 +174,9 @@ class ProfilingResult {
 
   double EstimateReduceScatterCost(
       const std::vector<std::vector<int>>& replica_groups, int64_t size,
-      std::string dtype) const {
+      const std::string& dtype) const {
     if (reduce_scatter_cost_dict_.empty()) {
-      // Use all-reduce to approximate all-gather.
+      // Use all-reduce to approximate reduce-scatter.
       return EstimateAllReduceCost(replica_groups, size, dtype) / 2;
     }
 
@@ -188,11 +188,12 @@ class ProfilingResult {
 
   double EstimateAllToAllCost(
       const std::vector<std::vector<int>>& replica_groups, int64_t size,
-      std::string dtype) const {
+      const std::string& dtype) const {
     // A penalty factor to make the theoretical cost match the
     // empirical cost on v100 + nvlink.
     int64_t num_devices = replica_groups.front().size();
     double penalty_factor = double(num_devices) / 2.0;
+    // Use all-gather to approximate all-to-all.
     return EstimateAllGatherCost(replica_groups, size / num_devices, dtype) *
            penalty_factor;
   }

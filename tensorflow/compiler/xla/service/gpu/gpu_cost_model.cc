@@ -253,7 +253,7 @@ double EstimateHloModuleCost(const HloModule* hlo_module) {
   ProfilingResult prof_result(
       pass_context::GetPyObject("gpu_cost_model::profiling_results"));
   const int64_t num_devices = hlo_module->config().num_partitions();
-  int verbose = pass_context::GetInt("gpu_cost_model::verbose");
+  int verbose = pass_context::GetInt("gpu_cost_model::verbose", 0);
 
   // Compute cost of all instruction.
   double sum = 0.0;

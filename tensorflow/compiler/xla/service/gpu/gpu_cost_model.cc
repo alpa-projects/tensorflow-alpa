@@ -254,7 +254,8 @@ double EstimateHloModuleCost(const HloModule* hlo_module) {
       pass_context::GetPyObject("gpu_cost_model::profiling_results"));
   const int64_t num_devices = hlo_module->config().num_partitions();
   int verbose = pass_context::GetInt("gpu_cost_model::verbose", 0);
-  int num_micro_batches = pass_context::GetInt("gpu_cost_model::num_micro_batches", 1);
+  int num_micro_batches =
+      pass_context::GetInt("gpu_cost_model::num_micro_batches", 1);
   std::string grad_sync_channel_ids =
       pass_context::GetString("gpu_cost_model::grad_sync_channel_ids", "");
 
@@ -292,7 +293,8 @@ double EstimateHloModuleCost(const HloModule* hlo_module) {
             }
 
             cost += prof_result.EstimateAllReduceCost(
-                replica_groups, size, operand->shape().element_type()) / normalizer;
+                        replica_groups, size, operand->shape().element_type()) /
+                    normalizer;
             break;
           }
           case HloOpcode::kAllToAll:

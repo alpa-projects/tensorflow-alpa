@@ -283,8 +283,16 @@ double EstimateHloModuleCost(const HloModule* hlo_module) {
                 replica_groups, size, operand->shape().element_type());
             break;
           case HloOpcode::kAllReduce:
+            double normalizer = 1.0;
+
+            // Amortize the cost of grad sync with the number of micro batches.
+		    std::string key = absl::StrFormat(".%d.", op_id);
+            if (grad_sync_channel_ids.find(key) != std::string::npos) {
+              normalizer = num_micro_batches;
+            }
+
             cost += prof_result.EstimateAllReduceCost(
-                replica_groups, size, operand->shape().element_type());
+                replica_groups, size, operand->shape().element_type()) / normalizer;
             break;
           case HloOpcode::kAllToAll:
             cost += prof_result.EstimateAllToAllCost(

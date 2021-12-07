@@ -536,6 +536,9 @@ class ClusterEnvironment {
     double bytes = GetBytes(shape) / src_spec.NumTiles();
     double cost = 0.0;
     for (int dim : all_gather_dims) {
+      if (dim >= device_mesh.num_dimensions()) {
+        return INFINITY_COST;
+      }
       bytes *= device_mesh.dim(dim);
       cost += AllGatherCost(bytes, dim);
     }

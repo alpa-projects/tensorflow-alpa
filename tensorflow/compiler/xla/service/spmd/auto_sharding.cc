@@ -958,6 +958,22 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             }
           }
 
+          // Check validity
+          bool valid = true;
+          for (int64_t x : tile_mesh_dims) {
+            if (x >= device_mesh.num_dimensions()) {
+              valid = false;
+            }
+          }
+          for (int64_t x : all_reduce_dims) {
+            if (x >= device_mesh.num_dimensions()) {
+              valid = false;
+            }
+          }
+          if (!valid) {
+            continue;
+          }
+
           std::string name, suffix;
           HloSharding output_spec = Undefined();
           if (solver_option.allow_mixed_mesh_shape &&

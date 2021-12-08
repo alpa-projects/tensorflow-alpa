@@ -190,7 +190,8 @@ void EnumerateAll1DPartition(const HloInstruction* ins,
         continue;
       }
 
-      if (only_allow_divisible && ins->shape().dimensions(i) % device_mesh.dim(j) != 0) {
+      if (only_allow_divisible &&
+          ins->shape().dimensions(i) % device_mesh.dim(j) != 0) {
         continue;
       }
 
@@ -352,9 +353,9 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
 // Disable mixed mesh shape if the batch dim is not divisible by the
 // number of devices.
 void DisableIncompatibleMixedMeshShape(
-  const InstructionBatchDimMap& batch_dim_map,
-  const Array<int64_t>& device_mesh_1d,
-  AutoShardingSolverOption& solver_option) {
+    const InstructionBatchDimMap& batch_dim_map,
+    const Array<int64_t>& device_mesh_1d,
+    AutoShardingSolverOption& solver_option) {
   int64_t batch_size = 0;
   for (auto iter : batch_dim_map) {
     batch_size = iter.first->shape().dimensions(iter.second);
@@ -364,13 +365,14 @@ void DisableIncompatibleMixedMeshShape(
   if (batch_size % device_mesh_1d.dim(0) != 0) {
     if (solver_option.allow_mixed_mesh_shape) {
       solver_option.allow_mixed_mesh_shape = false;
-      LOG(WARNING) << "Mixed mesh shape is disabled due to indivisible batch size.";
+      LOG(WARNING)
+          << "Mixed mesh shape is disabled due to indivisible batch size.";
     }
   }
 }
 
 // Build possible sharding strategies and their costs for all instructions.
-std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>
+StatusOr<std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>>
 BuildStrategyAndCost(const HloInstructionSequence& sequence,
                      const InstructionDepthMap& depth_map,
                      const AliasMap& alias_map,
@@ -397,7 +399,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
   InstructionBatchDimMap batch_dim_map;
   if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
     batch_dim_map = BuildInstructionBatchDimMap(sequence);
-    DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh_1d, solver_option);
+    DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh_1d,
+                                      solver_option);
   }
 
   // Gather all output values
@@ -436,8 +439,9 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                   strategy_map, strategies, true, " 1d");
         }
 
-        if ((solver_option.allow_replicated_parameters && !IsFollowedByReduce(ins))
-            || strategies->leaf_vector.empty()) {
+        if ((solver_option.allow_replicated_parameters &&
+             !IsFollowedByReduce(ins)) ||
+            strategies->leaf_vector.empty()) {
           // Replicate
           strategies->leaf_vector.push_back(
               ShardingStrategy({"R",
@@ -453,7 +457,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         // and only keep the data parallel strategies.
         if (solver_option.force_batch_dim_to_mesh_dim >= 0 &&
             batch_dim_map.count(ins)) {
-          FilterStrategy(ins, strategies, cluster_env, batch_dim_map, solver_option);
+          TF_RETURN_IF_ERROR(FilterStrategy(ins, strategies, cluster_env,
+                                            batch_dim_map, solver_option));
         }
         break;
       }
@@ -1026,13 +1031,15 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       case HloOpcode::kDot: {
-        HandleDot(strategies, leaf_strategies, strategy_map, ins,
-                  instruction_id, cluster_env, batch_dim_map, solver_option);
+        TF_RETURN_IF_ERROR(HandleDot(strategies, leaf_strategies, strategy_map,
+                                     ins, instruction_id, cluster_env,
+                                     batch_dim_map, solver_option));
         break;
       }
       case HloOpcode::kConvolution: {
-        HandleConv(strategies, leaf_strategies, strategy_map, ins,
-                   instruction_id, cluster_env, batch_dim_map, solver_option);
+        TF_RETURN_IF_ERROR(HandleConv(strategies, leaf_strategies, strategy_map,
+                                      ins, instruction_id, cluster_env,
+                                      batch_dim_map, solver_option));
         break;
       }
       case HloOpcode::kTuple: {
@@ -1691,14 +1698,16 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
   for (size_t i = 0; i < N; ++i) {
     int stra_idx = cost_graph.RemapIndex(i, s_val[i]);
     const ShardingStrategy& stra = leaf_strategies[i]->leaf_vector[stra_idx];
-    const HloInstruction* ins = instructions[leaf_strategies[i]->instruction_id];
+    const HloInstruction* ins =
+        instructions[leaf_strategies[i]->instruction_id];
 
     int ct = tuple_elem_counter[ins]++;
     if (ct == 0) {
       os << i << " " << ins->ToString(HloPrintOptions::ShortParsable()) << "  ";
     } else {
       // Only print tuple once
-      os << i << " tuple." << ct << " " << ins->shape().tuple_shapes(ct).ToString() << "  ";
+      os << i << " tuple." << ct << " "
+         << ins->shape().tuple_shapes(ct).ToString() << "  ";
     }
 
     if (cost_graph.follow_idx[i] < 0) {
@@ -1762,8 +1771,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       pass_context::GetBool("auto_sharding::allow_replicated_parameters", true);
   solver_option.prefer_reduce_scatter =
       pass_context::GetBool("auto_sharding::prefer_reduce_scatter", false);
-  solver_option.reduce_scatter_grad_acc_friendly =
-      pass_context::GetBool("auto_sharding::reduce_scatter_grad_acc_friendly", false);
+  solver_option.reduce_scatter_grad_acc_friendly = pass_context::GetBool(
+      "auto_sharding::reduce_scatter_grad_acc_friendly", false);
   solver_option.reduce_scatter_aggresive_partition = pass_context::GetBool(
       "auto_sharding::reduce_scatter_aggresive_partition", false);
   solver_option.batch_matmul_always_split_batch = pass_context::GetBool(
@@ -1835,9 +1844,10 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   AliasMap alias_map =
       BuildAliasMap(module, alias_analysis->dataflow_analysis());
-  std::tie(strategy_map, leaf_strategies, associative_dot_pairs) =
+  TF_ASSIGN_OR_RETURN(
+      std::tie(strategy_map, leaf_strategies, associative_dot_pairs),
       BuildStrategyAndCost(sequence, ins_depth_map, alias_map, cluster_env,
-                           solver_option);
+                           solver_option));
   AliasSet alias_set =
       BuildAliasSet(module, alias_analysis->dataflow_analysis(), strategy_map);
   // std::cerr << PrintStrategyMap(strategy_map, sequence);

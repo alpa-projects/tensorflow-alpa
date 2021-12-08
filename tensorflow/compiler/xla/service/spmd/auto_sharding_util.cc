@@ -758,15 +758,20 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
 // Filter strategies according to the solver_option.force_batch_dim_to_mesh_dim.
 // This can be used to forcibly generate data-parallel strategies.
-void FilterStrategy(const HloInstruction* ins,
-                    std::unique_ptr<StrategyVector>& strategies,
-                    const ClusterEnvironment& cluster_env,
-                    const InstructionBatchDimMap& batch_map,
-                    const AutoShardingSolverOption& solver_option) {
+Status FilterStrategy(const HloInstruction* ins,
+                      std::unique_ptr<StrategyVector>& strategies,
+                      const ClusterEnvironment& cluster_env,
+                      const InstructionBatchDimMap& batch_map,
+                      const AutoShardingSolverOption& solver_option) {
   int mesh_dim = solver_option.force_batch_dim_to_mesh_dim;
   int batch_dim = batch_map.at(ins);
   const Array<int64_t>& device_mesh = cluster_env.device_mesh;
-  CHECK_GE(ins->shape().dimensions(batch_dim), device_mesh.dim(mesh_dim));
+
+  if (ins->shape().dimensions(batch_dim) % device_mesh.dim(mesh_dim) != 0) {
+    return tensorflow::errors::InvalidArgument(
+        "The length of batch dimension is "
+        "not divisible by the number of devices");
+  }
 
   std::vector<ShardingStrategy> new_leaf_vector;
   for (auto& stra : strategies->leaf_vector) {
@@ -790,6 +795,8 @@ void FilterStrategy(const HloInstruction* ins,
   CHECK(!new_leaf_vector.empty())
       << ins->ToString() << " does not have any valid strategies";
   strategies->leaf_vector = std::move(new_leaf_vector);
+
+  return Status::OK();
 }
 
 inline std::pair<int, int> ParseMeshDims(const std::string& strategy_name) {

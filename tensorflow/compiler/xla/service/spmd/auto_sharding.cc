@@ -457,8 +457,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         // and only keep the data parallel strategies.
         if (solver_option.force_batch_dim_to_mesh_dim >= 0 &&
             batch_dim_map.count(ins)) {
-          TF_CHECK_OK(FilterStrategy(ins, strategies, cluster_env,
-                                     batch_dim_map, solver_option));
+          TF_RETURN_IF_ERROR(FilterStrategy(ins, strategies, cluster_env,
+                                            batch_dim_map, solver_option));
         }
         break;
       }
@@ -1031,13 +1031,15 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       case HloOpcode::kDot: {
-        HandleDot(strategies, leaf_strategies, strategy_map, ins,
-                  instruction_id, cluster_env, batch_dim_map, solver_option);
+        TF_RETURN_IF_ERROR(HandleDot(strategies, leaf_strategies, strategy_map,
+                                     ins, instruction_id, cluster_env,
+                                     batch_dim_map, solver_option));
         break;
       }
       case HloOpcode::kConvolution: {
-        HandleConv(strategies, leaf_strategies, strategy_map, ins,
-                   instruction_id, cluster_env, batch_dim_map, solver_option);
+        TF_RETURN_IF_ERROR(HandleConv(strategies, leaf_strategies, strategy_map,
+                                      ins, instruction_id, cluster_env,
+                                      batch_dim_map, solver_option));
         break;
       }
       case HloOpcode::kTuple: {

@@ -324,7 +324,7 @@ class DotHandler {
     }
   }
 
-  void RegisterStrategies() {
+  Status RegisterStrategies() {
     // SS = SR x RS
     // Split lhs space dim and rhs space dim.
     SplitLhsSpaceRhsSpace(0, 1);
@@ -400,7 +400,8 @@ class DotHandler {
     // and only keep the data parallel strategies.
     if (solver_option.force_batch_dim_to_mesh_dim >= 0 &&
         batch_map.count(ins)) {
-      FilterStrategy(ins, strategies, cluster_env, batch_map, solver_option);
+      TF_CHECK_OK(FilterStrategy(ins, strategies, cluster_env, batch_map,
+                                 solver_option));
     }
   }
 
@@ -427,18 +428,19 @@ class DotHandler {
 };
 
 // Register strategies for dot instructions.
-void HandleDot(std::unique_ptr<StrategyVector>& strategies,
-               LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
-               const HloInstruction* ins, size_t instruction_id,
-               const ClusterEnvironment& cluster_env,
-               const InstructionBatchDimMap& batch_map,
-               const AutoShardingSolverOption& solver_option) {
+Status HandleDot(std::unique_ptr<StrategyVector>& strategies,
+                 LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
+                 const HloInstruction* ins, size_t instruction_id,
+                 const ClusterEnvironment& cluster_env,
+                 const InstructionBatchDimMap& batch_map,
+                 const AutoShardingSolverOption& solver_option) {
   strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
   SetInNodesWithInstruction(strategies, ins, strategy_map);
 
   DotHandler handler(strategies, strategy_map, ins, cluster_env, batch_map,
                      solver_option);
-  handler.RegisterStrategies();
+  TF_CHECK_OK(handler.RegisterStrategies());
+  return Status::OK();
 }
 
 class ConvHandler {
@@ -589,7 +591,7 @@ class ConvHandler {
                       cluster_env, strategy_map, strategies);
   }
 
-  void RegisterStrategies() {
+  Status RegisterStrategies() {
     if ((ins->feature_group_count() ==
              lhs->shape().dimensions(lhs_in_channel_dim) &&
          ins->feature_group_count() ==
@@ -634,7 +636,8 @@ class ConvHandler {
     // and only keep the data parallel strategies.
     if (solver_option.force_batch_dim_to_mesh_dim >= 0 &&
         batch_map.count(ins)) {
-      FilterStrategy(ins, strategies, cluster_env, batch_map, solver_option);
+      TF_CHECK_OK(FilterStrategy(ins, strategies, cluster_env, batch_map,
+                                 solver_option));
     }
   }
 
@@ -658,18 +661,19 @@ class ConvHandler {
 };
 
 // Register strategies for dot instructions.
-void HandleConv(std::unique_ptr<StrategyVector>& strategies,
-                LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
-                const HloInstruction* ins, size_t instruction_id,
-                const ClusterEnvironment& cluster_env,
-                const InstructionBatchDimMap& batch_map,
-                const AutoShardingSolverOption& solver_option) {
+Status HandleConv(std::unique_ptr<StrategyVector>& strategies,
+                  LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
+                  const HloInstruction* ins, size_t instruction_id,
+                  const ClusterEnvironment& cluster_env,
+                  const InstructionBatchDimMap& batch_map,
+                  const AutoShardingSolverOption& solver_option) {
   strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
   SetInNodesWithInstruction(strategies, ins, strategy_map);
 
   ConvHandler handler(strategies, strategy_map, ins, cluster_env, batch_map,
                       solver_option);
-  handler.RegisterStrategies();
+  TF_CHECK_OK(handler.RegisterStrategies());
+  return Status::OK();
 }
 
 }  // namespace spmd

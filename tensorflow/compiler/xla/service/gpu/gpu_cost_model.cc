@@ -168,9 +168,11 @@ class ProfilingResult {
                           int64_t size, PrimitiveType dtype,
                           const CommDict& cost_dict) const {
     CommDictKey key(Group2Str(replica_groups), dtype);
-    CHECK(cost_dict.count(key))
-        << "cannot find key: (" << key.first << ", "
-        << gpu::ToString(key.second) << ")" << std::endl;
+    if (!cost_dict.count(key)) {
+      LOG(WARNING) << "Warning: cannot find key: (" << key.first << ", "
+                   << gpu::ToString(key.second) << ")" << std::endl;
+      return size;
+    }
     CommDictValue cost_list = cost_dict.at(key);
 
     CHECK(!cost_list.empty());

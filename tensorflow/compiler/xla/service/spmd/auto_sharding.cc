@@ -235,9 +235,9 @@ void EnumerateAll2DPartition(const HloInstruction* ins,
         continue;
       }
 
-      if (only_allow_divisible && (
-        ins->shape().dimensions(i) % device_mesh.dim(0) != 0 ||
-        ins->shape().dimensions(j) % device_mesh.dim(1) != 0)) {
+      if (only_allow_divisible &&
+          (ins->shape().dimensions(i) % device_mesh.dim(0) != 0 ||
+           ins->shape().dimensions(j) % device_mesh.dim(1) != 0)) {
         continue;
       }
 
@@ -360,9 +360,8 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
 // Disable mixed mesh shape if the batch dim is not divisible by the
 // number of devices.
 void DisableIncompatibleMixedMeshShape(
-  const InstructionBatchDimMap& batch_dim_map,
-  int64_t num_devices,
-  AutoShardingSolverOption& solver_option) {
+    const InstructionBatchDimMap& batch_dim_map, int64_t num_devices,
+    AutoShardingSolverOption& solver_option) {
   int64_t batch_size = 0;
   for (auto iter : batch_dim_map) {
     batch_size = iter.first->shape().dimensions(iter.second);
@@ -382,7 +381,7 @@ void DisableIncompatibleMixedMeshShape(
 StatusOr<std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>>
 BuildStrategyAndCost(const HloInstructionSequence& sequence,
                      const InstructionDepthMap& depth_map,
-                     const InstructionBatchDimMap &batch_dim_map,
+                     const InstructionBatchDimMap& batch_dim_map,
                      const AliasMap& alias_map,
                      const ClusterEnvironment& cluster_env,
                      AutoShardingSolverOption& solver_option) {
@@ -1845,11 +1844,12 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   // ----- Analyze the batch dim -----
   const HloInstructionSequence& sequence =
-    hlo_live_range->flattened_instruction_sequence();
+      hlo_live_range->flattened_instruction_sequence();
   InstructionBatchDimMap batch_dim_map;
   if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
     batch_dim_map = BuildInstructionBatchDimMap(sequence);
-    DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh.num_elements(), solver_option);
+    DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh.num_elements(),
+                                      solver_option);
   }
 
   // ----- Analyze depth -----
@@ -1863,8 +1863,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   TF_ASSIGN_OR_RETURN(
       std::tie(strategy_map, leaf_strategies, associative_dot_pairs),
-      BuildStrategyAndCost(sequence, ins_depth_map, batch_dim_map,
-	                   alias_map, cluster_env, solver_option));
+      BuildStrategyAndCost(sequence, ins_depth_map, batch_dim_map, alias_map,
+                           cluster_env, solver_option));
   AliasSet alias_set =
       BuildAliasSet(module, alias_analysis->dataflow_analysis(), strategy_map);
   // std::cerr << PrintStrategyMap(strategy_map, sequence);

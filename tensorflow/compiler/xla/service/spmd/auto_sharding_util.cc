@@ -210,7 +210,8 @@ InstructionDepthMap BuildInstructionDepthMap(
       depth_map[inst] = 0;
 
       // Add some initial depth for activations from other pipeline stages.
-      if (inst->opcode() == HloOpcode::kParameter && batch_dim_map.count(inst)) {
+      if (inst->opcode() == HloOpcode::kParameter &&
+          batch_dim_map.count(inst)) {
         depth_map[inst] = 20;
       }
       current_frontier.push_back(inst);

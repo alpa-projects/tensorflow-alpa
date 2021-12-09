@@ -1793,5 +1793,30 @@ void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
   inst->ReplaceOperandWith(operand_num, replace_with);
 }
 
+void AnnotateShardingWithSimpleHeuristic(HloModule* module,
+                                         const std::string& heuristic,
+                                         const ClusterEnvironment& cluster_env) {
+  const Array<int64_t>& device_mesh = cluster_env.device_mesh;
+  const Array<int64_t>& device_mesh_1d = cluster_env.device_mesh_1d;
+
+  HloComputation* entry_computation = module->entry_computation();
+  for (HloInstruction* inst : entry_computation->instructions()) {
+    if (inst->opcode() == HloOpcode::kParameter) {
+      int64_t max_dim = -1;
+      int64_t max_dim_length = -1;
+
+      for (int64_t i = 0; i < inst->shape().rank(); ++i) {
+        if (inst->shape().dimensions(i) > max_dim_length) {
+          max_dim_length = inst->shape().dimensions(i);
+          max_dim = i;
+        }
+      }
+
+      HloSharding spec = Tile(inst->shape(), {max_dim}, {0}, device_mesh_1d);
+      inst->set_sharding(spec);
+    }
+  }
+}
+
 }  // namespace spmd
 }  // namespace xla

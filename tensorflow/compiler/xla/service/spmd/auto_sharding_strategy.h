@@ -71,6 +71,10 @@ struct AutoShardingSolverOption {
 
   // If true, load solution vector from PassContext
   bool load_solution_vector;
+
+  // If it is not empty, forcibly use simple heuristic strategies
+  // instead of the ILP solver. This is used for ablation study.
+  std::string force_simple_heuristic;
 };
 
 // One sharding strategy
@@ -1030,6 +1034,10 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
                            const std::vector<int64_t>& s_val,
                            const ClusterEnvironment& cluster_env,
                            const AutoShardingSolverOption& solver_option);
+
+void AnnotateShardingWithSimpleHeuristic(HloModule* module,
+                                         const std::string& heuristic,
+                                         const ClusterEnvironment& cluster_env);
 
 }  // namespace spmd
 }  // namespace xla

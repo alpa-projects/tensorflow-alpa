@@ -1838,7 +1838,7 @@ void AnnotateShardingWithSimpleHeuristic(
         std::vector<int> indices = Argsort(lengths);
         int common_dims = std::min(mesh_nn_dims, indices.size());
 
-        if (common_dims < 1 || inst->shape().rank() <= 1) {
+        if (common_dims < 1) {
           continue;
         }
 
@@ -1854,7 +1854,7 @@ void AnnotateShardingWithSimpleHeuristic(
           int dim0 = indices[1];
           int length0 = lengths[dim0];
 
-          if (length0 % device_mesh.dim(0) && length1 % device_mesh.dim(1)) {
+          if (length0 % device_mesh.dim(0) == 0 && length1 % device_mesh.dim(1) == 0) {
             output_spec =
                 Tile(inst->shape(), {dim0, dim1}, {0, 1}, device_mesh);
           }

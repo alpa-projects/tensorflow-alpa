@@ -807,11 +807,28 @@ inline std::pair<int, int> ParseMeshDims(const std::string& strategy_name) {
   }
 }
 
+// Return whether the tensor shape is divisible by
+// the number of devices along multiple dimensions.
+bool IsDivisible(const HloInstruction* ins, const Array<int64_t>& device_mesh,
+                 const std::vector<int64_t>& tensor_dims,
+                 const std::vector<int64_t>& mesh_dims) {
+  CHECK_EQ(tensor_dims.size(), mesh_dims.size());
+  for (int64_t i = 0; i < tensor_dims.size(); ++i) {
+    if (ins->shape().dimensions(tensor_dims[i]) %
+            device_mesh.dim(mesh_dims[i]) !=
+        0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Return the output sharding of the reduce-scatter variant of a given strategy.
 HloSharding GetReduceScatterOutput(const HloInstruction* ins,
                                    const ShardingStrategy& strategy,
                                    const ClusterEnvironment& cluster_env) {
   const Array<int64_t>& device_mesh = cluster_env.device_mesh;
+  const Array<int64_t>& device_mesh_1d = cluster_env.device_mesh_1d;
 
   if (ins->opcode() == HloOpcode::kDot) {
     const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
@@ -822,12 +839,8 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       int mesh_dim0, mesh_dim1;
       std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
 
-      if (ins->shape().dimensions(space_base_dim) %
-                  cluster_env.device_mesh.dim(mesh_dim0) !=
-              0 ||
-          ins->shape().dimensions(space_base_dim + 1) %
-                  cluster_env.device_mesh.dim(mesh_dim1) !=
-              0) {
+      if (!IsDivisible(ins, device_mesh, {space_base_dim, space_base_dim + 1},
+                       {mesh_dim0, mesh_dim1})) {
         // XLA supports uneven partitioning by adding padding.
         // However, the ShardingSpec in Jax does not support uneven
         // partitioning.
@@ -840,11 +853,11 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       int mesh_dim0, mesh_dim1;
       std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
 
-      if (ins->shape().dimensions(0) % cluster_env.device_mesh.dim(mesh_dim0) !=
-              0 ||
-          ins->shape().dimensions(space_base_dim) %
-                  cluster_env.device_mesh.dim(mesh_dim1) !=
-              0) {
+      if (!IsDivisible(ins, device_mesh, {0, space_base_dim},
+                       {mesh_dim0, mesh_dim1})) {
+        // XLA supports uneven partitioning by adding padding.
+        // However, the ShardingSpec in Jax does not support uneven
+        // partitioning.
         return Undefined();
       }
 
@@ -853,22 +866,19 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
     } else if (StrStartsWith(strategy.name, "RR = RS x SR")) {
       int mesh_dim = strategy.name.find("{0}") != std::string::npos ? 0 : 1;
 
-      if (ins->shape().dimensions(space_base_dim) %
-              cluster_env.device_mesh.dim(mesh_dim) !=
-          0) {
+      if (!IsDivisible(ins, device_mesh, {space_base_dim}, {mesh_dim})) {
         return Undefined();
       }
 
       return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh);
     } else if (StrStartsWith(strategy.name, "R = Sk x Sk")) {
       int mesh_dim = 0;
-      if (ins->shape().dimensions(space_base_dim) %
-              cluster_env.device_mesh.dim(mesh_dim) !=
-          0) {
+
+      if (!IsDivisible(ins, device_mesh_1d, {space_base_dim}, {mesh_dim})) {
         return Undefined();
       }
-      return Tile(ins->shape(), {space_base_dim}, {0},
-                  cluster_env.device_mesh_1d);
+
+      return Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh_1d);
     }
   } else if (ins->opcode() == HloOpcode::kConvolution) {
     const ConvolutionDimensionNumbers& conv_dnums =
@@ -881,15 +891,8 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
       int mesh_dim0, mesh_dim1;
       std::tie(mesh_dim0, mesh_dim1) = ParseMeshDims(strategy.name);
 
-      if (ins->shape().dimensions(out_batch_dim) %
-                  cluster_env.device_mesh.dim(mesh_dim0) !=
-              0 ||
-          ins->shape().dimensions(out_out_channel_dim) %
-                  cluster_env.device_mesh.dim(mesh_dim1) !=
-              0) {
-        // XLA supports uneven partitioning by adding padding.
-        // However, the ShardingSpec in Jax does not support uneven
-        // partitioning.
+      if (!IsDivisible(ins, device_mesh, {out_batch_dim, out_out_channel_dim},
+                       {mesh_dim0, mesh_dim1})) {
         return Undefined();
       }
 
@@ -897,13 +900,12 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
                   {mesh_dim0, mesh_dim1}, device_mesh);
     } else if (StrStartsWith(strategy.name, "R = Sk x Sk")) {
       int mesh_dim = 0;
-      if (ins->shape().dimensions(out_batch_dim) %
-              cluster_env.device_mesh.dim(mesh_dim) !=
-          0) {
+
+      if (!IsDivisible(ins, device_mesh_1d, {out_batch_dim}, {mesh_dim})) {
         return Undefined();
       }
-      return Tile(ins->shape(), {out_batch_dim}, {0},
-                  cluster_env.device_mesh_1d);
+
+      return Tile(ins->shape(), {out_batch_dim}, {mesh_dim}, device_mesh_1d);
     }
   } else if (ins->opcode() == HloOpcode::kReduce) {
     // TODO(lmzheng): support more cases.
@@ -918,11 +920,23 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
 
     if (strategy.output_sharding.IsReplicated()) {
       if (strategy.name.find("1d") != std::string::npos) {
-        return Tile(ins->shape(), {0}, {mesh_dim}, cluster_env.device_mesh_1d);
+        if (!IsDivisible(ins, device_mesh_1d, {0}, {mesh_dim})) {
+          return Undefined();
+        }
+
+        return Tile(ins->shape(), {0}, {mesh_dim}, device_mesh_1d);
       } else {
+        if (!IsDivisible(ins, device_mesh, {0}, {mesh_dim})) {
+          return Undefined();
+        }
+
         return Tile(ins->shape(), {0}, {mesh_dim}, device_mesh);
       }
     } else {
+      if (!IsDivisible(ins, device_mesh_1d, {0}, {0})) {
+        return Undefined();
+      }
+
       Array<int64_t> tile_assignment =
           strategy.output_sharding.tile_assignment();
       tile_assignment.Reshape({cluster_env.total_devices});

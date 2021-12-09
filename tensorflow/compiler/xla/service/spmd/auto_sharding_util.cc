@@ -524,6 +524,8 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       case HloOpcode::kTuple:
       case HloOpcode::kCustomCall:
         break;
+      case HloOpcode::kWhile:
+        break;
       default:
         LOG(FATAL) << "Unhandled instruction: " + ins->name();
     }
@@ -1791,6 +1793,134 @@ void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
   }
 
   inst->ReplaceOperandWith(operand_num, replace_with);
+}
+
+template <typename T>
+inline std::vector<int> Argsort(const std::vector<T>& scores) {
+  std::vector<int> index;
+  index.reserve(scores.size());
+  for (size_t i = 0; i < scores.size(); ++i) {
+    index.push_back(i);
+  }
+  auto cmp = [&scores](int l, int r) { return scores[l] > scores[r]; };
+  std::sort(index.begin(), index.end(), cmp);
+  return index;
+}
+
+void AnnotateShardingWithSimpleHeuristic(
+    HloModule* module, const std::string& heuristic, const AliasMap& alias_map,
+    const ClusterEnvironment& cluster_env) {
+  const Array<int64_t>& device_mesh = cluster_env.device_mesh;
+  const Array<int64_t>& device_mesh_1d = cluster_env.device_mesh_1d;
+  int64_t num_devices = device_mesh.num_elements();
+
+  // Count the non-one mesh dimension.
+  size_t mesh_nn_dims = 0;
+  for (int dim : device_mesh.dimensions()) {
+    if (dim > 1) {
+      mesh_nn_dims++;
+    }
+  }
+
+  // Shard instructions
+  HloComputation* entry_computation = module->entry_computation();
+  for (HloInstruction* inst : entry_computation->instructions()) {
+    if (inst->opcode() == HloOpcode::kParameter) {
+      HloSharding output_spec = HloSharding::Replicate();
+      inst->set_sharding(output_spec);
+
+      if (heuristic == "shard-largest") {
+        std::vector<int64_t> lengths;
+        for (int64_t i = 0; i < inst->shape().rank(); ++i) {
+          lengths.push_back(inst->shape().dimensions(i));
+        }
+
+        std::vector<int> indices = Argsort(lengths);
+        int common_dims = std::min(mesh_nn_dims, indices.size());
+
+        if (common_dims < 1) {
+          continue;
+        }
+
+        if (common_dims == 1) {
+          int dim = indices[0];
+          int length = lengths[dim];
+          if (length % num_devices == 0) {
+            output_spec = Tile(inst->shape(), {dim}, {0}, device_mesh_1d);
+          }
+        } else {
+          int dim1 = indices[0];
+          int length1 = lengths[dim1];
+          int dim0 = indices[1];
+          int length0 = lengths[dim0];
+
+          if (length0 % device_mesh.dim(0) == 0 && length1 % device_mesh.dim(1) == 0) {
+            output_spec =
+                Tile(inst->shape(), {dim0, dim1}, {0, 1}, device_mesh);
+          }
+        }
+      } else if (heuristic == "shard-first") {
+        if (inst->shape().rank() > 0 &&
+            inst->shape().dimensions(0) % num_devices == 0) {
+          output_spec = Tile(inst->shape(), {0}, {0}, device_mesh_1d);
+        }
+      } else if (heuristic == "shard-last") {
+        int64_t last_dim = inst->shape().rank() - 1;
+        if (inst->shape().rank() > 0 &&
+            inst->shape().dimensions(last_dim) % num_devices == 0) {
+          output_spec = Tile(inst->shape(), {last_dim}, {0}, device_mesh_1d);
+        }
+      } else {
+        LOG(FATAL) << "Invalid heuristic: " << heuristic;
+      }
+
+      inst->set_sharding(output_spec);
+      // std::cerr << "ins: " << inst->ToString() << ", spec: " <<
+      // output_spec.ToString() << std::endl;
+    } else if (inst->opcode() == HloOpcode::kDot) {
+      const HloInstruction* lhs = inst->operand(0);
+      const HloInstruction* rhs = inst->operand(1);
+      const DotDimensionNumbers& dot_dnums = inst->dot_dimension_numbers();
+      const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
+      const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
+      std::vector<int64_t> lhs_space_dims, rhs_space_dims;
+      std::tie(lhs_space_dims, rhs_space_dims) =
+          GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
+    }
+  }
+
+  // Meet the alias requirement for the output tuple.
+  HloInstruction* output = entry_computation->root_instruction();
+  const Shape& out_shape = output->shape();
+  ShapeTree<HloSharding> tuple_sharding(out_shape, HloSharding::Replicate());
+  std::vector<HloSharding> flattened_shardings;
+
+  std::function<void(HloInstruction*)> get_flattened_shardings;
+  get_flattened_shardings = [&](HloInstruction* cur) {
+    for (int64_t i = 0; i < cur->operand_count(); ++i) {
+      HloInstruction* operand = cur->mutable_operand(i);
+
+      if (operand->shape().IsTuple()) {
+        get_flattened_shardings(operand);
+      } else {
+        if (alias_map.count(operand)) {
+          operand = alias_map.at(operand);
+        }
+        if (!operand->has_sharding()) {
+          operand->set_sharding(HloSharding::Replicate());
+        }
+        CHECK(operand->has_sharding());
+        flattened_shardings.push_back(operand->sharding());
+      }
+    }
+  };
+  get_flattened_shardings(output);
+  int i = 0;
+  for (auto& leaf : tuple_sharding.leaves()) {
+    leaf.second = flattened_shardings[i++];
+  }
+  CHECK_EQ(i, flattened_shardings.size());
+  output->set_sharding(HloSharding::Tuple(tuple_sharding));
 }
 
 }  // namespace spmd

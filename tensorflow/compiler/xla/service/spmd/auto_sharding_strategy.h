@@ -1037,6 +1037,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
 void AnnotateShardingWithSimpleHeuristic(HloModule* module,
                                          const std::string& heuristic,
+                                         const AliasMap& alias_map,
                                          const ClusterEnvironment& cluster_env);
 
 }  // namespace spmd

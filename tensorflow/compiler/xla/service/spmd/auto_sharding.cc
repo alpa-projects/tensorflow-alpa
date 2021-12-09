@@ -1801,12 +1801,6 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       pass_context::GetDoubleVector("auto_sharding::device_mesh_beta"),
       prof_result, solver_option);
 
-  if (solver_option.force_simple_heuristic != "") {
-    AnnotateShardingWithSimpleHeuristic(module, solver_option.force_simple_heuristic,
-        cluster_env);
-    return true;
-  }
-
   // RemoveCustomCallMarker(module);
   // std::cerr << "===== Enter AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();
@@ -1823,20 +1817,26 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   const HloComputation* entry_computation = module->entry_computation();
   std::unique_ptr<HloAliasAnalysis> alias_analysis =
       HloAliasAnalysis::Run(module).ConsumeValueOrDie();
+  AliasMap alias_map =
+      BuildAliasMap(module, alias_analysis->dataflow_analysis());
+
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<HloLiveRange> hlo_live_range,
       HloLiveRange::Run(schedule, *alias_analysis, entry_computation));
-
   absl::flat_hash_map<const HloValue*, HloLiveRange::TimeBound>&
       buffer_live_ranges = hlo_live_range->buffer_live_ranges();
-
   LivenessSet liveness_set(hlo_live_range->schedule_end_time() + 1);
   for (const auto& iter : buffer_live_ranges) {
     for (int64_t i = iter.second.start; i <= iter.second.end; ++i) {
       liveness_set[i].push_back(iter.first);
     }
   }
-  // std::cerr << PrintLivenessSet(liveness_set);
+
+  if (solver_option.force_simple_heuristic != "") {
+    AnnotateShardingWithSimpleHeuristic(
+        module, solver_option.force_simple_heuristic, alias_map, cluster_env);
+    return true;
+  }
 
   // ----- Analyze depth -----
   const HloInstructionSequence& sequence =
@@ -1849,8 +1849,6 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   LeafStrategies leaf_strategies;
   AssociativeDotPairs associative_dot_pairs;
 
-  AliasMap alias_map =
-      BuildAliasMap(module, alias_analysis->dataflow_analysis());
   TF_ASSIGN_OR_RETURN(
       std::tie(strategy_map, leaf_strategies, associative_dot_pairs),
       BuildStrategyAndCost(sequence, ins_depth_map, alias_map, cluster_env,

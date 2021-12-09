@@ -302,7 +302,7 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
                                  const Array<int64_t>& device_mesh,
                                  const ClusterEnvironment& cluster_env,
                                  const StrategyMap& strategy_map,
-                                 InstructionBatchDimMap batch_dim_map,
+                                 const InstructionBatchDimMap& batch_dim_map,
                                  std::unique_ptr<StrategyVector>& strategies) {
   auto iter = batch_dim_map.find(ins);
   if (iter == batch_dim_map.end()) {
@@ -1748,7 +1748,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     return false;
   }
 
-  // ----- Set options for this pass -----
+  // ----- Read options of this pass -----
   AutoShardingSolverOption solver_option;
   solver_option.override_all_gather_cost = false;
   solver_option.override_all_reduce_cost = false;
@@ -1783,9 +1783,23 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       pass_context::GetBool("auto_sharding::allow_mixed_mesh_shape", false);
   solver_option.grad_acc_num_micro_batches =
       pass_context::GetInt("auto_sharding::grad_acc_num_micro_batches", 1);
-
   solver_option.load_solution_vector =
       pass_context::GetBool("auto_sharding::load_solution_vector", false);
+  solver_option.force_simple_heuristic =
+      pass_context::GetString("auto_sharding::force_simple_heuristic", "");
+
+  // ----- Read parameters of device mesh -----
+  Array<int64_t> device_mesh(
+      pass_context::GetIntVector("auto_sharding::device_mesh_shape"));
+  device_mesh.SetValues(
+      pass_context::GetIntVector("auto_sharding::device_mesh_ids"));
+  ProfilingResult prof_result(
+      pass_context::GetPyObject("auto_sharding::device_mesh_prof_result"));
+  ClusterEnvironment cluster_env(
+      device_mesh,
+      pass_context::GetDoubleVector("auto_sharding::device_mesh_alpha"),
+      pass_context::GetDoubleVector("auto_sharding::device_mesh_beta"),
+      prof_result, solver_option);
 
   // RemoveCustomCallMarker(module);
   // std::cerr << "===== Enter AutoSharding =====" << std::endl;
@@ -1803,20 +1817,26 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   const HloComputation* entry_computation = module->entry_computation();
   std::unique_ptr<HloAliasAnalysis> alias_analysis =
       HloAliasAnalysis::Run(module).ConsumeValueOrDie();
+  AliasMap alias_map =
+      BuildAliasMap(module, alias_analysis->dataflow_analysis());
+
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<HloLiveRange> hlo_live_range,
       HloLiveRange::Run(schedule, *alias_analysis, entry_computation));
-
   absl::flat_hash_map<const HloValue*, HloLiveRange::TimeBound>&
       buffer_live_ranges = hlo_live_range->buffer_live_ranges();
-
   LivenessSet liveness_set(hlo_live_range->schedule_end_time() + 1);
   for (const auto& iter : buffer_live_ranges) {
     for (int64_t i = iter.second.start; i <= iter.second.end; ++i) {
       liveness_set[i].push_back(iter.first);
     }
   }
-  // std::cerr << PrintLivenessSet(liveness_set);
+
+  if (solver_option.force_simple_heuristic != "") {
+    AnnotateShardingWithSimpleHeuristic(
+        module, solver_option.force_simple_heuristic, alias_map, cluster_env);
+    return true;
+  }
 
   // ----- Analyze depth -----
   const HloInstructionSequence& sequence =
@@ -1824,26 +1844,11 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   InstructionDepthMap ins_depth_map;
   ins_depth_map = BuildInstructionDepthMap(sequence);
 
-  // ----- Read parameters of device mesh -----
-  Array<int64_t> device_mesh(
-      pass_context::GetIntVector("auto_sharding::device_mesh_shape"));
-  device_mesh.SetValues(
-      pass_context::GetIntVector("auto_sharding::device_mesh_ids"));
-  ProfilingResult prof_result(
-      pass_context::GetPyObject("auto_sharding::device_mesh_prof_result"));
-  ClusterEnvironment cluster_env(
-      device_mesh,
-      pass_context::GetDoubleVector("auto_sharding::device_mesh_alpha"),
-      pass_context::GetDoubleVector("auto_sharding::device_mesh_beta"),
-      prof_result, solver_option);
-
   // ----- Build strategies and costs -----
   StrategyMap strategy_map;
   LeafStrategies leaf_strategies;
   AssociativeDotPairs associative_dot_pairs;
 
-  AliasMap alias_map =
-      BuildAliasMap(module, alias_analysis->dataflow_analysis());
   TF_ASSIGN_OR_RETURN(
       std::tie(strategy_map, leaf_strategies, associative_dot_pairs),
       BuildStrategyAndCost(sequence, ins_depth_map, alias_map, cluster_env,

@@ -167,6 +167,11 @@ class ProfilingResult {
   double EstimateInternal(const std::vector<ReplicaGroup>& replica_groups,
                           int64_t size, PrimitiveType dtype,
                           const CommDict& cost_dict) const {
+    if (dtype != PrimitiveType::F16 && dtype != PrimitiveType::F32) {
+      // Cast other types to F32.
+      dtype = PrimitiveType::F32;
+    }
+
     CommDictKey key(Group2Str(replica_groups), dtype);
     if (!cost_dict.count(key)) {
       LOG(WARNING) << "Warning: cannot find key: (" << key.first << ", "

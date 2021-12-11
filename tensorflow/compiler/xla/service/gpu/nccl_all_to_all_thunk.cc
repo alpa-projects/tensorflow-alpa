@@ -47,10 +47,21 @@ namespace gpu {
 /*static*/ bool NcclAllToAllThunk::CanImplement(mlir::lmhlo::AllToAllOp op) {
   return absl::c_all_of(op.operands(), [&op](mlir::Value operand) {
     Shape shape = GetShape(operand);
+
+    auto dims = LayoutUtil::MinorToMajor(shape);
+    std::set<int64_t> valid_dims;
+    valid_dims.insert(dims.back());
+    for (int64_t i = dims.size() - 2; i >= 0; i--) {
+      if (shape.dimensions(dims[i]) != 1) {
+        break;
+      }
+      valid_dims.insert(dims[i]);
+    }
+
     return LayoutUtil::IsDenseArray(shape) &&
            IsTypeSupportedByNccl(shape.element_type()) &&
            (!op.split_dimension() ||
-            LayoutUtil::MinorToMajor(shape).back() == *op.split_dimension());
+            valid_dims.count(*op.split_dimension()));
   });
 }
 

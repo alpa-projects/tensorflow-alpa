@@ -145,11 +145,6 @@ bool IsCustomCallToCusolver(const HloInstruction& hlo) {
   return target == kCusolverCholeskyCallTarget;
 }
 
-bool ImplementedAsLibraryCall(const HloInstruction& hlo) {
-  return IsCublasGemm(hlo) || IsCustomCallToDnnBatchNorm(hlo) ||
-         IsCustomCallToDnnConvolution(hlo);
-}
-
 const char* const kBuiltinSwapOutTarget = "__builtin$SwapOut";
 const char* const kBuiltinSwapInTarget = "__builtin$SwapIn";
 const char* const kBuiltinSwapDoneTarget = "__builtin$SwapDone";

@@ -174,6 +174,30 @@ std::unique_ptr<StrategyVector> FollowInsStrategyVector(
   return std::move(strategies);
 }
 
+// Add "Replicate()" strategy
+void AddReplicatedStrategy(const HloInstruction* ins,
+                           const ClusterEnvironment& cluster_env,
+                           const StrategyMap& strategy_map,
+                           std::unique_ptr<StrategyVector>& strategies,
+                           double replicated_penalty) {
+  HloSharding output_spec = HloSharding::Replicate();
+
+  std::vector<std::vector<double>> resharding_costs;
+  for (int64_t k = 0; k < ins->operand_count(); ++k) {
+    resharding_costs.push_back(ReshardingCostVector(
+        strategy_map.at(ins->operand(k)).get(), ins->operand(k)->shape(),
+        output_spec, cluster_env));
+  }
+
+  strategies->leaf_vector.push_back(ShardingStrategy({"R",
+                                                      HloSharding::Replicate(),
+                                                      replicated_penalty,
+                                                      0,
+                                                      GetBytes(ins->shape()),
+                                                      resharding_costs,
+                                                      {}}));
+}
+
 // Enumerate all 1d partition strategies.
 void EnumerateAll1DPartition(const HloInstruction* ins,
                              const Array<int64_t>& device_mesh,
@@ -202,9 +226,15 @@ void EnumerateAll1DPartition(const HloInstruction* ins,
 
       std::vector<std::vector<double>> resharding_costs;
       for (int64_t k = 0; k < ins->operand_count(); ++k) {
-        resharding_costs.push_back(ReshardingCostVector(
-            strategy_map.at(ins->operand(k)).get(), ins->operand(k)->shape(),
-            output_spec, cluster_env));
+        const HloInstruction* operand = ins->operand(k);
+        if (operand->shape().rank() == 0) {
+          resharding_costs.push_back(std::vector<double>(
+              0.0, strategy_map.at(operand).get()->leaf_vector.size()));
+        } else {
+          resharding_costs.push_back(ReshardingCostVector(
+              strategy_map.at(operand).get(), ins->operand(k)->shape(),
+              output_spec, cluster_env));
+        }
       }
       strategies->leaf_vector.push_back(ShardingStrategy({name,
                                                           output_spec,
@@ -420,8 +450,10 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
     std::unique_ptr<StrategyVector> strategies;
     HloOpcode opcode = ins->opcode();
     switch (opcode) {
-      case HloOpcode::kParameter: {
+      case HloOpcode::kParameter:
+      case HloOpcode::kRng: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
+        SetInNodesWithInstruction(strategies, ins, strategy_map);
 
         // Split 1 dim
         EnumerateAll1DPartition(ins, device_mesh, cluster_env, strategy_map,
@@ -442,15 +474,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         if ((solver_option.allow_replicated_parameters &&
              !IsFollowedByReduce(ins)) ||
             strategies->leaf_vector.empty()) {
-          // Replicate
-          strategies->leaf_vector.push_back(
-              ShardingStrategy({"R",
-                                HloSharding::Replicate(),
-                                replicated_penalty,
-                                0,
-                                GetBytes(ins->shape()),
-                                {},
-                                {}}));
+          AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
+                                replicated_penalty);
         }
 
         // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies
@@ -464,14 +489,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
       }
       case HloOpcode::kConstant: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
-        strategies->leaf_vector.push_back(
-            ShardingStrategy({"R",
-                              HloSharding::Replicate(),
-                              0,
-                              0,
-                              GetBytes(ins->shape()),
-                              {},
-                              {}}));
+        AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies, 0);
         break;
       }
       case HloOpcode::kBroadcast: {
@@ -547,14 +565,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           }
 
           // Replicate
-          strategies->leaf_vector.push_back(ShardingStrategy(
-              {"R",
-               HloSharding::Replicate(),
-               replicated_penalty,
-               0,
-               GetBytes(ins->shape()),
-               {std::vector<double>(src_strategies->leaf_vector.size(), 0.0)},
-               {}}));
+          AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
+                                replicated_penalty);
         }
 
         break;
@@ -627,19 +639,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           }
 
           // Replicate
-          HloSharding output_spec = HloSharding::Replicate();
-          std::vector<std::vector<double>> resharding_costs{
-              ReshardingCostVector(strategy_map.at(ins->operand(0)).get(),
-                                   ins->operand(0)->shape(), output_spec,
-                                   cluster_env)};
-          strategies->leaf_vector.push_back(
-              ShardingStrategy({"R",
-                                output_spec,
-                                replicated_penalty,
-                                0,
-                                GetBytes(ins->shape()),
-                                resharding_costs,
-                                {}}));
+          AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
+                                replicated_penalty);
         }
         break;
       }
@@ -1056,14 +1057,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
       }
       case HloOpcode::kRngGetAndUpdateState: {
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
-        strategies->leaf_vector.push_back(
-            ShardingStrategy({"R",
-                              HloSharding::Replicate(),
-                              0,
-                              0,
-                              GetBytes(ins->shape()),
-                              {},
-                              {}}));
+        AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies, 0);
         break;
       }
       case HloOpcode::kIota: {
@@ -1082,14 +1076,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
         if (strategies->leaf_vector.empty() || IsFollowedByBroadcast(ins)) {
           // Replicate
-          strategies->leaf_vector.push_back(
-              ShardingStrategy({"R",
-                                HloSharding::Replicate(),
-                                replicated_penalty * 5,
-                                0,
-                                GetBytes(ins->shape()),
-                                {},
-                                {}}));
+          AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
+                                replicated_penalty * 5);
         }
         break;
       }
@@ -1117,7 +1105,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       default:
-        LOG(FATAL) << "Unhandled instruction: " + ins->name();
+        LOG(FATAL) << "Unhandled instruction: " + ins->ToString();
     }
 
     // Debug options: forcibly set the the strategy of some instructions.
@@ -1541,7 +1529,7 @@ void SetHloSharding(const HloInstructionSequence& sequence,
     // they are valid. But the the spmd partitioner cannot infer the correct
     // dot algorithms or resharding algorithm from the input/output sharding.
     // It then generates bad fallback code.
-    // Here we insert some extra annotated identiy instructions to help the
+    // Here we insert some extra annotated identity instructions to help the
     // spmd partitioner generate correct code.
 
     if (inst->opcode() == HloOpcode::kDot) {

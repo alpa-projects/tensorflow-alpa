@@ -2520,6 +2520,37 @@ cc_library(
 
 # These tests are intended to be run with --test_env=XLA_FLAGS=--xla_gpu_bef_thunk
 # See tap/tensorflow.xla_gpu_tfrt.
+cc_library(
+    name = "common_computation_elimination",
+    srcs = [
+        "common_computation_elimination.cc",
+    ],
+    hdrs = [
+        "common_computation_elimination.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+    ],
+)
+
+cc_library(
+    name = "gpu_cost_model",
+    srcs = [
+        "gpu_cost_model.cc",
+    ],
+    hdrs = [
+        "gpu_cost_model.h",
+    ],
+    deps = [
+        ":backend_configs_cc",
+        ":cublas_cudnn",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:pass_context",
+        "//tensorflow/compiler/xla/service/spmd:auto_sharding",
+    ],
+)
+
 # TODO(b/187959015): Expand test patterns; see cl/377552996.
 test_suite(
     name = "bef_thunk_tests",

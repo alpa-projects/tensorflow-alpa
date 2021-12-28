@@ -61,7 +61,7 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   CHECK(operands_.size() == address_list_.size());
-  for (int32 i = 0; i < operands_.size(); ++i) {
+  for (int32_t i = 0; i < operands_.size(); ++i) {
     const BufferAllocation::Slice& slice = operands_.at(i);
     if (!slice.allocation()) {
       return InternalError("custom call input missing buffer allocation");
@@ -122,7 +122,7 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   CHECK(memory_ref_->AddressList().size() == results_.size())
       << memory_ref_->AddressList().size() << " v.s. " << results_.size();
-  for (int32 i = 0; i < results_.size(); ++i) {
+  for (int32_t i = 0; i < results_.size(); ++i) {
     const BufferAllocation::Slice& slice = results_.at(i);
     if (!slice.allocation()) {
       return InternalError("custom call output missing buffer allocation");

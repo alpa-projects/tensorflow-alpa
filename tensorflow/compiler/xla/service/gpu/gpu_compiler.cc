@@ -78,7 +78,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gather_expander.h"
 #include "tensorflow/compiler/xla/service/gpu/alias_passthrough_params.h"
 #include "tensorflow/compiler/xla/service/gpu/all_reduce_blueconnect.h"
-#include "tensorflow/compiler/xla/service/gpu/auto_sharding.h"
 #include "tensorflow/compiler/xla/service/gpu/cudnn_batchnorm_rewriter.h"
 #include "tensorflow/compiler/xla/service/gpu/common_computation_elimination.h"
 #include "tensorflow/compiler/xla/service/gpu/fusion_bitcast_lift.h"
@@ -131,7 +130,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_subcomputation_unification.h"
 #include "tensorflow/compiler/xla/service/hlo_swap_insertion.h"
 #include "tensorflow/compiler/xla/service/hlo_verifier.h"
-#include "tensorflow/compiler/xla/service/identity_remover.h"
 #include "tensorflow/compiler/xla/service/remat_identity_fixer.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
 #include "tensorflow/compiler/xla/service/logistic_expander.h"
@@ -290,50 +288,61 @@ Status GpuCompiler::OptimizeHloModule(
     if (num_partitions > 1) {
       // Run some IR cleanup passes before running the SPMD partitioning
       // passes.
-      spmd_pipeline.AddInvariantChecker<HloVerifier>(
-          /*layout_sensitive=*/false,
-          /*allow_mixed_precision=*/false);
-      spmd_pipeline.AddPass<CallInliner>();
-      spmd_pipeline.AddPass<ZeroSizedHloElimination>();
-      spmd_pipeline.AddPass<ConditionalCanonicalizer>();
+      if (pass_context::GetBool("build_option::run_pre_spmd_partitioner_passes", true)) {
+        spmd_pipeline.AddInvariantChecker<HloVerifier>(
+            /*layout_sensitive=*/false,
+            /*allow_mixed_precision=*/false);
+        spmd_pipeline.AddPass<CallInliner>();
+        spmd_pipeline.AddPass<DotDecomposer>();
+        spmd_pipeline.AddPass<ZeroSizedHloElimination>();
+        spmd_pipeline.AddPass<ConditionalCanonicalizer>();
 
-      HloPassPipeline& spmd_simplify =
-          spmd_pipeline.AddPass<HloPassFix<HloPassPipeline>>("spmd-simplify");
+        HloPassPipeline& spmd_simplify =
+            spmd_pipeline.AddPass<HloPassFix<HloPassPipeline>>("spmd-simplify");
 
-      AlgebraicSimplifierOptions options;
-      options.set_replace_transpose_with_bitcast(false);
-      options.set_enable_conv_operand_swap(false);
-      // "slow" minmax means we propagate nan.
-      options.set_minmax_propagate_nan(
-          !debug_options.xla_gpu_enable_fast_min_max());
-      spmd_simplify.AddPass<AlgebraicSimplifier>(options);
+        AlgebraicSimplifierOptions options;
+        options.set_replace_transpose_with_bitcast(false);
+        options.set_enable_conv_operand_swap(false);
+        // "slow" minmax means we propagate nan.
+        options.set_minmax_propagate_nan(
+            !debug_options.xla_gpu_enable_fast_min_max());
+        spmd_simplify.AddPass<AlgebraicSimplifier>(options);
 
-      spmd_simplify.AddPass<SortSimplifier>();
-      spmd_simplify.AddPass<TupleSimplifier>();
-      spmd_simplify.AddPass<ScatterExpander>(
-          ScatterExpander::kEliminateSimpleScatters);
-      spmd_simplify.AddPass<GatherExpander>(
-          GatherExpander::kEliminateSimpleGathers);
-      spmd_simplify.AddPass<WhileLoopConstantSinking>();
-      spmd_simplify.AddPass<WhileLoopSimplifier>();
+        spmd_simplify.AddPass<SortSimplifier>();
+        spmd_simplify.AddPass<TupleSimplifier>();
+        spmd_simplify.AddPass<ScatterExpander>(
+            ScatterExpander::kEliminateSimpleScatters);
+        spmd_simplify.AddPass<GatherExpander>(
+            GatherExpander::kEliminateSimpleGathers);
+        spmd_simplify.AddPass<WhileLoopConstantSinking>();
+        spmd_simplify.AddPass<WhileLoopSimplifier>();
 
-      spmd_simplify.AddPass<ReshapeMover>();
-      spmd_simplify.AddPass<HloConstantFolding>();
-      spmd_simplify.AddPass<ConditionalSimplifier>();
-      spmd_simplify.AddPass<HloDCE>();
+        spmd_simplify.AddPass<ReshapeMover>();
+        spmd_simplify.AddPass<HloConstantFolding>();
+        spmd_simplify.AddPass<ConditionalSimplifier>();
+        spmd_simplify.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
+        spmd_simplify.AddPass<HloDCE>();
+      }
 
+      spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
+      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
     } else {
+      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
+
+    if (pass_context::GetBool("build_option::return_after_slice_auto_sharded_stages", false)) {
+      return Status::OK();
+    }
   }
 
-  if (pass_context::GetBool("build_option::run_hlo_optimization_pipeline", true)) {
+  {
     HloPassPipeline pipeline("optimization");
     pipeline.AddInvariantChecker<HloVerifier>(/*layout_sensitive=*/false,
                                               /*allow_mixed_precision=*/false);
@@ -489,27 +498,6 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
 
-  if (hlo_module->config().use_spmd_partitioning()) {
-    HloPassPipeline spmd_pipeline("spmd-partitioner");
-    const int64_t num_partitions = hlo_module->config().num_partitions();
-    if (num_partitions > 1) {
-      spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
-      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
-      spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
-      spmd_pipeline.AddPass<GpuSpmdPartitioner>(
-          num_partitions, hlo_module->config().replica_count());
-    } else {
-      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
-      // Remove redundant sharding ops when partition_count == 1.
-      spmd_pipeline.AddPass<ShardingRemover>();
-      spmd_pipeline.AddPass<HloDCE>();
-    }
-    TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
-    if (pass_context::GetBool("build_option::return_after_slice_auto_sharded_stages", false)) {
-      return Status::OK();
-    }
-  }
-
   // Optimize collectives generated by SPMD partitioning. Enable these passes
   // otherwise as well so that all collectives can get these optimizations.
   {
@@ -643,16 +631,14 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
 
-  {
-    if (pass_context::GetBool("swap::enable", false)) {
-      HloPassPipeline pipeline("swap insertion");
-      pipeline.AddPass<HloSwapInsertion>(
-          [](const Shape& shape) {
-            return ShapeUtil::ByteSizeOf(shape, sizeof(void*));
-          },
-          pass_context::GetInt("swap::device_memory_bound", INT64_MAX));
-      TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
-    }
+  if (pass_context::GetBool("swap::enable", false)) {
+    HloPassPipeline pipeline("swap insertion");
+    pipeline.AddPass<HloSwapInsertion>(
+        [](const Shape& shape) {
+          return ShapeUtil::ByteSizeOf(shape, sizeof(void*));
+        },
+        pass_context::GetInt("swap::device_memory_bound", INT64_MAX));
+    TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
   return Status::OK();
 }
@@ -700,8 +686,8 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   pipeline.AddPass<ReductionLayoutNormalizer>();
   pipeline.AddPass<ReductionDimensionGrouper>();
   pipeline.AddPass<HloPassFix<ReductionSplitter>>();
-  pipeline.AddPass<HloPassFix<GpuTreeReductionRewriter>>(
-      stream_exec->GetDeviceDescription().cuda_compute_capability());
+  //pipeline.AddPass<HloPassFix<GpuTreeReductionRewriter>>(
+  //    stream_exec->GetDeviceDescription().cuda_compute_capability());
 
   // The LayoutAssignment pass may leave behind kCopy instructions which are
   // duplicate or NOPs, so remove them with algebraic simplification and CSE.

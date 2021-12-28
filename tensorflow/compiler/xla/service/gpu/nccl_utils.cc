@@ -26,9 +26,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/core/platform/env.h"
-#include "tensorflow/core/platform/errors.h"
-#include "tensorflow/core/util/env_var.h"
-#include "tensorflow/stream_executor/gpu/gpu_types.h"
 
 namespace xla {
 namespace gpu {
@@ -224,7 +221,6 @@ struct NcclCliqueState {
   int64_t run_id = -1;
 };
 
-<<<<<<< HEAD
 using NcclClique = Lockable<NcclCliqueState>;
 
 std::shared_ptr<StatusOr<NcclClique::Lock>> AcquireNcclClique(
@@ -254,27 +250,6 @@ std::shared_ptr<StatusOr<NcclClique::Lock>> AcquireNcclClique(
         return clique;
       });
 }
-=======
-  VLOG(3) << "Initializing nccl comms for local participants: "
-          << LocalParticipantsToString(local_participants);
-
-  // Restore CUDA device after running this.  XLA shouldn't care, but maybe
-  // another consumer does.
-  int initial_cuda_device;
-
-  // Remap device indices for p3.8xlarge instances,
-  // due to its non-symetric GPU connection topology.
-  bool remap_device_id = true;
-  tensorflow::ReadBoolFromEnvVar("TF_CUDA_REMAP_DEVICE_ID",
-                                  /*default_val=*/false,
-                                  &remap_device_id);
-  int delta = remap_device_id ? 1 : 0;
-  int process_device_count;
-  XLA_CUDA_RETURN_IF_ERROR(cudaGetDeviceCount(&process_device_count));
-  auto map_device_id = [process_device_count, delta](int id) {
-    return (id + delta) % process_device_count;
-  };
->>>>>>> Register correct strategies for iota & Fix dot instructions that are incompatible with spmd partitioner (#22)
 
 void CheckNcclAsyncError(NcclComm& lockable_comm) {
   ncclComm_t comm = *lockable_comm.Acquire();

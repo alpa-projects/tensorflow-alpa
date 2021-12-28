@@ -325,6 +325,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       case HloOpcode::kConstant:
       case HloOpcode::kIota:
       case HloOpcode::kRngGetAndUpdateState:
+      case HloOpcode::kRng:
         break;
       case HloOpcode::kBroadcast: {
         const HloInstruction* operand = ins->operand(0);
@@ -1506,7 +1507,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
               }
               if (x->opcode() != HloOpcode::kConvolution &&
                   x->opcode() != HloOpcode::kDot) {
-                // only apply this aggressive optimization for dot and conv
+                // Only apply this aggressive optimization for dot and conv
                 continue;
               }
               if (iter->second < min_depth) {
@@ -1746,7 +1747,7 @@ void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
       sharding_1d = &dst_sharding;
     }
 
-    // Find an intermidiate shape
+    // Find an intermediate shape
     std::vector<int64_t> inter_shape_dims;
 
     for (size_t i = 0; i < shape.rank(); ++i) {
@@ -1857,7 +1858,8 @@ void AnnotateShardingWithSimpleHeuristic(
           int dim0 = indices[1];
           int length0 = lengths[dim0];
 
-          if (length0 % device_mesh.dim(0) == 0 && length1 % device_mesh.dim(1) == 0) {
+          if (length0 % device_mesh.dim(0) == 0 &&
+              length1 % device_mesh.dim(1) == 0) {
             output_spec =
                 Tile(inst->shape(), {dim0, dim1}, {0, 1}, device_mesh);
           }

@@ -57,10 +57,6 @@ bool IsCustomCallToCusolver(const HloInstruction& hlo);
 // is a success/failure code per batch element.
 extern const char* const kCusolverCholeskyCallTarget;
 
-// Returns true if `hlo` will be implemented as a library call, e.g. cuBLAS gemm
-// or cuDNN convolution.
-bool ImplementedAsLibraryCall(const HloInstruction& hlo);
-
 // Swap in or out. 
 extern const char* const kBuiltinSwapOutTarget;
 extern const char* const kBuiltinSwapInTarget;

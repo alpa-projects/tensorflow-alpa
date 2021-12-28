@@ -6292,6 +6292,7 @@ py_test(
         ":generate_test_hlo_checks",
         "@absl_py//absl/testing:absltest",
     ] + xla_py_test_deps(),
+)
 
 cc_library(
     name = "identity_remover",

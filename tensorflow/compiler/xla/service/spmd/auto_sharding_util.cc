@@ -17,8 +17,11 @@ NullStream& NullStream::Global() {
   return stream;
 }
 
-// Return whether the reshape is a special reshape that switches the batch dim
-// of a dot.
+const char* const kXlaPipelineMarker = "xla_pipeline_marker";
+const char* const kIdentityMarker = "identity";
+
+// Return whether a reshape instruction is a special reshape that switches
+// the batch dim of a dot.
 bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
   if (inst->opcode() != HloOpcode::kReshape) {
     return false;
@@ -311,7 +314,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       }
     }
 
-    if (ins->IsCustomCall("xla_pipeline_marker") &&
+    if (ins->IsCustomCall(kXlaPipelineMarker) &&
         ins->metadata().op_type().find("start") != std::string::npos) {
       // Reset the status after meet a new pipeline marker.
       set_the_next_dot_conv = true;
@@ -1443,7 +1446,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         SetSharding(to_split, output_spec, inst, transpose_inst, modified);
       }
 
-      if (!solver_option.reduce_scatter_aggresive_partition) {
+      if (!solver_option.reduce_scatter_aggressive_partition) {
         // The normal case
         for (HloInstruction* to_split : need_all_gather) {
           SetSharding(to_split, output_spec, inst, transpose_inst, modified);
@@ -1471,7 +1474,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           }
         }
       } else {
-        // Aggresivelly partition more parameter tensors.
+        // Aggressively partition more parameter tensors.
         // This can result in a strategy similar to ZeRO stage 3.
         // NOTE: The combination of this branch with pipeline parallel is not
         // tested.
@@ -1520,7 +1523,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
               // Insert an identity to prevent CSE of all-gather
               HloInstruction* identity = inst->parent()->AddInstruction(
                   HloInstruction::CreateCustomCall(cur->shape(), {cur},
-                                                   "identity"));
+                                                   ""));
               SetSharding(identity, output_spec, inst, transpose_inst,
                           modified);
               ReplaceOperand(first_user, cur, identity);

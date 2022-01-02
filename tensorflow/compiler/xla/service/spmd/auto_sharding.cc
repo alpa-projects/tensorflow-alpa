@@ -1761,8 +1761,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       pass_context::GetBool("auto_sharding::prefer_reduce_scatter", false);
   solver_option.reduce_scatter_grad_acc_friendly = pass_context::GetBool(
       "auto_sharding::reduce_scatter_grad_acc_friendly", false);
-  solver_option.reduce_scatter_aggresive_partition = pass_context::GetBool(
-      "auto_sharding::reduce_scatter_aggresive_partition", false);
+  solver_option.reduce_scatter_aggressive_partition = pass_context::GetBool(
+      "auto_sharding::reduce_scatter_aggressive_partition", false);
   solver_option.batch_matmul_always_split_batch = pass_context::GetBool(
       "auto_sharding::batch_matmul_always_split_batch", false);
   solver_option.allow_recompute_heavy_op =

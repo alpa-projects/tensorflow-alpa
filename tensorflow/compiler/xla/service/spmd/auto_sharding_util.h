@@ -26,6 +26,9 @@ using ReshardingCache =
     absl::flat_hash_map<const HloInstruction*,
                         std::vector<std::pair<HloSharding, HloInstruction*>>>;
 
+extern const char* const kXlaPipelineMarker;
+extern const char* const kIdentityMarker;
+
 /*
  * Array/Vector/Matrix Utility
  */
@@ -235,8 +238,8 @@ inline void ReplaceOperand(HloInstruction* inst,
 
 // Return whether this instruction is a custom call marker introduced by us.
 inline bool IsCustomCallMarker(const HloInstruction* inst) {
-  return inst->IsCustomCall("xla_pipeline_marker") ||
-         inst->IsCustomCall("identity");
+  return inst->IsCustomCall(kXlaPipelineMarker) ||
+         inst->IsCustomCall(kIdentityMarker);
 }
 
 // Return whether the reshape is a special reshape that switches the batch dim
@@ -359,7 +362,7 @@ inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
   for (size_t i = 0; i < instructions.size(); ++i) {
     const HloInstruction* ins = instructions[i];
 
-    if (ins->IsCustomCall("xla_pipeline_marker") &&
+    if (ins->IsCustomCall(kXlaPipelineMarker) &&
         ins->metadata().op_name().find("grad_acc_boundary") !=
             std::string::npos) {
       const HloInstruction* tuple = ins->operand(0);

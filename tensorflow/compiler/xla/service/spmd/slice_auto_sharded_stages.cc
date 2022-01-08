@@ -6,6 +6,8 @@
 #include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
+#include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
+
 
 namespace xla {
 namespace spmd {
@@ -65,8 +67,8 @@ std::unique_ptr<HloModule> CreateStageModule(
 
   HloInstruction* stage_start_instruction = stage_instructions.front();
   HloInstruction* stage_end_instruction = stage_instructions.back();
-  CHECK(stage_start_instruction->IsCustomCall("xla_pipeline_marker"));
-  CHECK(stage_end_instruction->IsCustomCall("xla_pipeline_marker"));
+  CHECK(stage_start_instruction->IsCustomCall(kXlaPipelineMarker));
+  CHECK(stage_end_instruction->IsCustomCall(kXlaPipelineMarker));
 
   CHECK(stage_start_instruction->shape().IsTuple());
   size_t n_parameters = stage_start_instruction->shape().tuple_shapes_size();
@@ -164,7 +166,7 @@ std::vector<std::string> HookShardingProto(HloModule* module) {
   }
 
   for (HloInstruction* inst : entry->instructions()) {
-    if (inst->IsCustomCall("identity")) {
+    if (inst->IsCustomCall(kIdentityMarker)) {
       auto* custom_call = Cast<HloCustomCallInstruction>(inst);
       if (custom_call->opaque() != "hook") {
         continue;
@@ -188,7 +190,7 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   std::vector<HloInstruction*> post_order = entry->MakeInstructionPostOrder();
   bool in_stage = false;
   for (HloInstruction* current_ins : post_order) {
-    if (current_ins->IsCustomCall("xla_pipeline_marker")) {
+    if (current_ins->IsCustomCall(kXlaPipelineMarker)) {
       if (in_stage) {
         current_stage_instructions.push_back(current_ins);
         pipeline_stages.push_back(

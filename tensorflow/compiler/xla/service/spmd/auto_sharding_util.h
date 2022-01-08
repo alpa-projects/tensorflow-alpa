@@ -26,6 +26,9 @@ using ReshardingCache =
     absl::flat_hash_map<const HloInstruction*,
                         std::vector<std::pair<HloSharding, HloInstruction*>>>;
 
+extern const char* const kXlaPipelineMarker;
+extern const char* const kIdentityMarker;
+
 /*
  * Array/Vector/Matrix Utility
  */
@@ -235,8 +238,8 @@ inline void ReplaceOperand(HloInstruction* inst,
 
 // Return whether this instruction is a custom call marker introduced by us.
 inline bool IsCustomCallMarker(const HloInstruction* inst) {
-  return inst->IsCustomCall("xla_pipeline_marker") ||
-         inst->IsCustomCall("identity");
+  return inst->IsCustomCall(kXlaPipelineMarker) ||
+         inst->IsCustomCall(kIdentityMarker);
 }
 
 // Return whether the reshape is a special reshape that switches the batch dim
@@ -250,7 +253,7 @@ bool IsFollowedByBroadcast(const HloInstruction* inst);
 bool IsFollowedByReduce(const HloInstruction* inst);
 
 // Depth analysis (breadth first search) that compute the depth of each
-// instruction. We also assign a much larger distance to heavey operators (e.g.,
+// instruction. We also assign a much larger distance to heavy operators (e.g.,
 // dot, convolution).
 InstructionDepthMap BuildInstructionDepthMap(
     const HloInstructionSequence& sequence);
@@ -311,15 +314,15 @@ HloSharding BroadcastSharding(const HloSharding& input_spec,
 
 // Propagate sharding for dim-wise operations (e.g., slice, pad) which works
 // independently on each dimension.
-// The sharding can successfully propagate if the operation only happends on
-// tensor dimentions that are not tiled.
+// The sharding can successfully propagate if the operation only happens on
+// tensor dimensions that are not tiled.
 absl::optional<HloSharding> PropagateDimwiseSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Shape& new_shape);
 
 // Propagate sharding for ReduceWindow-like operations.
 // The sharding can successfully propagate if the window operation only happens
-// on tensor dimentions that are not tiled.
+// on tensor dimensions that are not tiled.
 absl::optional<HloSharding> PropagateReduceWindowSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Window& window);
@@ -340,7 +343,7 @@ bool IsValidTileAssignment(const HloSharding& spec);
 std::pair<std::vector<int>, int> GetTensorDimToMeshDimInternal(
     const Shape& shape, const HloSharding& spec);
 
-// Forcely set the sharding of the operand of inst.
+// Forcibly set the sharding of the operand of inst.
 // Also fix the resharding between 1d and 2d logical mesh.
 void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
                                  const HloSharding& dst_sharding,
@@ -350,7 +353,7 @@ void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
 /*
  * Gradient accumulation
  */
-// Find all instrctions that compute gradients in gradient accumulation.
+// Find all instructions that compute gradients in gradient accumulation.
 // This is done by using the hint from pipeline_marker (gradient marker).
 inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
     const std::vector<HloInstruction*>& instructions) {
@@ -359,7 +362,7 @@ inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
   for (size_t i = 0; i < instructions.size(); ++i) {
     const HloInstruction* ins = instructions[i];
 
-    if (ins->IsCustomCall("xla_pipeline_marker") &&
+    if (ins->IsCustomCall(kXlaPipelineMarker) &&
         ins->metadata().op_name().find("grad_acc_boundary") !=
             std::string::npos) {
       const HloInstruction* tuple = ins->operand(0);

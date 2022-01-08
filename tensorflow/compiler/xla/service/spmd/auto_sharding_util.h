@@ -256,7 +256,8 @@ bool IsFollowedByReduce(const HloInstruction* inst);
 // instruction. We also assign a much larger distance to heavy operators (e.g.,
 // dot, convolution).
 InstructionDepthMap BuildInstructionDepthMap(
-    const HloInstructionSequence& sequence);
+    const HloInstructionSequence& sequence,
+    const InstructionBatchDimMap& batch_dim_map);
 
 // Batch dimension analysis that finds the batch dimension of each instruction.
 InstructionBatchDimMap BuildInstructionBatchDimMap(

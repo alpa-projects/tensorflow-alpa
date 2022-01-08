@@ -197,7 +197,8 @@ inline const HloInstruction* PassThroughCustomCallMarkerGetSource(
 // We also assign a much larger distance to heavy operators (e.g., dot,
 // convolution).
 InstructionDepthMap BuildInstructionDepthMap(
-    const HloInstructionSequence& sequence) {
+    const HloInstructionSequence& sequence,
+    const InstructionBatchDimMap& batch_dim_map) {
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
 
   InstructionDepthMap depth_map;
@@ -210,6 +211,12 @@ InstructionDepthMap BuildInstructionDepthMap(
     degree_dict[inst] = inst->unique_operands().size();
     if (degree_dict[inst] == 0) {
       depth_map[inst] = 0;
+
+      // Add some initial depth for activations from other pipeline stages.
+      if (inst->opcode() == HloOpcode::kParameter &&
+          batch_dim_map.count(inst)) {
+        depth_map[inst] = 20;
+      }
       current_frontier.push_back(inst);
       collected++;
     }

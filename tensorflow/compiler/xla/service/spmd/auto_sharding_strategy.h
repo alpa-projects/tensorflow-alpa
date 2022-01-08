@@ -49,9 +49,9 @@ struct AutoShardingSolverOption {
   // reduce-scatter
   bool reduce_scatter_grad_acc_friendly;
 
-  // If true, aggresively partition more tensors when generating reduce-scatter,
-  // even if it introduces more communicaton.
-  bool reduce_scatter_aggresive_partition;
+  // If true, aggressively partition more tensors when generating
+  // reduce-scatter, even if it introduces more communication.
+  bool reduce_scatter_aggressive_partition;
 
   // If true, the batch matmul will always be parallelized on the batch dim in
   // 2d mesh case.
@@ -61,7 +61,7 @@ struct AutoShardingSolverOption {
   // to reduce communication.
   bool allow_recompute_heavy_op;
 
-  // If ture, allow to add 1d strategies in 2d logical mesh.
+  // If ture, allow adding 1d strategies in 2d logical mesh.
   bool allow_mixed_mesh_shape;
 
   // The number of micro batches if gradient accumulation is used.
@@ -100,7 +100,7 @@ struct StrategyVector {
   int64_t id;
   // the index of the HLO instruction that generates this strategy vector.
   size_t instruction_id;
-  // the conneced nodes used for resharding costs;
+  // the connected nodes used for resharding costs;
   std::vector<const StrategyVector*> in_nodes;
   // the followed strategy. Used for merging nodes.
   const StrategyVector* following = nullptr;
@@ -216,7 +216,7 @@ class ProfilingResult {
   // vector<pair<size, time>>
   using Value = std::vector<std::pair<int64_t, double>>;
 
-  // Estimate the cost by linear interpolation bewteen the two closest points.
+  // Estimate the cost by linear interpolation between the two closest points.
   double EstimateInternal(
       const std::vector<std::vector<int>>& replica_groups, int64_t size,
       const std::string& dtype,

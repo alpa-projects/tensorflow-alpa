@@ -17,8 +17,11 @@ NullStream& NullStream::Global() {
   return stream;
 }
 
-// Return whether the reshape is a special reshape that switches the batch dim
-// of a dot.
+const char* const kXlaPipelineMarker = "xla_pipeline_marker";
+const char* const kIdentityMarker = "identity";
+
+// Return whether a reshape instruction is a special reshape that switches
+// the batch dim of a dot.
 bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
   if (inst->opcode() != HloOpcode::kReshape) {
     return false;
@@ -132,7 +135,7 @@ HloSharding BroadcastSharding(const HloSharding& input_spec,
 // Propagate sharding for dim-wise operations (e.g., slice, pad) which works
 // independently on each dimension.
 // The sharding can successfully propagate if the operation only happens
-// on tensor dimentions that are not tiled.
+// on tensor dimensions that are not tiled.
 absl::optional<HloSharding> PropagateDimwiseSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Shape& new_shape) {
@@ -155,7 +158,7 @@ absl::optional<HloSharding> PropagateDimwiseSharding(
 
 // Propagate sharding for ReduceWindow-like operations.
 // The sharding can successfully propagate if the window operation only happens
-// on tensor dimentions that are not tiled.
+// on tensor dimensions that are not tiled.
 absl::optional<HloSharding> PropagateReduceWindowSharding(
     const HloSharding& input_spec, const Shape& old_shape,
     const Window& window) {
@@ -191,7 +194,7 @@ inline const HloInstruction* PassThroughCustomCallMarkerGetSource(
 }
 
 // Depth analysis (breadth first search).
-// We also assign a much larger distance to heavey operators (e.g., dot,
+// We also assign a much larger distance to heavy operators (e.g., dot,
 // convolution).
 InstructionDepthMap BuildInstructionDepthMap(
     const HloInstructionSequence& sequence) {
@@ -311,7 +314,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       }
     }
 
-    if (ins->IsCustomCall("xla_pipeline_marker") &&
+    if (ins->IsCustomCall(kXlaPipelineMarker) &&
         ins->metadata().op_type().find("start") != std::string::npos) {
       // Reset the status after meet a new pipeline marker.
       set_the_next_dot_conv = true;
@@ -532,7 +535,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
     }
   }
 
-  // Backward propagation: propagete to operands
+  // Backward propagation: propagate to operands
   for (int64_t i = instructions.size() - 1; i >= 0; i--) {
     const HloInstruction* ins = instructions[i];
     switch (ins->opcode()) {
@@ -952,7 +955,7 @@ HloSharding GetReduceScatterOutput(const HloInstruction* ins,
   return Undefined();
 }
 
-// Return whether an instruction has the opportunity to generate redcue-scatter.
+// Return whether an instruction has the opportunity to generate reduce-scatter.
 bool HasReduceScatterOpportunity(
     const HloInstruction* inst, const StrategyMap& strategy_map,
     const CostGraph& cost_graph, const std::vector<int64_t>& s_val,
@@ -1057,7 +1060,7 @@ inline bool IsCustomCallMarkerTuple(const HloInstruction* inst) {
          IsCustomCallMarker(inst->users().front());
 }
 
-// Pass through the custom call marker and get the acutal user.
+// Pass through the custom call marker and get the actual user.
 inline HloInstruction* PassThroughCustomCallMarkerUser(
     HloInstruction* raw_user, const HloInstruction* inst) {
   if (!IsCustomCallMarkerTuple(raw_user)) {
@@ -1175,7 +1178,7 @@ void FindReplicateSet(
 }
 
 // Try to reduce the boundary set to its common ancestor
-void TryReduceWithCommonAncesstor(
+void TryReduceWithCommonAncestor(
     absl::flat_hash_set<HloInstruction*>& replicated_set,
     absl::flat_hash_set<HloInstruction*>& boundary_set,
     absl::flat_hash_set<HloInstruction*>& consumer_set,
@@ -1286,15 +1289,15 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
   // A debug option: whether to do all-gather after backward pass.
   // This controls the location of all-gather.
-  // If true, all-gather happends after backward pass, which is desired for
-  // gradient accumulation. If false, all-gather happends before forward pass,
+  // If true, all-gather happens after backward pass, which is desired for
+  // gradient accumulation. If false, all-gather happens before forward pass,
   // which can partitions more tensors.
   bool do_all_gather_after_backward = true;
 
-  // If true, do not acutally generate reduce-scatter + all-gather,
+  // If true, do not actually generate reduce-scatter + all-gather,
   // but generate all-reduce + all-gather instead.
   // This saves less memory but is more friendly to gradient accumulation.
-  // This is a temporary walkaround due to impelmentation difficutly.
+  // This is a temporary workaround due to implementation difficulty.
   // Ideally, we should be able to generate a gradient-accumulation-friendly
   // reduce-scatter + all-gather, but for now it is not easy to implement this
   // in our current system. So we generate a gradient-accumulation-friendly
@@ -1332,15 +1335,15 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
                      replicated_set, boundary_set, consumer_set, visited);
 
     // Try to reduce the boundary set to its common ancestor
-    TryReduceWithCommonAncesstor(replicated_set, boundary_set, consumer_set,
-                                 alias_map);
+    TryReduceWithCommonAncestor(replicated_set, boundary_set, consumer_set,
+                                alias_map);
 
     // Analyze the instructions after which all-gather should be inserted.
     std::vector<HloInstruction*> need_all_gather;
     for (HloInstruction* node : boundary_set) {
       if (consumer_set.count(node)) {
         if (AllUsersAreReduce(node)) {
-          // If users are reduce, the all-gather cost after this instructioon
+          // If users are reduce, the all-gather cost after this instruction
           // should be small, so we ignore all-gather cost of these
           // instructions.
           replicated_set.insert(node);
@@ -1443,7 +1446,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         SetSharding(to_split, output_spec, inst, transpose_inst, modified);
       }
 
-      if (!solver_option.reduce_scatter_aggresive_partition) {
+      if (!solver_option.reduce_scatter_aggressive_partition) {
         // The normal case
         for (HloInstruction* to_split : need_all_gather) {
           SetSharding(to_split, output_spec, inst, transpose_inst, modified);
@@ -1471,7 +1474,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
           }
         }
       } else {
-        // Aggresivelly partition more parameter tensors.
+        // Aggressively partition more parameter tensors.
         // This can result in a strategy similar to ZeRO stage 3.
         // NOTE: The combination of this branch with pipeline parallel is not
         // tested.
@@ -1520,7 +1523,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
               // Insert an identity to prevent CSE of all-gather
               HloInstruction* identity = inst->parent()->AddInstruction(
                   HloInstruction::CreateCustomCall(cur->shape(), {cur},
-                                                   "identity"));
+                                                   kIdentityMarker));
               SetSharding(identity, output_spec, inst, transpose_inst,
                           modified);
               ReplaceOperand(first_user, cur, identity);
@@ -1584,7 +1587,7 @@ void RemoveCustomCallMarker(HloModule* module) {
   }
 }
 
-// Get the values in an array along a dimesion.
+// Get the values in an array along a dimension.
 // e.g., if dim == 1, this returns array[0,:,0,0] following the numpy syntax.
 std::vector<int64_t> GetValuesAlongOneDim(const Array<int64_t>& array,
                                           int dim) {

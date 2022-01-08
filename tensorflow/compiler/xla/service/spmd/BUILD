@@ -181,6 +181,7 @@ cc_library(
     srcs = ["slice_auto_sharded_stages.cc"],
     hdrs = ["slice_auto_sharded_stages.h"],
     deps = [
+        ":auto_sharding",
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",

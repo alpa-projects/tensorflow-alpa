@@ -320,6 +320,13 @@ Status GpuCompiler::OptimizeHloModule(
         spmd_simplify.AddPass<ReshapeMover>();
         spmd_simplify.AddPass<HloConstantFolding>();
         spmd_simplify.AddPass<ConditionalSimplifier>();
+        spmd_simplify.AddPass<TransposeFolding>(
+            [](const HloInstruction& dot,
+               const TransposeFolding::OperandIndices& candidate_operands) {
+              return IsMatrixMultiplication(dot)
+                         ? candidate_operands
+                         : TransposeFolding::OperandIndices{};
+            });
         spmd_simplify.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
         spmd_simplify.AddPass<HloDCE>();
       }

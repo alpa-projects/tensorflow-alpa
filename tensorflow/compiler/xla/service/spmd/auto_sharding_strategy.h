@@ -49,8 +49,8 @@ struct AutoShardingSolverOption {
   // reduce-scatter
   bool reduce_scatter_grad_acc_friendly;
 
-  // If true, aggressively partition more tensors when generating reduce-scatter,
-  // even if it introduces more communication.
+  // If true, aggressively partition more tensors when generating
+  // reduce-scatter, even if it introduces more communication.
   bool reduce_scatter_aggressive_partition;
 
   // If true, the batch matmul will always be parallelized on the batch dim in

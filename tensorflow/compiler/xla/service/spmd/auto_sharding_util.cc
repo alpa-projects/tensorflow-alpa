@@ -1335,8 +1335,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
                      replicated_set, boundary_set, consumer_set, visited);
 
     // Try to reduce the boundary set to its common ancestor
-    TryReduceWithCommonAncesstor(replicated_set, boundary_set, consumer_set,
-                                 alias_map);
+    TryReduceWithCommonAncestor(replicated_set, boundary_set, consumer_set,
+                                alias_map);
 
     // Analyze the instructions after which all-gather should be inserted.
     std::vector<HloInstruction*> need_all_gather;
@@ -1523,7 +1523,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
               // Insert an identity to prevent CSE of all-gather
               HloInstruction* identity = inst->parent()->AddInstruction(
                   HloInstruction::CreateCustomCall(cur->shape(), {cur},
-                                                   ""));
+                                                   kIdentityMarker));
               SetSharding(identity, output_spec, inst, transpose_inst,
                           modified);
               ReplaceOperand(first_user, cur, identity);

@@ -252,7 +252,8 @@ void EnumerateAll2DPartition(const HloInstruction* ins,
                              const Array<int64_t>& device_mesh,
                              const ClusterEnvironment& cluster_env,
                              const StrategyMap& strategy_map,
-                             std::unique_ptr<StrategyVector>& strategies) {
+                             std::unique_ptr<StrategyVector>& strategies,
+                             bool only_allow_divisible) {
   // Fully tile the buffer to 2-d mesh
   for (int64_t i = 0; i < ins->shape().rank(); ++i) {
     for (int64_t j = 0; j < ins->shape().rank(); ++j) {
@@ -264,15 +265,27 @@ void EnumerateAll2DPartition(const HloInstruction* ins,
         continue;
       }
 
+      if (only_allow_divisible &&
+          (ins->shape().dimensions(i) % device_mesh.dim(0) != 0 ||
+           ins->shape().dimensions(j) % device_mesh.dim(1) != 0)) {
+        continue;
+      }
+
       std::string name = absl::StrFormat("S{%d,%d} @ {0,1}", i, j);
       HloSharding output_spec = Tile(ins->shape(), {i, j}, {0, 1}, device_mesh);
       double compute_cost = 0, communication_cost = 0;
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       std::vector<std::vector<double>> resharding_costs;
       for (int64_t k = 0; k < ins->operand_count(); ++k) {
-        resharding_costs.push_back(ReshardingCostVector(
-            strategy_map.at(ins->operand(k)).get(), ins->operand(k)->shape(),
-            output_spec, cluster_env));
+        const HloInstruction* operand = ins->operand(k);
+        if (operand->shape().rank() == 0) {
+          resharding_costs.push_back(std::vector<double>(
+              0.0, strategy_map.at(operand).get()->leaf_vector.size()));
+        } else {
+          resharding_costs.push_back(ReshardingCostVector(
+              strategy_map.at(operand).get(), operand->shape(),
+              output_spec, cluster_env));
+        }
       }
       strategies->leaf_vector.push_back(ShardingStrategy({name,
                                                           output_spec,
@@ -383,8 +396,7 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
 // Disable mixed mesh shape if the batch dim is not divisible by the
 // number of devices.
 void DisableIncompatibleMixedMeshShape(
-    const InstructionBatchDimMap& batch_dim_map,
-    const Array<int64_t>& device_mesh_1d,
+    const InstructionBatchDimMap& batch_dim_map, int num_devices,
     AutoShardingSolverOption& solver_option) {
   int64_t batch_size = 0;
   for (auto iter : batch_dim_map) {
@@ -392,7 +404,7 @@ void DisableIncompatibleMixedMeshShape(
     break;
   }
 
-  if (batch_size % device_mesh_1d.dim(0) != 0) {
+  if (batch_size % num_devices != 0) {
     if (solver_option.allow_mixed_mesh_shape) {
       solver_option.allow_mixed_mesh_shape = false;
       LOG(WARNING)
@@ -405,6 +417,7 @@ void DisableIncompatibleMixedMeshShape(
 StatusOr<std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>>
 BuildStrategyAndCost(const HloInstructionSequence& sequence,
                      const InstructionDepthMap& depth_map,
+                     const InstructionBatchDimMap& batch_dim_map,
                      const AliasMap& alias_map,
                      const ClusterEnvironment& cluster_env,
                      AutoShardingSolverOption& solver_option) {
@@ -423,14 +436,6 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
     if (dim > 1) {
       mesh_nn_dims++;
     }
-  }
-
-  // Analyze the batch dim if we want to forcely use data-parallel
-  InstructionBatchDimMap batch_dim_map;
-  if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
-    batch_dim_map = BuildInstructionBatchDimMap(sequence);
-    DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh_1d,
-                                      solver_option);
   }
 
   // Gather all output values
@@ -458,6 +463,12 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         // Split 1 dim
         EnumerateAll1DPartition(ins, device_mesh, cluster_env, strategy_map,
                                 strategies, true, "");
+
+        // Split 2 dims only for input data and activations
+        if (IsActivationFromAnotherStage(ins, batch_dim_map)) {
+          EnumerateAll2DPartition(ins, device_mesh, cluster_env, strategy_map,
+                                  strategies, true);
+        }
 
         if (solver_option.allow_mixed_mesh_shape &&
             cluster_env.non_zero_mesh_dims.size() > 1) {
@@ -1065,7 +1076,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
         // Split 2 dims
         EnumerateAll2DPartition(ins, device_mesh, cluster_env, strategy_map,
-                                strategies);
+                                strategies, false);
 
         if (solver_option.allow_mixed_mesh_shape &&
             cluster_env.non_zero_mesh_dims.size() > 1) {
@@ -1789,7 +1800,6 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
       pass_context::GetDoubleVector("auto_sharding::device_mesh_beta"),
       prof_result, solver_option);
 
-  // RemoveCustomCallMarker(module);
   // std::cerr << "===== Enter AutoSharding =====" << std::endl;
   // std::cerr << module->ToString();
   // std::cerr << "=====================================" << std::endl;
@@ -1826,11 +1836,19 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
     return true;
   }
 
-  // ----- Analyze depth -----
+  // ----- Analyze the batch dim -----
   const HloInstructionSequence& sequence =
       hlo_live_range->flattened_instruction_sequence();
+  InstructionBatchDimMap batch_dim_map;
+  batch_dim_map = BuildInstructionBatchDimMap(sequence);
+  if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
+    DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh.num_elements(),
+                                      solver_option);
+  }
+
+  // ----- Analyze depth -----
   InstructionDepthMap ins_depth_map;
-  ins_depth_map = BuildInstructionDepthMap(sequence);
+  ins_depth_map = BuildInstructionDepthMap(sequence, batch_dim_map);
 
   // ----- Build strategies and costs -----
   StrategyMap strategy_map;
@@ -1839,8 +1857,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
 
   TF_ASSIGN_OR_RETURN(
       std::tie(strategy_map, leaf_strategies, associative_dot_pairs),
-      BuildStrategyAndCost(sequence, ins_depth_map, alias_map, cluster_env,
-                           solver_option));
+      BuildStrategyAndCost(sequence, ins_depth_map, batch_dim_map, alias_map,
+                           cluster_env, solver_option));
   AliasSet alias_set =
       BuildAliasSet(module, alias_analysis->dataflow_analysis(), strategy_map);
   // std::cerr << PrintStrategyMap(strategy_map, sequence);

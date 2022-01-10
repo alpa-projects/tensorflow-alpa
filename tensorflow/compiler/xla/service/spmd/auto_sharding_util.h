@@ -252,6 +252,10 @@ bool IsFollowedByBroadcast(const HloInstruction* inst);
 // Return whether the instruction is followed by a reduce.
 bool IsFollowedByReduce(const HloInstruction* inst);
 
+// Return whether the instruction is an activation from another pipeline stage.
+bool IsActivationFromAnotherStage(const HloInstruction* inst,
+                                  const InstructionBatchDimMap& batch_dim_map);
+
 // Depth analysis (breadth first search) that compute the depth of each
 // instruction. We also assign a much larger distance to heavy operators (e.g.,
 // dot, convolution).

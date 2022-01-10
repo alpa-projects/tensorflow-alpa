@@ -97,6 +97,24 @@ bool IsFollowedByReduce(const HloInstruction* ins) {
   return found;
 }
 
+// Return whether the instruction is an activation from another pipeline stage.
+bool IsActivationFromAnotherStage(const HloInstruction* ins,
+                                  const InstructionBatchDimMap& batch_dim_map) {
+  if (!(ins->opcode() == HloOpcode::kParameter && batch_dim_map.count(ins))) {
+    return false;
+  }
+
+  for (const HloInstruction* user : ins->users()) {
+    if (!(user->opcode() == HloOpcode::kTuple && user->users().size() == 1 &&
+          user->users().front()->IsCustomCall(kXlaPipelineMarker) &&
+          user->users().front()->metadata().op_type().find("start") != std::string::npos)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Propagate sharding for broadcast.
 // The output will be tiled along the broadcasted dimension the same way
 // as the input for the broadcast while the other dimensions are kept
@@ -213,8 +231,7 @@ InstructionDepthMap BuildInstructionDepthMap(
       depth_map[inst] = 0;
 
       // Add some initial depth for activations from other pipeline stages.
-      if (inst->opcode() == HloOpcode::kParameter &&
-          batch_dim_map.count(inst)) {
+      if (IsActivationFromAnotherStage(inst, batch_dim_map)) {
         depth_map[inst] = 20;
       }
       current_frontier.push_back(inst);

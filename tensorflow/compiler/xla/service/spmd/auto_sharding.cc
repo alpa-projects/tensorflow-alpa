@@ -277,9 +277,15 @@ void EnumerateAll2DPartition(const HloInstruction* ins,
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       std::vector<std::vector<double>> resharding_costs;
       for (int64_t k = 0; k < ins->operand_count(); ++k) {
-        resharding_costs.push_back(ReshardingCostVector(
-            strategy_map.at(ins->operand(k)).get(), ins->operand(k)->shape(),
-            output_spec, cluster_env));
+        const HloInstruction* operand = ins->operand(k);
+        if (operand->shape().rank() == 0) {
+          resharding_costs.push_back(std::vector<double>(
+              0.0, strategy_map.at(operand).get()->leaf_vector.size()));
+        } else {
+          resharding_costs.push_back(ReshardingCostVector(
+              strategy_map.at(operand).get(), operand->shape(),
+              output_spec, cluster_env));
+        }
       }
       strategies->leaf_vector.push_back(ShardingStrategy({name,
                                                           output_spec,
@@ -459,11 +465,10 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                 strategies, true, "");
 
         // Split 2 dims only for input data and activations
-        if (batch_dim_map.count(ins)) {
-            EnumerateAll2DPartition(ins, device_mesh, cluster_env, strategy_map,
-                                    strategies, true);
+        if (IsActivationFromAnotherStage(ins, batch_dim_map)) {
+          EnumerateAll2DPartition(ins, device_mesh, cluster_env, strategy_map,
+                                  strategies, true);
         }
-
 
         if (solver_option.allow_mixed_mesh_shape &&
             cluster_env.non_zero_mesh_dims.size() > 1) {
@@ -1835,8 +1840,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   const HloInstructionSequence& sequence =
       hlo_live_range->flattened_instruction_sequence();
   InstructionBatchDimMap batch_dim_map;
+  batch_dim_map = BuildInstructionBatchDimMap(sequence);
   if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
-    batch_dim_map = BuildInstructionBatchDimMap(sequence);
     DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh.num_elements(),
                                       solver_option);
   }

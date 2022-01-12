@@ -8,7 +8,6 @@
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 
-
 namespace xla {
 namespace spmd {
 
@@ -185,7 +184,9 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   // ----- Slice the hlo module according to the pipeline marker -----
   HloComputation* entry = module->entry_computation();
 
+  std::vector<std::string> pipeline_stage_names;
   std::vector<std::unique_ptr<HloModule>> pipeline_stages;
+  std::string current_stage_name;
   std::vector<HloInstruction*> current_stage_instructions;
   std::vector<HloInstruction*> post_order = entry->MakeInstructionPostOrder();
   bool in_stage = false;
@@ -193,13 +194,16 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
     if (current_ins->IsCustomCall(kXlaPipelineMarker)) {
       if (in_stage) {
         current_stage_instructions.push_back(current_ins);
+        pipeline_stage_names.push_back(current_stage_name);
         pipeline_stages.push_back(
             CreateStageModule(module, current_stage_instructions,
                               std::to_string(pipeline_stages.size())));
+        current_stage_name.clear();
         current_stage_instructions.clear();
         in_stage = false;
       } else {
         in_stage = true;
+        current_stage_name = current_ins->metadata().op_name();
         current_stage_instructions.push_back(current_ins);
       }
     } else if (in_stage) {
@@ -220,7 +224,12 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   {
     py::object submodule =
         py::module_::import("parax.shard_parallel.auto_sharding");
+    py::list stage_names;
     py::list stage_modules;
+    for (const auto& name : pipeline_stage_names) {
+      py::str python_name(name);
+      stage_names.append(name);
+    }
     for (const auto& stage_module : pipeline_stages) {
       HloModuleProto module_proto = stage_module->ToProto();
       std::string serilaized_module_proto;
@@ -228,9 +237,10 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
       py::bytes serilaized_module_proto_bytes(serilaized_module_proto);
       stage_modules.append(serilaized_module_proto_bytes);
     }
+    py::tuple stages = py::make_tuple(stage_names, stage_modules);
     py::object set_auto_sharded_hlo_stages =
         submodule.attr("set_auto_sharded_hlo_stages");
-    py::object ret = set_auto_sharded_hlo_stages(stage_modules);
+    py::object ret = set_auto_sharded_hlo_stages(stages);
     if (!ret.is_none()) {
       PyGILState_Release(gstate);
       exit(-1);

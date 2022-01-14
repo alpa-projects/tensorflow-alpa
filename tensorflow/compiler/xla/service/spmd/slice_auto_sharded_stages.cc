@@ -91,15 +91,16 @@ std::unique_ptr<HloModule> CreateStageModule(
   // std::cerr << "======old instructions=====" << std::endl;
   for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
     HloInstruction* ins = stage_instructions[i];
+    if (ins->opcode() == HloOpcode::kParameter) {
+      continue;
+    }
+
     // std::cerr << ins->ToString() << std::endl;
     if (ins->opcode() == HloOpcode::kGetTupleElement &&
         ins->operand(0) == stage_start_instruction) {
       int64_t param_no = ins->tuple_index();
       context->MapInstruction(ins, parameters[param_no]);
     } else {
-      CHECK_NE(ins->opcode(), HloOpcode::kParameter)
-          << "instructions in a stage should not be parameter"
-          << ins->ToString();
       std::vector<HloInstruction*> new_operands;
       for (auto operand : ins->operands()) {
         HloInstruction* new_operand = context->FindInstruction(operand);
@@ -141,6 +142,10 @@ std::unique_ptr<HloModule> CreateStageModule(
           stage_end_instruction->operand(0)));
 
   for (size_t i = 1; i < stage_instructions.size() - 1; ++i) {
+    if (stage_instructions[i]->opcode() == HloOpcode::kParameter) {
+      continue;
+    }
+
     HloInstruction* ins = stage_instructions[i];
     HloInstruction* new_ins = context->GetInstruction(ins);
     for (auto successor : ins->control_successors()) {

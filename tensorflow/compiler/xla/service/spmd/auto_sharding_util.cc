@@ -1,5 +1,6 @@
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 
+#include "tensorflow/compiler/xla/primitive_util.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding_util.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_strategy.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -110,6 +111,14 @@ bool IsActivationFromAnotherStage(const HloInstruction* ins,
           user->users().front()->metadata().op_type().find("start") != std::string::npos)) {
       return false;
     }
+  }
+
+  if (primitive_util::IsIntegralType(ins->shape().element_type())) {
+    // TODO(lmzheng): This is a temporary hack. We use this to filter out
+    // the input word ids and position ids. These are global input so they are not
+    // activations from the previous stage. If we do not filter out them, some follow-up
+    // instructions will follow the wrong instructions.
+    return false;
   }
 
   return true;
@@ -1913,8 +1922,6 @@ void AnnotateShardingWithSimpleHeuristic(
       const HloInstruction* lhs = inst->operand(0);
       const HloInstruction* rhs = inst->operand(1);
       const DotDimensionNumbers& dot_dnums = inst->dot_dimension_numbers();
-      const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
-      const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
       std::vector<int64_t> lhs_space_dims, rhs_space_dims;
       std::tie(lhs_space_dims, rhs_space_dims) =
           GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);

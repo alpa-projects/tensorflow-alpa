@@ -228,7 +228,7 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   PyGILState_STATE gstate = PyGILState_Ensure();
   {
     py::object submodule =
-        py::module_::import("parax.shard_parallel.auto_sharding");
+        py::module_::import("alpa.shard_parallel.auto_sharding");
     py::list stage_names;
     py::list stage_modules;
     for (const auto& name : pipeline_stage_names) {

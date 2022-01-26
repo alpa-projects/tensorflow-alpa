@@ -128,7 +128,7 @@ using AliasSet = absl::flat_hash_set<std::pair<int64_t, int64_t>>;
 class ProfilingResult {
  public:
   // Construct the class from the corresponding python object
-  // parax/mesh_profiling.py::ProfilingResult.
+  // alpa/mesh_profiling.py::ProfilingResult.
   ProfilingResult(py::object prof_result) {
     if (!prof_result.is_none()) {
       PyGILState_STATE gstate = PyGILState_Ensure();

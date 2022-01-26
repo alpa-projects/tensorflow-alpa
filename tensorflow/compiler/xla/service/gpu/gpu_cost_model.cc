@@ -76,7 +76,7 @@ std::string Group2Str(const std::vector<ReplicaGroup>& replica_groups) {
 class ProfilingResult {
  public:
   // Construct the class from the corresponding python object
-  // parax/mesh_profiling.py::ProfilingResult.
+  // alpa/mesh_profiling.py::ProfilingResult.
   ProfilingResult(py::object prof_result) {
     if (!prof_result.is_none()) {
       PyGILState_STATE gstate = PyGILState_Ensure();

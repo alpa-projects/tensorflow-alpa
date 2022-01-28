@@ -393,15 +393,16 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
   }
 }
 
-// Disable mixed mesh shape if the batch dim is not divisible by the
+// 1. Disable mixed mesh shape if the batch dim is not divisible by the
 // number of devices.
-void DisableIncompatibleMixedMeshShape(
+// 2. Disable force_batch_dim_to_mesh_dim if the batch dim is 1. In this case,
+// the batch dim analysis can be wrong because the batch dim might be dropped.
+void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
     const InstructionBatchDimMap& batch_dim_map, int num_devices,
     AutoShardingSolverOption& solver_option) {
-  int64_t batch_size = 0;
+  int64_t batch_size = (1 << 31) - 1;
   for (auto iter : batch_dim_map) {
-    batch_size = iter.first->shape().dimensions(iter.second);
-    break;
+    batch_size = std::min(batch_size, iter.first->shape().dimensions(iter.second));
   }
 
   if (batch_size % num_devices != 0) {
@@ -410,6 +411,10 @@ void DisableIncompatibleMixedMeshShape(
       LOG(WARNING)
           << "Mixed mesh shape is disabled due to indivisible batch size.";
     }
+  }
+
+  if (batch_size == 1) {
+    solver_option.force_batch_dim_to_mesh_dim = -1;
   }
 }
 
@@ -1842,8 +1847,8 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   InstructionBatchDimMap batch_dim_map;
   batch_dim_map = BuildInstructionBatchDimMap(sequence);
   if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
-    DisableIncompatibleMixedMeshShape(batch_dim_map, device_mesh.num_elements(),
-                                      solver_option);
+    DisableIncompatibleMixedMeshShapeAndForceBatchDim(
+        batch_dim_map, device_mesh.num_elements(), solver_option);
   }
 
   // ----- Analyze depth -----

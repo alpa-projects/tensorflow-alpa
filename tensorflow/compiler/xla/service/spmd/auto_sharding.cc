@@ -78,19 +78,6 @@ HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
              : HloSharding::Tile(std::move(tile_assignment));
 }
 
-// Return the maximum number of tiles among all strategies of an instruction.
-int64_t MaxNumTiles(const StrategyMap& strategy_map,
-                    const HloInstruction* ins) {
-  const StrategyVector* strategies = strategy_map.at(ins).get();
-  int64_t max_num_tiles = -1;
-  for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
-    max_num_tiles = std::max(
-        max_num_tiles, strategies->leaf_vector[i].output_sharding.NumTiles());
-  }
-
-  return max_num_tiles;
-}
-
 // Compute the resharding cost vector from multiple possible strategies
 // to a desired sharding spec.
 std::vector<double> ReshardingCostVector(
@@ -406,28 +393,43 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
   }
 }
 
-std::pair<int64_t, bool> ChooseInstructionToFollow(
+// Return the maximum number of tiles among all strategies of an instruction.
+int64_t MaxNumTiles(const StrategyMap& strategy_map,
+                    const HloInstruction* ins) {
+  const StrategyVector* strategies = strategy_map.at(ins).get();
+  int64_t max_num_tiles = -1;
+  for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
+    max_num_tiles = std::max(
+        max_num_tiles, strategies->leaf_vector[i].output_sharding.NumTiles());
+  }
+
+  return max_num_tiles;
+}
+
+// Choose an operand to follow.
+// We choose to follow the operand whose strategy set contains the sharding spec
+// with the maximum number of tiles.
+std::pair<int64_t, bool> ChooseOperandToFollow(
     const StrategyMap& strategy_map, const InstructionDepthMap& depth_map,
     const AliasMap& alias_map,
     const absl::flat_hash_set<const HloInstruction*>& undefined_set,
     int64_t max_depth, const HloInstruction* ins) {
-  double depth_normalizer = 0.1 * max_depth;
-
   int64_t follow_idx = -1;
-  double max_metric = -1e20;
-  double range_delta = 3 * depth_normalizer;
   bool tie = false;
+  double max_priority = -1e20;
+  double depth_normalizer = 0.1 * max_depth;
+  double range_delta = 2 * depth_normalizer;
 
   for (int64_t i = 0; i < ins->operand_count(); ++i) {
     const HloInstruction* operand = ins->operand(i);
     if (!undefined_set.count(operand)) {
-      double metric = MaxNumTiles(strategy_map, operand) +
-                      depth_map.at(operand) * depth_normalizer;
-      if (metric > max_metric + range_delta) {
+      double priority = MaxNumTiles(strategy_map, operand) +
+                        depth_map.at(operand) * depth_normalizer;
+      if (priority > max_priority + range_delta) {
         follow_idx = i;
         tie = false;
-        max_metric = metric;
-      } else if (metric >= max_metric - range_delta) {
+        max_priority = priority;
+      } else if (priority >= max_priority - range_delta) {
         tie = true;
       }
     }
@@ -441,6 +443,20 @@ std::pair<int64_t, bool> ChooseInstructionToFollow(
   CHECK_GE(follow_idx, 0);
 
   return std::make_pair(follow_idx, tie);
+}
+
+// Return whether an instruciton can follow one of its operand when
+// more than two operands have the same priority.
+bool AllowTieFollowing(const HloInstruction* ins) {
+  if (ins->opcode() == HloOpcode::kCompare) {
+    // This is used to resolve a tricky case where an iota and a parameter
+    // has the same priority.
+    return false;
+  }
+  if (ins->operand_count() == 3) {
+    return false;
+  }
+  return true;
 }
 
 // Build possible sharding strategies and their costs for all instructions.
@@ -478,7 +494,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
   double replicated_penalty = std::round(cluster_env.AllReduceCost(1, 0) +
                                          cluster_env.AllReduceCost(1, 1));
 
-  int64_t max_depth = 10000;
+  int64_t max_depth = -1;
   for (const HloInstruction* ins : instructions) {
     max_depth = std::max(depth_map.at(ins), max_depth);
   }
@@ -742,10 +758,10 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-        // Choose instruction to follow
+        // Choose an operand to follow
         int64_t follow_idx;
         bool tie;
-        std::tie(follow_idx, tie) = ChooseInstructionToFollow(
+        std::tie(follow_idx, tie) = ChooseOperandToFollow(
             strategy_map, depth_map, alias_map, undefined_set, max_depth, ins);
 
         // Create follow strategies
@@ -862,18 +878,20 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-        // Choose instruction to follow
+        // Choose an operand to follow
         int64_t follow_idx;
         bool tie;
-        std::tie(follow_idx, tie) = ChooseInstructionToFollow(
+        std::tie(follow_idx, tie) = ChooseOperandToFollow(
             strategy_map, depth_map, alias_map, undefined_set, max_depth, ins);
 
         // Create follow strategies
         const StrategyVector* src_strategies =
             strategy_map.at(ins->operand(follow_idx)).get();
         CHECK(!src_strategies->is_tuple);
-        if (!tie) {
+        if (!tie || AllowTieFollowing(ins)) {
           strategies->following = src_strategies;
+        } else {
+          std::cerr << "tie: " << ins->ToString() << std::endl;
         }
 
         for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -1757,7 +1775,7 @@ std::string PrintAutoShardingSolution(
 void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
     const InstructionBatchDimMap& batch_dim_map, int num_devices,
     AutoShardingSolverOption& solver_option) {
-  int64_t batch_size = ((int64_t)1 << 31) - 1;
+  int64_t batch_size = (1 << 31) - 1;
   for (auto iter : batch_dim_map) {
     batch_size =
         std::min(batch_size, iter.first->shape().dimensions(iter.second));

@@ -406,31 +406,45 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
   }
 }
 
-// 1. Disable mixed mesh shape if the batch dim is not divisible by the
-// number of devices.
-// 2. Disable force_batch_dim_to_mesh_dim if the batch dim is 1. In this case,
-// the batch dim analysis can be wrong because the batch dim might be dropped.
-void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
-    const InstructionBatchDimMap& batch_dim_map, int num_devices,
-    AutoShardingSolverOption& solver_option) {
-  int64_t batch_size = ((int64_t)1 << 31) - 1;
-  for (auto iter : batch_dim_map) {
-    batch_size =
-        std::min(batch_size, iter.first->shape().dimensions(iter.second));
-  }
+std::pair<int64_t, bool> ChooseInstructionToFollow(
+  const StrategyMap& strategy_map,
+  const InstructionDepthMap& depth_map,
+  const AliasMap& alias_map,
+  const absl::flat_hash_set<const HloInstruction*>& undefined_set,
+  int64_t max_depth,
+  const HloInstruction* ins) {
+  double depth_normalizer = 0.1 * max_depth;
 
-  if (batch_size % num_devices != 0) {
-    if (solver_option.allow_mixed_mesh_shape) {
-      solver_option.allow_mixed_mesh_shape = false;
-      LOG(WARNING)
-          << "Mixed mesh shape is disabled due to indivisible batch size.";
+  int64_t follow_idx = -1;
+  double max_metric = -1e20;
+  double range_delta = 3 * depth_normalizer;
+  bool tie = false;
+
+  for (int64_t i = 0; i < ins->operand_count(); ++i) {
+    const HloInstruction* operand = ins->operand(i);
+    if (!undefined_set.count(operand)) {
+      double metric = MaxNumTiles(strategy_map, operand) +
+          depth_map.at(operand) * depth_normalizer;
+      if (metric > max_metric + range_delta) {
+        follow_idx = i;
+        tie = false;
+        max_metric = metric;
+      } else if (metric >= max_metric - range_delta) {
+        tie = true;
+      }
+    }
+
+    // If an alias constraint is set, always follow its alias source.
+    auto it = alias_map.find(ins);
+    if (it != alias_map.end() && it->second == operand) {
+      break;
     }
   }
+  CHECK_GE(follow_idx, 0);
 
-  if (batch_size == 1) {
-    solver_option.force_batch_dim_to_mesh_dim = -1;
-  }
+  return std::make_pair(follow_idx, tie);
 }
+
 
 // Build possible sharding strategies and their costs for all instructions.
 StatusOr<std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>>
@@ -467,9 +481,9 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
   double replicated_penalty = std::round(cluster_env.AllReduceCost(1, 0) +
                                          cluster_env.AllReduceCost(1, 1));
 
-  int64_t depth_normalizer = 10000;
+  int64_t max_depth = 10000;
   for (const HloInstruction* ins : instructions) {
-    depth_normalizer = std::max(depth_map.at(ins), depth_normalizer);
+    max_depth = std::max(depth_map.at(ins), max_depth);
   }
 
   // Register strategies and their costs for each instruction.
@@ -731,24 +745,11 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-        // Follow the operand with the max depth
-        int64_t follow_idx = -1;
-        double max_depth = -1e20;
-        for (int64_t i = 0; i < ins->operand_count(); ++i) {
-          const HloInstruction* operand = ins->operand(i);
-          if (!undefined_set.count(operand)) {
-            double depth = MaxNumTiles(strategy_map, operand) +
-                           0.1 * depth_map.at(operand) / depth_normalizer;
-            // Add the rank to depth to prefer the operand with the higher rank
-            // if some operands have the same depth.
-            if (depth > max_depth) {
-              follow_idx = i;
-              max_depth = MaxNumTiles(strategy_map, operand) +
-                          0.1 * depth_map.at(operand) / depth_normalizer;
-            }
-          }
-        }
-        CHECK_GE(follow_idx, 0);
+        // Choose instruction to follow
+        int64_t follow_idx;
+        bool tie;
+        std::tie(follow_idx, tie) = ChooseInstructionToFollow(
+            strategy_map, depth_map, alias_map, undefined_set, max_depth, ins);
 
         // Create follow strategies
         const HloInstruction* operand = ins->operand(follow_idx);
@@ -864,37 +865,19 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
         SetInNodesWithInstruction(strategies, ins, strategy_map);
 
-        // Follow the operand with the max depth
-        int64_t follow_idx = -1;
-        double max_depth = -1e20;
-        for (int64_t i = 0; i < ins->operand_count(); ++i) {
-          const HloInstruction* operand = ins->operand(i);
-          if (!undefined_set.count(operand)) {
-            double depth = MaxNumTiles(strategy_map, operand) +
-                           0.1 * depth_map.at(operand) / depth_normalizer;
-            // Add the rank to depth to prefer the operand with the higher rank
-            // if some operands have the same depth.
-            if (depth > max_depth) {
-              follow_idx = i;
-              max_depth = MaxNumTiles(strategy_map, operand) +
-                          0.1 * depth_map.at(operand) / depth_normalizer;
-            }
-          }
-
-          // If an alias constraint is set, always follow its alias source.
-          auto it = alias_map.find(ins);
-          if (it != alias_map.end() && it->second == operand) {
-            follow_idx = i;
-            break;
-          }
-        }
-        CHECK_GE(follow_idx, 0);
+        // Choose instruction to follow
+        int64_t follow_idx;
+        bool tie;
+        std::tie(follow_idx, tie) = ChooseInstructionToFollow(
+            strategy_map, depth_map, alias_map, undefined_set, max_depth, ins);
 
         // Create follow strategies
         const StrategyVector* src_strategies =
             strategy_map.at(ins->operand(follow_idx)).get();
         CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies;
+        if (!tie) {
+          strategies->following = src_strategies;
+        }
 
         for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
           HloSharding output_spec =
@@ -1768,6 +1751,32 @@ std::string PrintAutoShardingSolution(
      << "\n";
 
   return os.str();
+}
+
+// 1. Disable mixed mesh shape if the batch dim is not divisible by the
+// number of devices.
+// 2. Disable force_batch_dim_to_mesh_dim if the batch dim is 1. In this case,
+// the batch dim analysis can be wrong because the batch dim might be dropped.
+void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
+    const InstructionBatchDimMap& batch_dim_map, int num_devices,
+    AutoShardingSolverOption& solver_option) {
+  int64_t batch_size = ((int64_t)1 << 31) - 1;
+  for (auto iter : batch_dim_map) {
+    batch_size =
+        std::min(batch_size, iter.first->shape().dimensions(iter.second));
+  }
+
+  if (batch_size % num_devices != 0) {
+    if (solver_option.allow_mixed_mesh_shape) {
+      solver_option.allow_mixed_mesh_shape = false;
+      LOG(WARNING)
+          << "Mixed mesh shape is disabled due to indivisible batch size.";
+    }
+  }
+
+  if (batch_size == 1) {
+    solver_option.force_batch_dim_to_mesh_dim = -1;
+  }
 }
 
 StatusOr<bool> AutoSharding::Run(HloModule* module) {

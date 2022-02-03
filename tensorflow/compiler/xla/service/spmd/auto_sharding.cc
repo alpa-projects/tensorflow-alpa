@@ -407,12 +407,10 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
 }
 
 std::pair<int64_t, bool> ChooseInstructionToFollow(
-  const StrategyMap& strategy_map,
-  const InstructionDepthMap& depth_map,
-  const AliasMap& alias_map,
-  const absl::flat_hash_set<const HloInstruction*>& undefined_set,
-  int64_t max_depth,
-  const HloInstruction* ins) {
+    const StrategyMap& strategy_map, const InstructionDepthMap& depth_map,
+    const AliasMap& alias_map,
+    const absl::flat_hash_set<const HloInstruction*>& undefined_set,
+    int64_t max_depth, const HloInstruction* ins) {
   double depth_normalizer = 0.1 * max_depth;
 
   int64_t follow_idx = -1;
@@ -424,7 +422,7 @@ std::pair<int64_t, bool> ChooseInstructionToFollow(
     const HloInstruction* operand = ins->operand(i);
     if (!undefined_set.count(operand)) {
       double metric = MaxNumTiles(strategy_map, operand) +
-          depth_map.at(operand) * depth_normalizer;
+                      depth_map.at(operand) * depth_normalizer;
       if (metric > max_metric + range_delta) {
         follow_idx = i;
         tie = false;
@@ -444,7 +442,6 @@ std::pair<int64_t, bool> ChooseInstructionToFollow(
 
   return std::make_pair(follow_idx, tie);
 }
-
 
 // Build possible sharding strategies and their costs for all instructions.
 StatusOr<std::tuple<StrategyMap, LeafStrategies, AssociativeDotPairs>>

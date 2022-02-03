@@ -231,13 +231,13 @@ InstructionDepthMap BuildInstructionDepthMap(
     degree_dict[inst] = inst->unique_operands().size();
     if (degree_dict[inst] == 0) {
       depth_map[inst] = 0;
-      current_frontier.push_back(inst);
 
       // Add some initial depth for activations from other pipeline stages.
       if (IsActivationFromAnotherStage(inst, batch_dim_map)) {
         depth_map[inst] = 20;
       }
 
+      current_frontier.push_back(inst);
       collected++;
     }
   }

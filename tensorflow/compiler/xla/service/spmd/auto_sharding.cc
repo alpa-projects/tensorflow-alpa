@@ -890,8 +890,6 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         CHECK(!src_strategies->is_tuple);
         if (!tie || AllowTieFollowing(ins)) {
           strategies->following = src_strategies;
-        } else {
-          std::cerr << "tie: " << ins->ToString() << std::endl;
         }
 
         for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {

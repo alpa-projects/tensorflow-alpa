@@ -446,11 +446,11 @@ std::pair<int64_t, bool> ChooseOperandToFollow(
 }
 
 // Return whether an instruciton can follow one of its operand when
-// more than two operands have the same priority.
+// more than one operand have the same priority.
 bool AllowTieFollowing(const HloInstruction* ins) {
   if (ins->opcode() == HloOpcode::kCompare) {
     // This is used to resolve a tricky case where an iota and a parameter
-    // has the same priority.
+    // has the same priority. This happens for embedding / onehot.
     return false;
   }
   if (ins->operand_count() == 3) {
@@ -495,8 +495,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                          cluster_env.AllReduceCost(1, 1));
 
   int64_t max_depth = -1;
-  for (const HloInstruction* ins : instructions) {
-    max_depth = std::max(depth_map.at(ins), max_depth);
+  for (auto iter : depth_map) {
+    max_depth = std::max(max_depth, iter.second);
   }
 
   // Register strategies and their costs for each instruction.
@@ -1773,7 +1773,7 @@ std::string PrintAutoShardingSolution(
 void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
     const InstructionBatchDimMap& batch_dim_map, int num_devices,
     AutoShardingSolverOption& solver_option) {
-  int64_t batch_size = (1 << 31) - 1;
+  int64_t batch_size = (((int64_t)1) << 31) - 1;
   for (auto iter : batch_dim_map) {
     batch_size =
         std::min(batch_size, iter.first->shape().dimensions(iter.second));

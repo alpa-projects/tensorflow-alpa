@@ -108,7 +108,8 @@ bool IsActivationFromAnotherStage(const HloInstruction* ins,
   for (const HloInstruction* user : ins->users()) {
     if (!(user->opcode() == HloOpcode::kTuple && user->users().size() == 1 &&
           user->users().front()->IsCustomCall(kXlaPipelineMarker) &&
-          user->users().front()->metadata().op_type().find("start") != std::string::npos)) {
+          user->users().front()->metadata().op_type().find("start") !=
+              std::string::npos)) {
       return false;
     }
   }
@@ -243,6 +244,7 @@ InstructionDepthMap BuildInstructionDepthMap(
       if (IsActivationFromAnotherStage(inst, batch_dim_map)) {
         depth_map[inst] = 20;
       }
+
       current_frontier.push_back(inst);
       collected++;
     }
@@ -273,27 +275,12 @@ InstructionDepthMap BuildInstructionDepthMap(
             // TODO(lmzheng): remove this hack by correctly registering
             // strategies for broadcast.
             case HloOpcode::kReduce:
-              delta = 1;
               reset = true;
               break;
             // For similar reasons mentioned above, we give some penalty to
             // broadcast.
             case HloOpcode::kBroadcast:
-              delta = -(4 + node->shape().rank() - node->dimensions().size());
-              break;
-            case HloOpcode::kConstant:
-            case HloOpcode::kParameter:
-              delta = 0;
-              break;
-            case HloOpcode::kReshape:
-            case HloOpcode::kTranspose:
-              delta = 0;
-              break;
-            case HloOpcode::kGetTupleElement:
-            case HloOpcode::kTuple:
-            case HloOpcode::kCustomCall:  // Mainly for pipeline_marker
-              // Skip these useless instructions.
-              delta = 0;
+              delta = -5;
               break;
             default:
               delta = 1;
@@ -301,7 +288,7 @@ InstructionDepthMap BuildInstructionDepthMap(
           }
 
           if (reset) {
-            depth_map[node] = delta;
+            depth_map[node] = 0;
           } else if (node->opcode() == HloOpcode::kGetTupleElement &&
                      IsCustomCallMarker(node->operand(0))) {
             depth_map[node] =

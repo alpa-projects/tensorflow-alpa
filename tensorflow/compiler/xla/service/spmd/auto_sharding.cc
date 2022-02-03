@@ -407,8 +407,8 @@ int64_t MaxNumTiles(const StrategyMap& strategy_map,
 }
 
 // Choose an operand to follow.
-// We choose to follow the operand whose strategy set contains the sharding spec
-// with the maximum number of tiles.
+// We choose to follow the operand with the highest priority.
+// priority(operand) = max(x.output_spec.num_tiles for x in operand.strategies)
 std::pair<int64_t, bool> ChooseOperandToFollow(
     const StrategyMap& strategy_map, const InstructionDepthMap& depth_map,
     const AliasMap& alias_map,

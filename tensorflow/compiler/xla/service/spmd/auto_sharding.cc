@@ -78,6 +78,19 @@ HloSharding Tile(const Shape& shape, const std::vector<int64_t> tensor_dims,
              : HloSharding::Tile(std::move(tile_assignment));
 }
 
+// Return the maximum number of tiles among all strategies of an instruction.
+int64_t MaxNumTiles(const StrategyMap& strategy_map,
+                    const HloInstruction* ins) {
+  const StrategyVector* strategies = strategy_map.at(ins).get();
+  int64_t max_num_tiles = -1;
+  for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
+    max_num_tiles = std::max(
+        max_num_tiles, strategies->leaf_vector[i].output_sharding.NumTiles());
+  }
+
+  return max_num_tiles;
+}
+
 // Compute the resharding cost vector from multiple possible strategies
 // to a desired sharding spec.
 std::vector<double> ReshardingCostVector(
@@ -282,9 +295,9 @@ void EnumerateAll2DPartition(const HloInstruction* ins,
           resharding_costs.push_back(std::vector<double>(
               0.0, strategy_map.at(operand).get()->leaf_vector.size()));
         } else {
-          resharding_costs.push_back(ReshardingCostVector(
-              strategy_map.at(operand).get(), operand->shape(),
-              output_spec, cluster_env));
+          resharding_costs.push_back(
+              ReshardingCostVector(strategy_map.at(operand).get(),
+                                   operand->shape(), output_spec, cluster_env));
         }
       }
       strategies->leaf_vector.push_back(ShardingStrategy({name,
@@ -400,9 +413,10 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
 void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
     const InstructionBatchDimMap& batch_dim_map, int num_devices,
     AutoShardingSolverOption& solver_option) {
-  int64_t batch_size = (1 << 31) - 1;
+  int64_t batch_size = ((int64_t)1 << 31) - 1;
   for (auto iter : batch_dim_map) {
-    batch_size = std::min(batch_size, iter.first->shape().dimensions(iter.second));
+    batch_size =
+        std::min(batch_size, iter.first->shape().dimensions(iter.second));
   }
 
   if (batch_size % num_devices != 0) {
@@ -452,6 +466,11 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
   // Add penalty for replicated tensors
   double replicated_penalty = std::round(cluster_env.AllReduceCost(1, 0) +
                                          cluster_env.AllReduceCost(1, 1));
+
+  int64_t depth_normalizer = 10000;
+  for (const HloInstruction* ins : instructions) {
+    depth_normalizer = std::max(depth_map.at(ins), depth_normalizer);
+  }
 
   // Register strategies and their costs for each instruction.
   for (size_t instruction_id = 0; instruction_id < instructions.size();
@@ -718,13 +737,14 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         for (int64_t i = 0; i < ins->operand_count(); ++i) {
           const HloInstruction* operand = ins->operand(i);
           if (!undefined_set.count(operand)) {
-            double depth =
-                depth_map.at(operand) + operand->shape().rank() / 10.0;
+            double depth = MaxNumTiles(strategy_map, operand) +
+                           0.1 * depth_map.at(operand) / depth_normalizer;
             // Add the rank to depth to prefer the operand with the higher rank
             // if some operands have the same depth.
             if (depth > max_depth) {
               follow_idx = i;
-              max_depth = depth_map.at(operand);
+              max_depth = MaxNumTiles(strategy_map, operand) +
+                          0.1 * depth_map.at(operand) / depth_normalizer;
             }
           }
         }
@@ -850,15 +870,17 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         for (int64_t i = 0; i < ins->operand_count(); ++i) {
           const HloInstruction* operand = ins->operand(i);
           if (!undefined_set.count(operand)) {
-            double depth =
-                depth_map.at(operand) + operand->shape().rank() / 10.0;
+            double depth = MaxNumTiles(strategy_map, operand) +
+                           0.1 * depth_map.at(operand) / depth_normalizer;
             // Add the rank to depth to prefer the operand with the higher rank
             // if some operands have the same depth.
             if (depth > max_depth) {
               follow_idx = i;
-              max_depth = depth_map.at(operand);
+              max_depth = MaxNumTiles(strategy_map, operand) +
+                          0.1 * depth_map.at(operand) / depth_normalizer;
             }
           }
+
           // If an alias constraint is set, always follow its alias source.
           auto it = alias_map.find(ins);
           if (it != alias_map.end() && it->second == operand) {
@@ -1684,13 +1706,11 @@ std::string PrintStrategyMap(const StrategyMap& strategy_map,
 }
 
 // Print the choosen sharding strategy for debugging.
-std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
-                                      const LivenessSet& liveness_set,
-                                      const StrategyMap& strategy_map,
-                                      const LeafStrategies& leaf_strategies,
-                                      const CostGraph& cost_graph,
-                                      const std::vector<int64_t>& s_val,
-                                      double objective) {
+std::string PrintAutoShardingSolution(
+    const HloInstructionSequence& sequence, const LivenessSet& liveness_set,
+    const InstructionDepthMap depth_map, const StrategyMap& strategy_map,
+    const LeafStrategies& leaf_strategies, const CostGraph& cost_graph,
+    const std::vector<int64_t>& s_val, double objective) {
   std::ostringstream os;
   const std::vector<HloInstruction*>& instructions = sequence.instructions();
   size_t N = leaf_strategies.size();
@@ -1713,6 +1733,9 @@ std::string PrintAutoShardingSolution(const HloInstructionSequence& sequence,
       os << i << " tuple." << ct << " "
          << ins->shape().tuple_shapes(ct).ToString() << "  ";
     }
+
+    // os << " depth: " << depth_map.at(ins) << " #stra: " <<
+    // strategy_map.at(ins)->leaf_vector.size() << " ";
 
     if (cost_graph.follow_idx[i] < 0) {
       os << stra.name << " ";
@@ -1884,9 +1907,9 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   }
 
   if (pass_context::GetBool("auto_sharding::print_strategy", false)) {
-    std::cerr << PrintAutoShardingSolution(sequence, liveness_set, strategy_map,
-                                           leaf_strategies, cost_graph, s_val,
-                                           objective);
+    std::cerr << PrintAutoShardingSolution(
+        sequence, liveness_set, ins_depth_map, strategy_map, leaf_strategies,
+        cost_graph, s_val, objective);
   }
 
   // ----- Substitute all-reduce with reduce-scatter -----

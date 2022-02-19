@@ -533,9 +533,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                   strategy_map, strategies, true, " 1d");
         }
 
-        if ((solver_option.allow_replicated_parameters &&
-             !IsFollowedByReduce(ins)) ||
-            strategies->leaf_vector.empty()) {
+        if (solver_option.allow_replicated_parameters) {
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty);
         }

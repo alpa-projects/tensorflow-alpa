@@ -329,11 +329,12 @@ Status GpuCompiler::OptimizeHloModule(
             });
         spmd_simplify.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
         spmd_simplify.AddPass<HloDCE>();
+
+        spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
+        spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
+        spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       }
 
-      spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
-      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
-      spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
     } else {
@@ -344,7 +345,7 @@ Status GpuCompiler::OptimizeHloModule(
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
 
-    if (pass_context::GetBool("build_option::return_after_slice_auto_sharded_stages", false)) {
+    if (!pass_context::GetBool("build_option::run_post_spmd_partitioner_passes", true)) {
       return Status::OK();
     }
   }
@@ -776,12 +777,6 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
-  if (!pass_context::GetBool("build_option::run_hlo_passes", true)) {
-    // Do no run the HLO optimization passes. Assume the input HloModule
-    // has already been optimized.
-    return std::move(module);
-  }
-
   // We dump the post-optimization HLO in RunBackend so no need to dump it here.
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunHloPasses");
   tensorflow::profiler::TraceMe activity(
@@ -1191,7 +1186,7 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
 StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
-  if (!pass_context::GetBool("build_option::run_backend_codegen", true)) {
+  if (!pass_context::GetBool("build_option::run_post_spmd_partitioner_passes", true)) {
     // Do no run backend code generation. Return a dummy executable.
     GpuExecutable::Params params;
     params.debug_module = std::move(module);

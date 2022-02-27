@@ -15,6 +15,9 @@ namespace py = pybind11;
 
 enum VisitState { kVisiting, kVisited };
 
+constexpr absl::string_view kPipelineMarkerStartType = "start";
+constexpr absl::string_view kPipelineMarkerEndType = "end";
+
 std::vector<HloInstruction*> GetAncestorInstructions(
     HloInstruction* start_ins) {
   std::vector<HloInstruction*> postorder;
@@ -42,6 +45,122 @@ std::vector<HloInstruction*> GetAncestorInstructions(
     }
   }
   return postorder;
+}
+
+std::unique_ptr<HloModule> CreateStageModuleDFS(
+    HloModule* full_module, HloInstrunction* stage_start_instruction,
+    HloInstruction* stage_end_instruction, std::string stage_name_suffix) {
+  CHECK(stage_start_instruction->IsCustomCall(kXlaPipelineMarker));
+  CHECK_EQ(stage_start_instruction->metadata().op_type(),
+           kPipelineMarkerStartType);
+  CHECK(stage_end_instruction->IsCustomCall(kXlaPipelineMarker));
+  CHECK_EQ(stage_end_instruction->metadata().op_type(), kPipelineMarkerEndType);
+  CHECK_EQ(stage_start_instruction->metadata().op_name(),
+           stage_end_instruction->metadata().op_name());
+
+  // DFS search to find all instructions in the stage.
+  std::vector<HloInstruction*> stage_instructions;
+  absl::flat_hash_map<HloInstruction*, VisitState> visited;
+  std::vector<HloInstruction*> dfs_stack;
+  dfs_stack.push_back(stage_end_instruction->operand(0));
+
+  while (!dfs_stack.empty()) {
+    auto* cur = dfs_stack.back();
+    auto it = visited.find(cur);
+    if (it != visited.end()) {
+      dfs_stack.pop_back();
+      if (it->second == kVisited) {
+        continue;
+      }
+      CHECK_EQ(it->second, kVisiting);
+      stage_instructions.push_back(cur);
+      it->second = kVisited;
+      continue;
+    }
+
+    visited.insert({cur, kVisiting});
+    if (!(ins->opcode() == HloOpcode::kGetTupleElement &&
+          ins->operand(0) == stage_start_instruction)) {
+      for (HloInstruction* operand : cur->operands()) {
+        dfs_stack.push_back(operand);
+      }
+    }
+  }
+
+  // Setup the new stage module.
+  HloModuleConfig config = full_module->config();
+  config.set_shardable_value_update_pairs({});
+  config.mutable_fusion_config()->clear();
+  config.mutable_dot_config()->clear();
+  config.mutable_layout_config()->clear();
+
+  auto module = absl::make_unique<HloModule>(
+      absl::StrCat(full_module->name(), "-", stage_name_suffix), config);
+  auto context_ptr =
+      absl::make_unique<HloCloneContext>(module.get(), stage_name_suffix);
+  HloCloneContext* context = context_ptr.get();
+
+  std::vector<std::unique_ptr<HloInstruction>> instructions;
+
+  // Create parameters for the new stage module.
+  int n_parameters = stage_start_instruction->shape().tuple_shapes_size();
+  std::vector<HloInstruction*> parameters(n_parameters);
+  for (size_t i = 0; i < n_parameters; ++i) {
+    auto new_param = HloInstruction::CreateParameter(
+        i, stage_start_instruction->shape().tuple_shapes(i),
+        absl::StrCat("param_", i));
+    if (stage_start_instruction->has_sharding()) {
+      CHECK(stage_start_instruction->sharding().IsTuple());
+      new_param->set_sharding(
+          stage_start_instruction->sharding().GetSubSharding(
+              stage_start_instruction->shape(), {i}));
+    }
+    new_param->set_metadata(stage_start_instruction->metadata());
+    parameters[i] = new_param.get();
+    instructions.push_back(std::move(new_param));
+  }
+
+  // Process the instructions in the stage.
+  for (auto* ins : stage_instructions) {
+    CHECK_NE(ins->opcode(), HloOpcode::kParameter)
+        << "All the inputs to a pipeline stage should be from the start "
+           "marker.";
+    if (ins->opcode() == HloOpcode::kGetTupleElement &&
+        ins->operand(0) == stage_start_instruction) {
+      int64_t param_no = ins->tuple_index();
+      context->MapInstruction(ins, parameters[param_no]);
+    } else {
+      std::vector<HloInstruction*> new_operands;
+      for (HloInstruction* operand : ins->operands()) {
+        new_operands.push_back(context->GetInstruction(operand));
+      }
+      instructions.push_back(
+          ins->CloneWithNewOperands(ins->shape(), new_operands, context));
+    }
+  }
+
+  // Build the HLO computation.
+  HloComputation::Builder builder(
+      absl::StrCat(full_module->entry_computation()->name(), "-", suffix));
+  for (auto& ins : instructions) {
+    builder.AddInstruction(std::move(ins));
+  }
+  std::unique_ptr<HloComputation> new_computation = builder.Build(
+      /*root_instruction=*/context->GetInstruction(
+          stage_end_instruction->operand(0)));
+
+  for (auto* ins : stage_instructions) {
+    HloInstruction* new_ins = context->GetInstruction(ins);
+    for (auto successor : ins->control_successors()) {
+      TF_CHECK_OK(
+          new_ins->AddControlDependencyTo(context->GetInstruction(successor)));
+    }
+  }
+
+  // NOTE: We assume the HLO graph only has one computation.
+  module->AddEntryComputationWithLayouts(std::move(new_computation));
+
+  return module;
 }
 
 std::unique_ptr<HloModule> CreateStageModule(
@@ -192,27 +311,29 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   std::vector<std::string> pipeline_stage_names;
   std::vector<std::unique_ptr<HloModule>> pipeline_stages;
   std::string current_stage_name;
-  std::vector<HloInstruction*> current_stage_instructions;
+  HloInstruction* current_stage_start = nullptr;
+  HloInstruction* current_stage_end = nullptr;
   std::vector<HloInstruction*> post_order = entry->MakeInstructionPostOrder();
   bool in_stage = false;
   for (HloInstruction* current_ins : post_order) {
     if (current_ins->IsCustomCall(kXlaPipelineMarker)) {
       if (in_stage) {
-        current_stage_instructions.push_back(current_ins);
+        current_stage_end = current_ins;
+        CHECK_EQ(current_ins->metadata().op_name(), current_stage_name);
+        CHECK_EQ(current_ins->metadata().op_type(), kPipelineMarkerEndType);
         pipeline_stage_names.push_back(current_stage_name);
         pipeline_stages.push_back(
-            CreateStageModule(module, current_stage_instructions,
-                              std::to_string(pipeline_stages.size())));
+            CreateStageModuleDFS(module, current_stage_start, current_stage_end,
+                                 current_stage_name));
         current_stage_name.clear();
         current_stage_instructions.clear();
         in_stage = false;
       } else {
         in_stage = true;
         current_stage_name = current_ins->metadata().op_name();
-        current_stage_instructions.push_back(current_ins);
+        CHECK_EQ(current_ins->metadata().op_type(), kPipelineMarkerStartType);
+        current_stage_start = current_ins;
       }
-    } else if (in_stage) {
-      current_stage_instructions.push_back(current_ins);
     }
   }
 

@@ -48,7 +48,7 @@ std::vector<HloInstruction*> GetAncestorInstructions(
 }
 
 std::unique_ptr<HloModule> CreateStageModuleDFS(
-    HloModule* full_module, HloInstrunction* stage_start_instruction,
+    HloModule* full_module, HloInstruction* stage_start_instruction,
     HloInstruction* stage_end_instruction, std::string stage_name_suffix) {
   CHECK(stage_start_instruction->IsCustomCall(kXlaPipelineMarker));
   CHECK_EQ(stage_start_instruction->metadata().op_type(),
@@ -59,9 +59,9 @@ std::unique_ptr<HloModule> CreateStageModuleDFS(
            stage_end_instruction->metadata().op_name());
 
   // DFS search to find all instructions in the stage.
-  std::vector<HloInstruction*> stage_instructions;
-  absl::flat_hash_map<HloInstruction*, VisitState> visited;
-  std::vector<HloInstruction*> dfs_stack;
+  std::vector<const HloInstruction*> stage_instructions;
+  absl::flat_hash_map<const HloInstruction*, VisitState> visited;
+  std::vector<const HloInstruction*> dfs_stack;
   dfs_stack.push_back(stage_end_instruction->operand(0));
 
   while (!dfs_stack.empty()) {
@@ -79,9 +79,9 @@ std::unique_ptr<HloModule> CreateStageModuleDFS(
     }
 
     visited.insert({cur, kVisiting});
-    if (!(ins->opcode() == HloOpcode::kGetTupleElement &&
-          ins->operand(0) == stage_start_instruction)) {
-      for (HloInstruction* operand : cur->operands()) {
+    if (!(cur->opcode() == HloOpcode::kGetTupleElement &&
+          cur->operand(0) == stage_start_instruction)) {
+      for (auto operand : cur->operands()) {
         dfs_stack.push_back(operand);
       }
     }
@@ -105,7 +105,7 @@ std::unique_ptr<HloModule> CreateStageModuleDFS(
   // Create parameters for the new stage module.
   int n_parameters = stage_start_instruction->shape().tuple_shapes_size();
   std::vector<HloInstruction*> parameters(n_parameters);
-  for (size_t i = 0; i < n_parameters; ++i) {
+  for (int i = 0; i < n_parameters; ++i) {
     auto new_param = HloInstruction::CreateParameter(
         i, stage_start_instruction->shape().tuple_shapes(i),
         absl::StrCat("param_", i));
@@ -121,7 +121,7 @@ std::unique_ptr<HloModule> CreateStageModuleDFS(
   }
 
   // Process the instructions in the stage.
-  for (auto* ins : stage_instructions) {
+  for (auto ins : stage_instructions) {
     CHECK_NE(ins->opcode(), HloOpcode::kParameter)
         << "All the inputs to a pipeline stage should be from the start "
            "marker.";
@@ -141,7 +141,7 @@ std::unique_ptr<HloModule> CreateStageModuleDFS(
 
   // Build the HLO computation.
   HloComputation::Builder builder(
-      absl::StrCat(full_module->entry_computation()->name(), "-", suffix));
+      absl::StrCat(full_module->entry_computation()->name(), "-", stage_name_suffix));
   for (auto& ins : instructions) {
     builder.AddInstruction(std::move(ins));
   }
@@ -149,7 +149,7 @@ std::unique_ptr<HloModule> CreateStageModuleDFS(
       /*root_instruction=*/context->GetInstruction(
           stage_end_instruction->operand(0)));
 
-  for (auto* ins : stage_instructions) {
+  for (auto ins : stage_instructions) {
     HloInstruction* new_ins = context->GetInstruction(ins);
     for (auto successor : ins->control_successors()) {
       TF_CHECK_OK(
@@ -326,7 +326,6 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
             CreateStageModuleDFS(module, current_stage_start, current_stage_end,
                                  current_stage_name));
         current_stage_name.clear();
-        current_stage_instructions.clear();
         in_stage = false;
       } else {
         in_stage = true;

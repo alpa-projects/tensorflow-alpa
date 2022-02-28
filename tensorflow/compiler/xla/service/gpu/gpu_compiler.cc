@@ -330,13 +330,19 @@ Status GpuCompiler::OptimizeHloModule(
         spmd_simplify.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
         spmd_simplify.AddPass<HloDCE>();
 
-        spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
-        spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
-        spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
+        if (pass_context::GetBool("build_option::run_auto_sharding", false)) {
+          spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
+          spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
+        }
+
       }
 
-      spmd_pipeline.AddPass<GpuSpmdPartitioner>(
-          num_partitions, hlo_module->config().replica_count());
+      if (pass_context::GetBool("build_option::run_spmd_partitioner", true)) {
+        spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
+        spmd_pipeline.AddPass<GpuSpmdPartitioner>(
+            num_partitions, hlo_module->config().replica_count());
+        spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
+      }
     } else {
       spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
@@ -514,7 +520,6 @@ Status GpuCompiler::OptimizeHloModule(
     collectives_pipeline.AddPass<ReduceScatterCreator>();
     collectives_pipeline.AddPass<RematIdentityFixer>();
     collectives_pipeline.AddPass<AllReduceReassociate>();
-    collectives_pipeline.AddPass<xla::spmd::GradAccRewrite>();
 
     // Run algebraic simplifier to reshape(broadcast) into a broadcast when
     // the reshape is just adding a unit dimension. This will help with the

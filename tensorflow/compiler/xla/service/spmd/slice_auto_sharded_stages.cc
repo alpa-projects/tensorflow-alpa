@@ -163,13 +163,14 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   for (HloInstruction* ins : entry->instructions()) {
     if (ins->IsCustomCall(kXlaPipelineMarker)) {
       std::string pipeline_stage_name = ins->metadata().op_name();
+      std::string marker_type = ins->metadata().op_type();
       if (!stage_start_end_instructions.contains(pipeline_stage_name)) {
         stage_start_end_instructions[pipeline_stage_name] =
             std::make_pair(nullptr, nullptr);
       }
-      if (ins->metadata().op_type() == kPipelineMarkerStartType) {
+      if (marker_type == kPipelineMarkerStartType) {
         stage_start_end_instructions[pipeline_stage_name].first = ins;
-      } else if (ins->metadata().op_type() == kPipelineMarkerEndType) {
+      } else if (marker_type == kPipelineMarkerEndType) {
         stage_start_end_instructions[pipeline_stage_name].second = ins;
       }
     }

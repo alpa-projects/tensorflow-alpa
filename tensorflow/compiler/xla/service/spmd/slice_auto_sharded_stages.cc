@@ -15,9 +15,6 @@ namespace py = pybind11;
 
 enum VisitState { kVisiting, kVisited };
 
-constexpr absl::string_view kPipelineMarkerStartType = "start";
-constexpr absl::string_view kPipelineMarkerEndType = "end";
-
 std::unique_ptr<HloModule> CreateStageModule(
     HloModule* full_module, HloInstruction* stage_start_instruction,
     HloInstruction* stage_end_instruction, std::string stage_name_suffix) {

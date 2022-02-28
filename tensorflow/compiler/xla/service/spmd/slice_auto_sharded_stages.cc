@@ -161,31 +161,30 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   // ----- Slice the hlo module according to the pipeline marker -----
   HloComputation* entry = module->entry_computation();
 
+  absl::flat_hash_map<std::string, std::pair<HloInstruction*, HloInstruction*>>
+      stage_start_end_instructions;
+  for (HloInstruction* ins : entry->instructions()) {
+    if (ins->IsCustomCall(kXlaPipelineMarker)) {
+      std::string pipeline_stage_name = ins->metadata().op_name();
+      if (!stage_start_end_instructions.contains(pipeline_stage_name)) {
+        stage_start_end_instructions[pipeline_stage_name] =
+            std::make_pair(nullptr, nullptr);
+      }
+      if (ins->metadata().op_type() == kPipelineMarkerStartType) {
+        stage_start_end_instructions[pipeline_stage_name].first = ins;
+      } else if (ins->metadata().op_type() == kPipelineMarkerEndType) {
+        stage_start_end_instructions[pipeline_stage_name].second = ins;
+      }
+    }
+  }
+
   std::vector<std::string> pipeline_stage_names;
   std::vector<std::unique_ptr<HloModule>> pipeline_stages;
-  std::string current_stage_name;
-  HloInstruction* current_stage_start = nullptr;
-  HloInstruction* current_stage_end = nullptr;
-  std::vector<HloInstruction*> post_order = entry->MakeInstructionPostOrder();
-  bool in_stage = false;
-  for (HloInstruction* current_ins : post_order) {
-    if (current_ins->IsCustomCall(kXlaPipelineMarker)) {
-      if (in_stage) {
-        current_stage_end = current_ins;
-        CHECK_EQ(current_ins->metadata().op_name(), current_stage_name);
-        CHECK_EQ(current_ins->metadata().op_type(), kPipelineMarkerEndType);
-        pipeline_stage_names.push_back(current_stage_name);
-        pipeline_stages.push_back(CreateStageModule(module, current_stage_start,
-                                                    current_stage_end,
-                                                    current_stage_name));
-        current_stage_name.clear();
-        in_stage = false;
-      } else {
-        in_stage = true;
-        current_stage_name = current_ins->metadata().op_name();
-        CHECK_EQ(current_ins->metadata().op_type(), kPipelineMarkerStartType);
-        current_stage_start = current_ins;
-      }
+  for (const auto& it : stage_start_end_instructions) {
+    if (it.second.first != nullptr && it.second.second != nullptr) {
+      pipeline_stage_names.push_back(it.first);
+      pipeline_stages.push_back(CreateStageModule(module, it.second.first,
+                                                  it.second.second, it.first));
     }
   }
 

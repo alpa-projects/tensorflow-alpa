@@ -1791,10 +1791,6 @@ void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
 }
 
 StatusOr<bool> AutoSharding::Run(HloModule* module) {
-  if (!pass_context::GetBool("auto_sharding::enable", false)) {
-    return false;
-  }
-
   // ----- Read options of this pass -----
   AutoShardingSolverOption solver_option;
   solver_option.override_all_gather_cost = false;

@@ -183,7 +183,7 @@ Status NcclCollectivePermuteThunk::RunNcclCollective(
   TF_ASSIGN_OR_RETURN(auto dtype_and_multiplier,
                       ToNcclDataTypeAndCountMultiplier(element_type));
   ncclDataType_t dtype = dtype_and_multiplier.first;
-  int element_count = buffer_.element_count * dtype_and_multiplier.second;
+  int64_t element_count = buffer_.element_count * dtype_and_multiplier.second;
 
   se::gpu::GpuStreamHandle gpu_stream =
       se::gpu::AsGpuStreamValue(params.stream);

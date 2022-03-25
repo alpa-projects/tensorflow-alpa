@@ -80,7 +80,7 @@ Status RunAllReduce(const NcclAllReduceConfig& config,
         //}
       } else {
         PrimitiveType element_type = config.config.operand_element_type[i];
-        int size = buffer.element_count *
+        int64_t size = buffer.element_count *
                    ShapeUtil::ByteSizeOfPrimitiveType(element_type);
 
         // if (device_ordinal == 0) {
@@ -107,7 +107,7 @@ Status RunAllReduce(const NcclAllReduceConfig& config,
     TF_ASSIGN_OR_RETURN(auto dtype_and_multiplier,
                         ToNcclDataTypeAndCountMultiplier(element_type));
     ncclDataType_t dtype = dtype_and_multiplier.first;
-    int element_count = buffer.element_count * dtype_and_multiplier.second;
+    int64_t element_count = buffer.element_count * dtype_and_multiplier.second;
 
     VLOG(3) << absl::StreamFormat(
         "Calling ncclAllReduce(send_buffer=%p, recv_buffer=%p, count=%d, "
@@ -423,7 +423,7 @@ Status NcclReduceScatterThunk::RunNcclCollective(const ExecuteParams& params,
     TF_ASSIGN_OR_RETURN(auto dtype_and_multiplier,
                         ToNcclDataTypeAndCountMultiplier(element_type));
     ncclDataType_t dtype = dtype_and_multiplier.first;
-    int element_count = buffer.element_count * dtype_and_multiplier.second;
+    int64_t element_count = buffer.element_count * dtype_and_multiplier.second;
 
     // buffer.element_count is the source buffers element count. For
     // ncclReduceScatter, we need the destination buffers element count.

@@ -67,7 +67,7 @@ Status PreCompileCheck(const XlaComputation& computation,
   return Status::OK();
 }
 
-StatusOr<std::unique_ptr<xla::HloModule>> RunAutoShardingPass(
+StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
     const XlaComputation& computation, CompileOptions options) {
   PreCompileCheck(computation, options);
 
@@ -83,7 +83,7 @@ StatusOr<std::unique_ptr<xla::HloModule>> RunAutoShardingPass(
       HloModule::CreateModuleConfigFromProto(
           module_proto, build_options.debug_options(), &execution_options));
 
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> hlo_module,
+  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
                       CreateModuleFromProto(
                           module_proto, module_config,
                           options.executable_build_options.run_backend_only()));
@@ -151,7 +151,7 @@ StatusOr<std::unique_ptr<xla::HloModule>> RunAutoShardingPass(
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module.get()).status());
   }
-  return std::move(hlo_module);
+  return hlo_module;
 }
 };  // namespace spmd
 

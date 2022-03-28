@@ -1,0 +1,26 @@
+# This is a test workflow to trigger Alpa CI
+
+name: Trigger Alpa CI to Build JAXlib and Alpa
+
+on:
+  push: 
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  dispatch:
+    if: github.repository == 'alpa-projects/tensorflow-alpa'  # Don't do this in forks
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.PAT_TOKEN }}
+        script: |
+          await github.rest.actions.createWorkflowDispatch({
+            owner: 'alpa-projects',
+            repo: 'alpa',
+            workflow_id: 'build-jax-alpa.yml',
+            ref: 'main'
+          })
+

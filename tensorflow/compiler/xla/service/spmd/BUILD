@@ -195,7 +195,9 @@ cc_library(
     hdrs = ["alpa_compile.h"],
     deps = [
         ":auto_sharding",
+        ":grad_acc_rewrite",
         ":slice_auto_sharded_stages",
+        "//tensorflow/compiler/xla/pjrt:pjrt_client",
         "//tensorflow/compiler/xla/service:algebraic_simplifier",
         "//tensorflow/compiler/xla/service:call_inliner",
         "//tensorflow/compiler/xla/service:conditional_canonicalizer",

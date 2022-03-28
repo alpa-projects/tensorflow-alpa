@@ -1,3 +1,6 @@
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE
+#define TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE
+
 #include "tensorflow/compiler/xla/pjrt/pjrt_client.h"
 
 namespace xla {
@@ -12,3 +15,5 @@ StatusOr<std::unique_ptr<xla::HloModule>> RunAutoShardingPass(
 };  // namespace spmd
 
 };  // namespace xla
+
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE

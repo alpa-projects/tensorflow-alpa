@@ -63,6 +63,8 @@ Status PreCompileCheck(const XlaComputation& computation,
           build_options.device_assignment().ToString());
     }
   }
+
+  return Status::OK();
 }
 
 StatusOr<std::unique_ptr<xla::HloModule>> RunAutoShardingPass(
@@ -70,9 +72,16 @@ StatusOr<std::unique_ptr<xla::HloModule>> RunAutoShardingPass(
   PreCompileCheck(computation, options);
 
   const HloModuleProto& module_proto = computation.proto();
+  // The device ordinal of the option might be -1, but it will not be used.
+  const ExecutableBuildOptions& build_options =
+      options.executable_build_options;
+  const ProgramShape program_shape(module_proto.host_program_shape());
+  const ExecutionOptions execution_options =
+      CreateExecutionOptions(build_options, &program_shape);
   TF_ASSIGN_OR_RETURN(
       auto module_config,
-      HloModule::CreateModuleConfigFromProto(module_proto, DebugOptions()));
+      HloModule::CreateModuleConfigFromProto(
+          module_proto, build_options.debug_options(), &execution_options));
 
   TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> hlo_module,
                       CreateModuleFromProto(

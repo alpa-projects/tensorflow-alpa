@@ -545,6 +545,21 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         }
         break;
       }
+      case HloOpcode::kGather:
+      case HloOpcode::kScatter: {
+        const HloInstruction* operand = ins->operand(0);
+        if (batch_map.count(operand)) {
+          int batch_dim = batch_map[operand];
+          if (ins->shape().rank() == operand->shape().rank() &&
+              ins->shape().dimensions(batch_dim) ==
+                  operand->shape().dimensions(batch_dim)) {
+            batch_map[ins] = batch_dim;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kSort:
+        break;
       case HloOpcode::kTuple:
       case HloOpcode::kCustomCall:
         break;

@@ -833,6 +833,16 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         }
         break;
       }
+      case HloOpcode::kGather:
+      case HloOpcode::kScatter: {  // TODO(lmzheng): revisit this
+        const HloInstruction* operand = ins->operand(0);
+        const StrategyVector* src_strategies = strategy_map.at(operand).get();
+        CHECK(!src_strategies->is_tuple);
+        strategies = FollowInsStrategyVector(
+            src_strategies, ins->shape(), instruction_id,
+            /* have_memory_cost= */ false, leaf_strategies);
+        break;
+      }
       // Unary elementwise operations.
       case HloOpcode::kAbs:
       case HloOpcode::kRoundNearestAfz:
@@ -1110,6 +1120,130 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           // Replicate
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty * 5);
+        }
+        break;
+      }
+      case HloOpcode::kSort: {
+        if (ins->operand_count() == 1) {
+          strategies = CreateLeafStrategyVector(instruction_id, ins,
+                                                strategy_map, leaf_strategies);
+
+          const StrategyVector* src_strategies =
+              strategy_map.at(ins->operand(0)).get();
+          strategies->following = src_strategies;
+
+          for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
+               ++sid) {
+            HloSharding output_spec =
+                src_strategies->leaf_vector[sid].output_sharding;
+
+            std::string name = ToStringSimple(output_spec);
+            double compute_cost = 0;
+            double memory_cost =
+                GetBytes(ins->shape()) / output_spec.NumTiles();
+
+            bool need_all_gather = false;
+            if (output_spec.IsTuple()) {
+              for (int64_t dim : ins->dimensions()) {
+                if (output_spec.tile_assignment().dim(dim) > 1) {
+                  need_all_gather = true;
+                }
+              }
+            }
+
+            double communication_cost =
+                need_all_gather
+                    ? cluster_env.ReshardingCost(ins->shape(), output_spec,
+                                                 HloSharding::Replicate())
+                    : 0;
+
+            strategies->leaf_vector.push_back(ShardingStrategy(
+                {name,
+                 output_spec,
+                 compute_cost,
+                 communication_cost,
+                 memory_cost,
+                 {FollowInsCostVector(src_strategies->leaf_vector.size(), sid)},
+                 {}}));
+          }
+        } else {
+          // Choose an operand to follow
+          int64_t follow_idx;
+          bool tie;
+          std::tie(follow_idx, tie) =
+              ChooseOperandToFollow(strategy_map, depth_map, alias_map,
+                                    undefined_set, max_depth, ins);
+          const StrategyVector* src_strategies =
+              strategy_map.at(ins->operand(follow_idx)).get();
+
+          // Create main child strategy for the 0-th output
+          auto main_child_stra = CreateLeafStrategyVector(
+              instruction_id, ins, strategy_map, leaf_strategies);
+          main_child_stra->following = src_strategies;
+
+          for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
+               ++sid) {
+            HloSharding output_spec =
+                src_strategies->leaf_vector[sid].output_sharding;
+
+            std::string name = ToStringSimple(output_spec);
+            double compute_cost = 0;
+            double memory_cost =
+                GetBytes(ins->shape()) / output_spec.NumTiles();
+
+            bool need_all_gather = false;
+            if (output_spec.IsTuple()) {
+              for (int64_t dim : ins->dimensions()) {
+                if (output_spec.tile_assignment().dim(dim) > 1) {
+                  need_all_gather = true;
+                  break;
+                }
+              }
+            }
+
+            double communication_cost =
+                need_all_gather
+                    ? cluster_env.ReshardingCost(ins->shape(), output_spec,
+                                                 HloSharding::Replicate())
+                    : 0;
+            HloSharding input_spec =
+                need_all_gather ? HloSharding::Replicate() : output_spec;
+
+            std::vector<std::vector<double>> resharding_costs;
+            for (int64_t k = 0; k < ins->operand_count(); ++k) {
+              if (k == follow_idx) {
+                resharding_costs.push_back(FollowInsCostVector(
+                    src_strategies->leaf_vector.size(), sid));
+              } else {
+                resharding_costs.push_back(ReshardingCostVector(
+                    strategy_map.at(ins->operand(k)).get(),
+                    ins->operand(k)->shape(), input_spec, cluster_env));
+              }
+            }
+
+            main_child_stra->leaf_vector.push_back(
+                ShardingStrategy({name,
+                                  output_spec,
+                                  compute_cost,
+                                  communication_cost,
+                                  memory_cost,
+                                  std::move(resharding_costs),
+                                  {}}));
+          }
+
+          // Create following child strategies for other outputs
+          strategies = CreateTupleStrategyVector(instruction_id);
+          strategies->childs.reserve(ins->operand_count());
+          const StrategyVector* main_child_ptr = main_child_stra.get();
+          for (size_t i = 0; i < ins->operand_count(); ++i) {
+            if (i == follow_idx) {
+              strategies->childs.push_back(std::move(main_child_stra));
+            } else {
+              strategies->childs.push_back(std::move(FollowInsStrategyVector(
+                  main_child_ptr, ins->operand(i)->shape(), instruction_id,
+                  true, leaf_strategies)));
+            }
+          }
         }
         break;
       }

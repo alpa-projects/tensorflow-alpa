@@ -116,6 +116,7 @@ class Matrix {
       idx = i * m + j;
     }
     CHECK(data != nullptr) << n << " , " << m;
+    CHECK(idx < n * m) << idx << " , " << n << " , " << m;
     return (*data)[idx];
   }
 
@@ -126,7 +127,8 @@ class Matrix {
     } else {
       idx = i * m + j;
     }
-    CHECK(data != nullptr) << n << " . " << m;
+    CHECK(data != nullptr) << n << " , " << m;
+    CHECK(idx < n * m) << idx << " , " << n << " , " << m;
     return (*data)[idx];
   }
 
@@ -370,10 +372,9 @@ inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
     const HloInstruction* ins = instructions[i];
 
     if (ins->IsCustomCall(kXlaPipelineMarker) &&
-        (ins->metadata().op_name().find("compute_grad") !=
-             std::string::npos ||
+        (ins->metadata().op_name().find("compute_grad") != std::string::npos ||
          ins->metadata().op_name().find("backward") != std::string::npos) &&
-         ins->metadata().op_type() == kPipelineMarkerEndType) {
+        ins->metadata().op_type() == kPipelineMarkerEndType) {
       const HloInstruction* tuple = ins->operand(0);
       for (size_t j = 0; j < tuple->operand_count(); ++j) {
         const HloInstruction* add = tuple->operand(j);

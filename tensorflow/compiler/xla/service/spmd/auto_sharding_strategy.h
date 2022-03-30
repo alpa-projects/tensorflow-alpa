@@ -714,10 +714,6 @@ class CostGraph {
       extra_node_costs.push_back(
           std::vector<double>(strategies->leaf_vector.size(), 0.0));
 
-      for (const auto& strategy : strategies->leaf_vector) {
-        CHECK_EQ(strategy.resharding_costs.size(), strategies->in_nodes.size());
-      }
-
       for (size_t i = 0; i < strategies->in_nodes.size(); ++i) {
         size_t src_idx = strategies->in_nodes[i]->id;
         size_t dst_idx = strategies->id;
@@ -725,6 +721,10 @@ class CostGraph {
         Matrix edge_cost(node_lens[src_idx], node_lens[dst_idx]);
         for (size_t k = 0; k < strategies->leaf_vector.size(); ++k) {
           const ShardingStrategy& stra = strategies->leaf_vector[k];
+
+          CHECK_EQ(node_lens[src_idx], stra.resharding_costs[i].size());
+          CHECK_EQ(stra.resharding_costs.size(), strategies->in_nodes.size());
+
           for (size_t j = 0; j < stra.resharding_costs[i].size(); ++j) {
             edge_cost(j, k) = stra.resharding_costs[i][j];
           }
@@ -997,14 +997,9 @@ std::vector<double> ReshardingCostVector(const StrategyVector* strategies,
                                          const HloSharding& required_sharding,
                                          const ClusterEnvironment& cluster_env);
 
-std::vector<double> FollowInsCostVector(int64_t source_len, int64_t index);
-
 std::unique_ptr<StrategyVector> CreateLeafStrategyVector(
-    size_t instruction_id, LeafStrategies& leaf_strategies);
-
-void SetInNodesWithInstruction(std::unique_ptr<StrategyVector>& strategies,
-                               const HloInstruction* ins,
-                               const StrategyMap& strategy_map);
+    size_t instruction_id, const HloInstruction* ins,
+    const StrategyMap& strategy_map, LeafStrategies& leaf_strategies);
 
 Status FilterStrategy(const HloInstruction* ins,
                       std::unique_ptr<StrategyVector>& strategies,

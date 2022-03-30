@@ -116,9 +116,9 @@ bool IsActivationFromAnotherStage(const HloInstruction* ins,
 
   if (primitive_util::IsIntegralType(ins->shape().element_type())) {
     // TODO(lmzheng): This is a temporary hack. We use this to filter out
-    // the input word ids and position ids. These are global input so they are not
-    // activations from the previous stage. If we do not filter out them, some follow-up
-    // instructions will follow the wrong instructions.
+    // the input word ids and position ids. These are global input so they are
+    // not activations from the previous stage. If we do not filter out them,
+    // some follow-up instructions will follow the wrong instructions.
     return false;
   }
 
@@ -551,7 +551,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       case HloOpcode::kWhile:
         break;
       default:
-        LOG(FATAL) << "Unhandled instruction: " + ins->name();
+        LOG(FATAL) << "Unhandled instruction: " + ins->ToString();
     }
   }
 

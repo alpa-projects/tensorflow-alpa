@@ -436,8 +436,8 @@ Status HandleDot(std::unique_ptr<StrategyVector>& strategies,
                  const ClusterEnvironment& cluster_env,
                  const InstructionBatchDimMap& batch_map,
                  const AutoShardingSolverOption& solver_option) {
-  strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
-  SetInNodesWithInstruction(strategies, ins, strategy_map);
+  strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+                                        leaf_strategies);
 
   DotHandler handler(strategies, strategy_map, ins, cluster_env, batch_map,
                      solver_option);
@@ -671,8 +671,8 @@ Status HandleConv(std::unique_ptr<StrategyVector>& strategies,
                   const ClusterEnvironment& cluster_env,
                   const InstructionBatchDimMap& batch_map,
                   const AutoShardingSolverOption& solver_option) {
-  strategies = CreateLeafStrategyVector(instruction_id, leaf_strategies);
-  SetInNodesWithInstruction(strategies, ins, strategy_map);
+  strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+                                        leaf_strategies);
 
   ConvHandler handler(strategies, strategy_map, ins, cluster_env, batch_map,
                       solver_option);

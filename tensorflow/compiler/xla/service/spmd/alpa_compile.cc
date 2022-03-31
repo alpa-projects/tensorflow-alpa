@@ -36,7 +36,8 @@ namespace xla {
 
 namespace spmd {
 
-const char kBeforeAlpaDumpName[] = "before_alpa";
+const char kBeforeAutoShardingDumpName[] = "before_auto_sharding";
+const char kBeforeSpmdPartitionDumpName[] = "before_spmd_partitioning";
 // TODO(yonghao): Check correctness of compile options and modules
 Status PreCompileCheck(const XlaComputation& computation,
                        CompileOptions options) {
@@ -67,7 +68,7 @@ Status PreCompileCheck(const XlaComputation& computation,
   return Status::OK();
 }
 
-StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
+StatusOr<std::shared_ptr<xla::HloModule>> CreateHloModule(
     const XlaComputation& computation, CompileOptions options) {
   PreCompileCheck(computation, options);
 
@@ -87,7 +88,14 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
                       CreateModuleFromProto(
                           module_proto, module_config,
                           options.executable_build_options.run_backend_only()));
-  DumpHloModuleIfEnabled(*hlo_module, kBeforeAlpaDumpName);
+  return hlo_module;
+}
+
+StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
+    const XlaComputation& computation, CompileOptions options) {
+  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
+                      CreateHloModule(computation, options));
+  DumpHloModuleIfEnabled(*hlo_module, kBeforeAutoShardingDumpName);
   // TODO(yonghao): TF Profiler Traceme
   const DebugOptions& debug_options = hlo_module->config().debug_options();
   if (hlo_module->config().use_spmd_partitioning()) {
@@ -139,6 +147,31 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
       spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
       spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
 
+      spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
+      spmd_pipeline.AddPass<gpu::GpuSpmdPartitioner>(
+          num_partitions, hlo_module->config().replica_count());
+      spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
+    } else {
+      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
+      // Remove redundant sharding ops when partition_count == 1.
+      spmd_pipeline.AddPass<ShardingRemover>();
+      spmd_pipeline.AddPass<HloDCE>();
+    }
+    TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module.get()).status());
+  }
+  return hlo_module;
+}
+
+StatusOr<std::shared_ptr<HloModule>> RunSpmdPartitionerPass(
+    const XlaComputation& computation, CompileOptions options) {
+  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
+                      CreateHloModule(computation, options));
+  DumpHloModuleIfEnabled(*hlo_module, kBeforeSpmdPartitionDumpName);
+  // TODO(yonghao): TF Profiler Traceme
+  if (hlo_module->config().use_spmd_partitioning()) {
+    HloPassPipeline spmd_pipeline("spmd-partitioner");
+    const int64_t num_partitions = hlo_module->config().num_partitions();
+    if (num_partitions > 1) {
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<gpu::GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());

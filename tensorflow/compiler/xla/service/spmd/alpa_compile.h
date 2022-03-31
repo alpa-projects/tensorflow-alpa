@@ -9,7 +9,10 @@ namespace spmd {
 
 // Compile an Xla Computation into HloModule, then apply Alpa's passes.
 // The result hlo is later compiled again to apply spmd and other optimizations.
-StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
+StatusOr<std::shared_ptr<HloModule>> RunAutoShardingPass(
+    const XlaComputation& computation, CompileOptions options);
+
+StatusOr<std::shared_ptr<HloModule>> RunSpmdPartitionerPass(
     const XlaComputation& computation, CompileOptions options);
 
 };  // namespace spmd

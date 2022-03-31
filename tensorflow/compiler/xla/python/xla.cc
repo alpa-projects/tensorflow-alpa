@@ -536,6 +536,13 @@ PYBIND11_MODULE(xla_extension, m) {
           return spmd::RunAutoShardingPass(computation, options);
         }, 
         py::arg("computation"), py::arg("compile_options") = CompileOptions());
+
+  m.def("run_spmd_partitioner", 
+        [](const XlaComputation& computation, CompileOptions options) {
+          py::gil_scoped_release gil_release;
+          return spmd::RunSpmdPartitionerPass(computation, options);
+        }, 
+        py::arg("computation"), py::arg("compile_options") = CompileOptions());
 }  // NOLINT(readability/fn_size)
 
 }  // namespace xla

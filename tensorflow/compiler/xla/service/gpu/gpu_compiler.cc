@@ -309,80 +309,48 @@ Status GpuCompiler::OptimizeHloModule(
     if (num_partitions > 1) {
       // Run some IR cleanup passes before running the SPMD partitioning
       // passes.
-      if (pass_context::GetBool("build_option::run_pre_spmd_partitioner_passes", true)) {
-        spmd_pipeline.AddInvariantChecker<HloVerifier>(
-            /*layout_sensitive=*/false,
-            /*allow_mixed_precision=*/false);
-        spmd_pipeline.AddPass<CallInliner>();
-        spmd_pipeline.AddPass<DotDecomposer>();
-        spmd_pipeline.AddPass<ZeroSizedHloElimination>();
-        spmd_pipeline.AddPass<ConditionalCanonicalizer>();
+      spmd_pipeline.AddInvariantChecker<HloVerifier>(
+          /*layout_sensitive=*/false,
+          /*allow_mixed_precision=*/false);
+      spmd_pipeline.AddPass<CallInliner>();
+      spmd_pipeline.AddPass<ZeroSizedHloElimination>();
+      spmd_pipeline.AddPass<ConditionalCanonicalizer>();
 
-        HloPassPipeline& spmd_simplify =
-            spmd_pipeline.AddPass<HloPassFix<HloPassPipeline>>("spmd-simplify");
+      HloPassPipeline& spmd_simplify =
+          spmd_pipeline.AddPass<HloPassFix<HloPassPipeline>>("spmd-simplify");
 
-        AlgebraicSimplifierOptions options;
-        options.set_replace_transpose_with_bitcast(false);
-        options.set_enable_conv_operand_swap(false);
-        // "slow" minmax means we propagate nan.
-        options.set_minmax_propagate_nan(
-            !debug_options.xla_gpu_enable_fast_min_max());
-        spmd_simplify.AddPass<AlgebraicSimplifier>(options);
+      AlgebraicSimplifierOptions options;
+      options.set_replace_transpose_with_bitcast(false);
+      options.set_enable_conv_operand_swap(false);
+      // "slow" minmax means we propagate nan.
+      options.set_minmax_propagate_nan(
+          !debug_options.xla_gpu_enable_fast_min_max());
+      spmd_simplify.AddPass<AlgebraicSimplifier>(options);
 
-        spmd_simplify.AddPass<SortSimplifier>();
-        spmd_simplify.AddPass<TupleSimplifier>();
-        spmd_simplify.AddPass<ScatterExpander>(
-            ScatterExpander::kEliminateSimpleScatters);
-        spmd_simplify.AddPass<GatherExpander>(
-            GatherExpander::kEliminateSimpleGathers);
-        spmd_simplify.AddPass<WhileLoopConstantSinking>();
-        spmd_simplify.AddPass<WhileLoopSimplifier>();
+      spmd_simplify.AddPass<SortSimplifier>();
+      spmd_simplify.AddPass<TupleSimplifier>();
+      spmd_simplify.AddPass<ScatterExpander>(
+          ScatterExpander::kEliminateSimpleScatters);
+      spmd_simplify.AddPass<GatherExpander>(
+          GatherExpander::kEliminateSimpleGathers);
+      spmd_simplify.AddPass<WhileLoopConstantSinking>();
+      spmd_simplify.AddPass<WhileLoopSimplifier>();
 
-        spmd_simplify.AddPass<ReshapeMover>();
-        spmd_simplify.AddPass<HloConstantFolding>();
-        spmd_simplify.AddPass<ConditionalSimplifier>();
-        spmd_simplify.AddPass<TransposeFolding>(
-            [](const HloInstruction& dot,
-               const TransposeFolding::OperandIndices& candidate_operands) {
-              return IsMatrixMultiplication(dot)
-                         ? candidate_operands
-                         : TransposeFolding::OperandIndices{};
-            });
-        spmd_simplify.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
-        spmd_simplify.AddPass<HloDCE>();
+      spmd_simplify.AddPass<ReshapeMover>();
+      spmd_simplify.AddPass<HloConstantFolding>();
+      spmd_simplify.AddPass<ConditionalSimplifier>();
+      spmd_simplify.AddPass<HloDCE>();
 
-        if (pass_context::GetBool("build_option::run_auto_sharding", false)) {
-          spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
-          spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
-        }
-
-      }
-
-<<<<<<< HEAD
-      spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
-      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
-      spmd_pipeline.AddPass<spmd::StatefulRngSpmdPartitioner>(
+      spmd_pipeline.AddPass<GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
-=======
-      if (pass_context::GetBool("build_option::run_spmd_partitioner", true)) {
-        spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
-        spmd_pipeline.AddPass<GpuSpmdPartitioner>(
-            num_partitions, hlo_module->config().replica_count());
-        spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
-      }
->>>>>>> Reorganize passes and build options (#95)
+      spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
     } else {
-      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
-
-    if (!pass_context::GetBool("build_option::run_post_spmd_partitioner_passes", true)) {
-      return Status::OK();
-    }
   }
 
   {
@@ -1278,6 +1246,7 @@ StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
 <<<<<<< HEAD
+<<<<<<< HEAD
   VLOG(1) << "Starting to compile HLO module " << module->name();
 =======
   if (!pass_context::GetBool("build_option::run_post_spmd_partitioner_passes", true)) {
@@ -1287,6 +1256,8 @@ StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     auto* gpu_executable = new GpuExecutable(std::move(params));
     return std::unique_ptr<Executable>(gpu_executable);
   }
+=======
+>>>>>>> Refactor compilation (#97)
 
 >>>>>>> Reorganize passes and build options (#95)
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunBackend");

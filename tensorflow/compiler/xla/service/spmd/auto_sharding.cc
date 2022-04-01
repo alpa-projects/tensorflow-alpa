@@ -422,7 +422,7 @@ std::pair<int64_t, bool> ChooseOperandToFollow(
   int64_t follow_idx = -1;
   bool tie = false;
   double max_priority = -1e20;
-  double depth_normalizer = 0.1 * max_depth;
+  double depth_normalizer = 0.1 / max_depth;
   double range_delta = 2 * depth_normalizer;
 
   for (int64_t i = 0; i < ins->operand_count(); ++i) {
@@ -833,14 +833,102 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         }
         break;
       }
-      case HloOpcode::kGather:
-      case HloOpcode::kScatter: {  // TODO(lmzheng): revisit this
-        const HloInstruction* operand = ins->operand(0);
-        const StrategyVector* src_strategies = strategy_map.at(operand).get();
-        CHECK(!src_strategies->is_tuple);
-        strategies = FollowInsStrategyVector(
-            src_strategies, ins->shape(), instruction_id,
-            /* have_memory_cost= */ false, leaf_strategies);
+      case HloOpcode::kGather: {
+        strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+                                              leaf_strategies);
+        auto dnums = ins->gather_dimension_numbers();
+
+        // Split one update_window_dims
+        for (size_t i = 0; i < dnums.offset_dims().size(); ++i) {
+          for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
+            if (device_mesh.dim(j) == 1 ||
+                ins->shape().dimensions(i) < device_mesh.dim(j)) {
+              continue;
+            }
+
+            HloSharding output_spec = Tile(ins->shape(), {i}, {j}, device_mesh);
+
+            int operand_dim = dnums.offset_dims(i);
+
+            CHECK_EQ(ins->shape().dimensions(operand_dim),
+                     ins->operand(0)->shape().dimensions(operand_dim));
+
+            std::vector<HloSharding> operand_specs{
+                Tile(ins->operand(0)->shape(), {operand_dim}, {j}, device_mesh),
+                HloSharding::Replicate(),
+            };
+
+            std::string name = ToStringSimple(output_spec);
+            double compute_cost = 0, communication_cost = 0;
+            double memory_cost =
+                GetBytes(ins->shape()) / output_spec.NumTiles();
+            std::vector<std::vector<double>> resharding_costs;
+            for (int64_t k = 0; k < ins->operand_count(); ++k) {
+              resharding_costs.push_back(ReshardingCostVector(
+                  strategy_map.at(ins->operand(k)).get(),
+                  ins->operand(k)->shape(), operand_specs[k], cluster_env));
+            }
+
+            strategies->leaf_vector.push_back(ShardingStrategy(
+                {name, output_spec, compute_cost, communication_cost,
+                 memory_cost, std::move(resharding_costs),
+                 std::move(operand_specs)}));
+          }
+        }
+
+        // Replicate all
+        AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies, 0);
+        break;
+      }
+      case HloOpcode::kScatter: {
+        strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+                                              leaf_strategies);
+        auto dnums = ins->scatter_dimension_numbers();
+
+        // Split one update_window_dims
+        for (size_t i = 0; i < dnums.update_window_dims().size(); ++i) {
+          for (int64_t j = 0; j < device_mesh.num_dimensions(); ++j) {
+            if (device_mesh.dim(j) == 1 ||
+                ins->shape().dimensions(i) < device_mesh.dim(j)) {
+              continue;
+            }
+
+            HloSharding output_spec = Tile(ins->shape(), {i}, {j}, device_mesh);
+
+            int operand_dim = dnums.update_window_dims(i);
+            int update_dim = operand_dim;
+
+            CHECK_EQ(ins->shape().dimensions(operand_dim),
+                     ins->operand(0)->shape().dimensions(operand_dim));
+            CHECK_EQ(ins->shape().dimensions(operand_dim),
+                     ins->operand(2)->shape().dimensions(update_dim));
+
+            std::vector<HloSharding> operand_specs{
+                Tile(ins->operand(0)->shape(), {operand_dim}, {j}, device_mesh),
+                HloSharding::Replicate(),
+                Tile(ins->operand(2)->shape(), {update_dim}, {j}, device_mesh),
+            };
+
+            std::string name = ToStringSimple(output_spec);
+            double compute_cost = 0, communication_cost = 0;
+            double memory_cost =
+                GetBytes(ins->shape()) / output_spec.NumTiles();
+            std::vector<std::vector<double>> resharding_costs;
+            for (int64_t k = 0; k < ins->operand_count(); ++k) {
+              resharding_costs.push_back(ReshardingCostVector(
+                  strategy_map.at(ins->operand(k)).get(),
+                  ins->operand(k)->shape(), operand_specs[k], cluster_env));
+            }
+
+            strategies->leaf_vector.push_back(ShardingStrategy(
+                {name, output_spec, compute_cost, communication_cost,
+                 memory_cost, std::move(resharding_costs),
+                 std::move(operand_specs)}));
+          }
+        }
+
+        // Replicate all
+        AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies, 0);
         break;
       }
       // Unary elementwise operations.
@@ -1764,11 +1852,16 @@ void SetHloSharding(const HloInstructionSequence& sequence,
         FixMixedMeshShapeResharding(inst, 1, stra.input_shardings[1],
                                     device_mesh, resharding_cache);
       }
-    } else if (inst->opcode() == HloOpcode::kReshape) {
-      const ShardingStrategy& stra = GetShardingStrategy(inst);
-      if (!stra.input_shardings.empty()) {
-        FixMixedMeshShapeResharding(inst, 0, stra.input_shardings[0],
-                                    device_mesh, resharding_cache);
+    } else {
+      if (!strategy_map.at(inst).get()->is_tuple) {
+        const ShardingStrategy& stra = GetShardingStrategy(inst);
+        if (!stra.input_shardings.empty()) {
+          CHECK_EQ(stra.input_shardings.size(), inst->operand_count());
+          for (size_t i = 0; i < stra.input_shardings.size(); ++i) {
+            FixMixedMeshShapeResharding(inst, i, stra.input_shardings[i],
+                                        device_mesh, resharding_cache);
+          }
+        }
       }
     }
   }

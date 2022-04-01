@@ -459,8 +459,13 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       case HloOpcode::kClamp: {
         for (const HloInstruction* operand : ins->unique_operands()) {
           if (batch_map.count(operand)) {
-            batch_map[ins] = batch_map[operand];
-            break;
+            int value = batch_map[operand];
+            if (operand->shape().rank() == ins->shape().rank() &&
+                operand->shape().dimensions(value) ==
+                    ins->shape().dimensions(value)) {
+              batch_map[ins] = batch_map[operand];
+              break;
+            }
           }
         }
         break;
@@ -537,6 +542,35 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         }
         break;
       }
+      case HloOpcode::kGather:
+      case HloOpcode::kScatter: {
+        // We only handle one case for now:
+        // If gather/scatter does not happen on the batch dimension,
+        // then we can propagate the batch dim.
+        const HloInstruction* operand = ins->operand(0);
+        if (batch_map.count(operand)) {
+          int value = batch_map[operand];
+          if (ins->shape().rank() == operand->shape().rank() &&
+              ins->shape().dimensions(value) ==
+                  operand->shape().dimensions(value)) {
+            batch_map[ins] = value;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kSort: {
+        for (size_t i = 0; i < ins->operand_count(); ++i) {
+          const HloInstruction* operand = ins->operand(i);
+          if (batch_map.count(operand)) {
+            int value = batch_map[operand];
+            if (!absl::c_linear_search(ins->dimensions(), value)) {
+              batch_map[ins] = value;
+              break;
+            }
+          }
+        }
+        break;
+      }
       case HloOpcode::kGetTupleElement: {
         const HloInstruction* source =
             PassThroughCustomCallMarkerGetSource(ins);
@@ -545,21 +579,6 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         }
         break;
       }
-      case HloOpcode::kGather:
-      case HloOpcode::kScatter: {
-        const HloInstruction* operand = ins->operand(0);
-        if (batch_map.count(operand)) {
-          int batch_dim = batch_map[operand];
-          if (ins->shape().rank() == operand->shape().rank() &&
-              ins->shape().dimensions(batch_dim) ==
-                  operand->shape().dimensions(batch_dim)) {
-            batch_map[ins] = batch_dim;
-          }
-        }
-        break;
-      }
-      case HloOpcode::kSort:
-        break;
       case HloOpcode::kTuple:
       case HloOpcode::kCustomCall:
         break;
@@ -630,8 +649,6 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       case HloOpcode::kDynamicUpdateSlice:
       case HloOpcode::kReduceWindow:
       case HloOpcode::kSelectAndScatter:
-        // TODO(lmzheng): support these
-        break;
       // Unary elementwise operations.
       case HloOpcode::kAbs:
       case HloOpcode::kRoundNearestAfz:
@@ -684,7 +701,10 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
         if (batch_map.count(ins)) {
           int value = batch_map[ins];
           for (const HloInstruction* operand : ins->unique_operands()) {
-            if (!batch_map.count(operand)) {
+            if (!batch_map.count(operand) &&
+                operand->shape().rank() == ins->shape().rank() &&
+                operand->shape().dimensions(value) ==
+                    ins->shape().dimensions(value)) {
               batch_map[operand] = value;
             }
           }
@@ -763,6 +783,34 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
           }
         }
 
+        break;
+      }
+      case HloOpcode::kGather:
+      case HloOpcode::kScatter: {
+        // We only handle one case for now:
+        // If gather/scatter does not happen on the batch dimension,
+        // then we can propagate the batch dim.
+        if (batch_map.count(ins)) {
+          int value = batch_map[ins];
+          const HloInstruction* operand = ins->operand(0);
+          if (ins->shape().rank() == operand->shape().rank() &&
+              ins->shape().dimensions(value) ==
+                  operand->shape().dimensions(value)) {
+            batch_map[operand] = value;
+          }
+        }
+        break;
+      }
+      case HloOpcode::kSort: {
+        if (batch_map.count(ins)) {
+          int value = batch_map[ins];
+          if (!absl::c_linear_search(ins->dimensions(), value)) {
+            for (size_t i = 0; i < ins->operand_count(); ++i) {
+              const HloInstruction* operand = ins->operand(i);
+              batch_map[operand] = value;
+            }
+          }
+        }
         break;
       }
       case HloOpcode::kGetTupleElement: {

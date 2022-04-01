@@ -320,12 +320,10 @@ Status GpuCompiler::OptimizeHloModule(
       spmd_simplify.AddPass<ConditionalSimplifier>();
       spmd_simplify.AddPass<HloDCE>();
 
-      if (pass_context::GetBool("build_option::run_spmd_partitioner", true)) {
-        spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
-        spmd_pipeline.AddPass<GpuSpmdPartitioner>(
-            num_partitions, hlo_module->config().replica_count());
-        spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
-      }
+      spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
+      spmd_pipeline.AddPass<GpuSpmdPartitioner>(
+          num_partitions, hlo_module->config().replica_count());
+      spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
     } else {
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();

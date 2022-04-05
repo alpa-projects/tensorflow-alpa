@@ -258,9 +258,7 @@ absl::optional<ReduceScatterSpec> MatchReduceScatter(
     const HloAllReduceInstruction* ar, int64_t num_partitions,
     int64_t num_replicas, bool allow_multiple_split_dims,
     bool allow_intervening_reshape, int64_t min_rank) {
-  if (!ar->shape().IsArray() || ar->constrain_layout() ||
-      (ar->IsCrossModuleAllReduce() &&
-       !ar->GetModule()->config().use_spmd_partitioning())) {
+  if (!ar->shape().IsArray() || ar->constrain_layout()) {
     VLOG(2) << "Unsupported all-reduce: " << ar->ToString();
     return absl::nullopt;
   }

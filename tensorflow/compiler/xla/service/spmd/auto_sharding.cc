@@ -402,6 +402,10 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
 int64_t MaxNumTiles(const StrategyMap& strategy_map,
                     const HloInstruction* ins) {
   const StrategyVector* strategies = strategy_map.at(ins).get();
+  // TODO(lmzheng): optimize with path compression.
+  while (strategies->following != nullptr) {
+    strategies = strategies->following;
+  }
   int64_t max_num_tiles = -1;
   for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
     max_num_tiles = std::max(
@@ -1967,8 +1971,8 @@ std::string PrintAutoShardingSolution(
          << ins->shape().tuple_shapes(ct).ToString() << "  ";
     }
 
-    // os << " depth: " << depth_map.at(ins) << " #stra: " <<
-    // strategy_map.at(ins)->leaf_vector.size() << " ";
+    // os << " depth: " << depth_map.at(ins)
+    //    << " max_num_tiles: " << MaxNumTiles(strategy_map, ins) << " ";
 
     if (cost_graph.follow_idx[i] < 0) {
       os << stra.name << " ";

@@ -2402,6 +2402,11 @@ PjRtStreamExecutorExecutable::GetHloModules() const {
 StatusOr<PjRtStreamExecutorClient::ExecutableExtras>
 PjRtStreamExecutorClient::GetExecutableExtras(CompileOptions* options) {
   ExecutableExtras extras;
+
+  if (pass_context::GetBool("build_option::bypass_device_assignment_check", false)) {
+    return extras;
+  }
+
   std::shared_ptr<DeviceAssignment>& device_assignment =
       extras.device_assignment;
   std::vector<PjRtStreamExecutorExecutable::LogicalDeviceIds>&

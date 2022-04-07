@@ -1,5 +1,5 @@
-#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_GRAD_ACC_REWRITE
-#define TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_GRAD_ACC_REWRITE
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_GRAD_ACC_REWRITE_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_GRAD_ACC_REWRITE_H_
 
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
 
@@ -37,4 +37,4 @@ std::string GetGradSyncChannelIds(const HloModule* module,
 }  // namespace spmd
 }  // namespace xla
 
-#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_GRAD_ACC_REWRITE
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_GRAD_ACC_REWRITE_H_

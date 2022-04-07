@@ -24,6 +24,7 @@
 #include "tensorflow/compiler/xla/service/sort_simplifier.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding.h"
 #include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
+#include "tensorflow/compiler/xla/service/spmd/redundant_slice_eliminator.h"
 #include "tensorflow/compiler/xla/service/spmd/slice_auto_sharded_stages.h"
 #include "tensorflow/compiler/xla/service/transpose_folding.h"
 #include "tensorflow/compiler/xla/service/tuple_simplifier.h"
@@ -143,15 +144,16 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
       spmd_simplify.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
       spmd_simplify.AddPass<HloDCE>();
 
-      spmd_pipeline.AddPass<xla::spmd::AutoSharding>();
-      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
+      spmd_pipeline.AddPass<AutoSharding>();
+      spmd_pipeline.AddPass<SliceAutoShardedStages>();
 
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<gpu::GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
-      spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
+      spmd_pipeline.AddPass<RedundantSliceEliminator>();
+      spmd_pipeline.AddPass<GradAccRewrite>();
     } else {
-      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
+      spmd_pipeline.AddPass<SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();
@@ -174,9 +176,9 @@ StatusOr<std::shared_ptr<HloModule>> RunSpmdPartitionerPass(
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<gpu::GpuSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
-      spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
+      spmd_pipeline.AddPass<GradAccRewrite>();
     } else {
-      spmd_pipeline.AddPass<xla::spmd::SliceAutoShardedStages>();
+      spmd_pipeline.AddPass<SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();

@@ -1,5 +1,5 @@
-#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING
-#define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING_H_
 
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
@@ -19,4 +19,4 @@ class AutoSharding : public HloModulePass {
 }  // namespace spmd
 }  // namespace xla
 
-#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING_H_

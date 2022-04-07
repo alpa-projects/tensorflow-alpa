@@ -199,6 +199,18 @@ cc_library(
 )
 
 cc_library(
+    name = "redundant_slice_eliminator",
+    srcs = ["redundant_slice_eliminator.cc"],
+    hdrs = ["redundant_slice_eliminator.h"],
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_dce",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+    ],
+)
+
+cc_library(
     name = "grad_acc_rewrite",
     srcs = ["grad_acc_rewrite.cc"],
     hdrs = ["grad_acc_rewrite.h"],
@@ -229,6 +241,7 @@ cc_library(
     hdrs = ["alpa_compile.h"],
     deps = [
         ":auto_sharding",
+        ":redundant_slice_eliminator",
         ":grad_acc_rewrite",
         ":slice_auto_sharded_stages",
         "//tensorflow/compiler/xla/pjrt:pjrt_client",

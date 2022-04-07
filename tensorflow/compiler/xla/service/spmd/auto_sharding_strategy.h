@@ -1,3 +1,6 @@
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_AUTO_SHARDING_STRATEGY_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_AUTO_SHARDING_STRATEGY_H_
+
 #include <cmath>
 #include <vector>
 
@@ -1037,3 +1040,5 @@ void AnnotateShardingWithSimpleHeuristic(HloModule* module,
 
 }  // namespace spmd
 }  // namespace xla
+
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_AUTO_SHARDING_STRATEGY_H_

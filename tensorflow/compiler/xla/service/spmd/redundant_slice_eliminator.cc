@@ -38,7 +38,9 @@ StatusOr<bool> RedundantSliceEliminator::Run(HloModule* module) {
                     operand->dimensions()));
             ins->ReplaceAllUsesWith(new_ins);
           }
-        } else if (operand->opcode() == HloOpcode::kConstant &&
+        } else if (false && // Temporarily disable this because it is incompatible with
+                            // ReduceScatterCreator. We need to adjust the order of passes.
+                   operand->opcode() == HloOpcode::kConstant &&
                    operand->shape().rank() == 1 &&
                    operand->shape().dimensions(0) > 1 &&
                    operand->shape().IsInteger() &&
@@ -103,6 +105,13 @@ StatusOr<bool> RedundantSliceEliminator::Run(HloModule* module) {
                       k_ins->shape(), HloOpcode::kAdd, mul_ins, b_ins));
             } else {
               add_ins = mul_ins;
+            }
+
+            if (ins->shape().element_type() != add_ins->shape().element_type()) {
+              Shape copy_shape = add_ins->shape();
+              copy_shape.set_element_type(ins->shape().element_type());
+              add_ins = ins->parent()->AddInstruction(HloInstruction::CreateConvert(
+                  copy_shape, add_ins));
             }
 
             HloInstruction* reshape_ins = ins->parent()->AddInstruction(

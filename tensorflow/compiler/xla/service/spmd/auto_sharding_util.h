@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "absl/types/span.h"
 #include "tensorflow/compiler/xla/array.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_schedule.h"
@@ -319,7 +320,7 @@ inline bool IsFullyTiled(const HloSharding& sharding) {
 // non-tiled.
 HloSharding BroadcastSharding(const HloSharding& input_spec,
                               const Shape& new_shape,
-                              const std::vector<int64_t>& dimensions);
+                              const absl::Span<const int64_t>& dimensions);
 
 // Propagate sharding for dim-wise operations (e.g., slice, pad) which works
 // independently on each dimension.

@@ -342,9 +342,8 @@ Status GpuCompiler::OptimizeHloModule(
       spmd_simplify.AddPass<HloDCE>();
 
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
-      spmd_pipeline.AddPass<GpuSpmdPartitioner>(
+      spmd_pipeline.AddPass<spmd::StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
-      spmd_pipeline.AddPass<xla::spmd::GradAccRewrite>();
     } else {
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
@@ -1245,21 +1244,7 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
 StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
-<<<<<<< HEAD
-<<<<<<< HEAD
   VLOG(1) << "Starting to compile HLO module " << module->name();
-=======
-  if (!pass_context::GetBool("build_option::run_post_spmd_partitioner_passes", true)) {
-    // Do no run backend code generation. Return a dummy executable.
-    GpuExecutable::Params params;
-    params.debug_module = std::move(module);
-    auto* gpu_executable = new GpuExecutable(std::move(params));
-    return std::unique_ptr<Executable>(gpu_executable);
-  }
-=======
->>>>>>> Refactor compilation (#97)
-
->>>>>>> Reorganize passes and build options (#95)
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunBackend");
   std::string slow_compilation_msg =
       absl::StrCat("Compiling module ", module->name());

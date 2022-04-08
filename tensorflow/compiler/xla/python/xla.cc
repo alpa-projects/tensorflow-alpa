@@ -54,7 +54,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/python/transfer_guard_lib.h"
 #include "tensorflow/compiler/xla/python/types.h"
 #include "tensorflow/compiler/xla/python/xla_compiler.h"
-#include "tensorflow/compiler/xla/service/collective_ops_utils.h"
 #include "tensorflow/compiler/xla/service/spmd/alpa_compile.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -424,15 +423,6 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("dlpack_managed_tensor_to_buffer", DLPackManagedTensorToBuffer,
         py::arg("dlpack"), py::arg("cpu_backend") = nullptr,
         py::arg("gpu_backend") = nullptr);
-
-  // TODO(lmzheng): Remove this
-  m.def("init_nccl_communicators", [](
-      PyClient* py_client,
-      std::shared_ptr<DistributedRuntimeClient> distributed_client,
-      int node_id,
-      PyExecutable* py_executable) {
-    return Status::OK();
-  });
 
   BuildProfilerSubmodule(&m);
   BuildOpsSubmodule(&m);

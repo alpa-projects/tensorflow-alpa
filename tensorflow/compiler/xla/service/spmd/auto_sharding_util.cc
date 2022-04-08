@@ -131,7 +131,7 @@ bool IsActivationFromAnotherStage(const HloInstruction* ins,
 // non-tiled.
 HloSharding BroadcastSharding(const HloSharding& input_spec,
                               const Shape& new_shape,
-                              const std::vector<int64_t>& dimensions) {
+                              const absl::Span<const int64_t>& dimensions) {
   if (input_spec.IsReplicated()) {
     return input_spec;
   }

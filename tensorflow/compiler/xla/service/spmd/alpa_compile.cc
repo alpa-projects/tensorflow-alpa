@@ -6,8 +6,7 @@
 #include "tensorflow/compiler/xla/service/dot_decomposer.h"
 #include "tensorflow/compiler/xla/service/dump.h"
 #include "tensorflow/compiler/xla/service/gather_expander.h"
-#include "tensorflow/compiler/xla/service/gpu/gpu_spmd_partitioner.h"  // TODO(yonghao): remove it
-#include "tensorflow/compiler/xla/service/gpu/ir_emission_utils.h"  // TODO(yonghao): remove it
+#include "tensorflow/compiler/xla/service/gpu/ir_emission_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_constant_folding.h"
 #include "tensorflow/compiler/xla/service/hlo_cse.h"
 #include "tensorflow/compiler/xla/service/hlo_dce.h"
@@ -26,6 +25,7 @@
 #include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
 #include "tensorflow/compiler/xla/service/spmd/redundant_slice_eliminator.h"
 #include "tensorflow/compiler/xla/service/spmd/slice_auto_sharded_stages.h"
+#include "tensorflow/compiler/xla/service/spmd/stateful_rng_spmd_partitioner.h"
 #include "tensorflow/compiler/xla/service/transpose_folding.h"
 #include "tensorflow/compiler/xla/service/tuple_simplifier.h"
 #include "tensorflow/compiler/xla/service/while_loop_constant_sinking.h"
@@ -146,9 +146,8 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
 
       spmd_pipeline.AddPass<AutoSharding>();
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
-
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
-      spmd_pipeline.AddPass<gpu::GpuSpmdPartitioner>(
+      spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<RedundantSliceEliminator>();
       spmd_pipeline.AddPass<GradAccRewrite>();
@@ -174,7 +173,7 @@ StatusOr<std::shared_ptr<HloModule>> RunSpmdPartitionerPass(
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
       spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
-      spmd_pipeline.AddPass<gpu::GpuSpmdPartitioner>(
+      spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<GradAccRewrite>();
     } else {

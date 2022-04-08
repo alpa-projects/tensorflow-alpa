@@ -1,10 +1,9 @@
-#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE
-#define TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE_H_
 
 #include "tensorflow/compiler/xla/pjrt/pjrt_client.h"
 
 namespace xla {
-
 namespace spmd {
 
 // Compile an Xla Computation into HloModule, then apply Alpa's passes.
@@ -16,7 +15,6 @@ StatusOr<std::shared_ptr<HloModule>> RunSpmdPartitionerPass(
     const XlaComputation& computation, CompileOptions options);
 
 };  // namespace spmd
-
 };  // namespace xla
 
-#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_SPMD_ALPA_COMPILE_H_

@@ -482,20 +482,6 @@ PartitionedHlo PartitionedHlo::ReshardNoCache(const HloSharding& target) {
     return Replicate().Reshard(target);
   }
 
-  // 'Replicated' to 'PartialReduction'.
-  if (target.IsPartialReduction()) {
-    auto norm = state_.b->AddInstruction(
-        HloInstruction::CreateConstant(LiteralUtil::CreateR0<float>(
-                state_.num_partitions)));
-    norm = state_.b->AddInstruction(
-        HloInstruction::CreateBroadcast(hlo_->shape(), norm, {}));
-    auto div = state_.b->AddInstruction(
-        HloInstruction::CreateBinary(hlo_->shape(), HloOpcode::kDivide,
-                                     hlo_, norm));
-    div->set_sharding(target);
-    return PartitionedHlo(div, base_shape_, state_);
-  }
-
   // 'Replicated' to 'SingleDevice'.
   if (target.IsTileMaximal()) {
     auto copy = state_.b->AddInstruction(
@@ -915,12 +901,6 @@ PartitionedHlo PartitionedHlo::Replicate() {
     }
     return resharded;
   };
-
-  // 'PartialReduction' to 'Replicated'
-  if (sharding.IsPartialReduction()) {
-    return update_cache(AllReduce());
-  }
-
   // 'Single Device' to 'Repliated'.
   if (sharding.IsTileMaximal()) {
     return update_cache(Broadcast());
@@ -1193,20 +1173,6 @@ PartitionedHlo PartitionedHlo::Broadcast() const {
 
   auto result = state_.collective_ops_creator.create_cross_partition_all_reduce(
       state_.b, operand, reduction, {}, NewChannel());
-  result->set_sharding(HloSharding::Replicate());
-  return PartitionedHlo(result, base_shape_, state_);
-}
-
-PartitionedHlo PartitionedHlo::AllReduce() const {
-  const Shape& shape = hlo_->shape();
-  const HloSharding& sharding = hlo_->sharding();
-  CHECK(sharding.IsPartialReduction());
-  CHECK(!shape.IsTuple() && shape.element_type() != TOKEN);
-
-  HloComputation* reduction =
-      MakeBinaryAdd(shape.element_type(), state_.module);
-  auto result = state_.collective_ops_creator.create_cross_partition_all_reduce(
-      state_.b, hlo(), reduction, {}, NewChannel());
   result->set_sharding(HloSharding::Replicate());
   return PartitionedHlo(result, base_shape_, state_);
 }

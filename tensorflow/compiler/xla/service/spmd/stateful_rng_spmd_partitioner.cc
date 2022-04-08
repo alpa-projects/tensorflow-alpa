@@ -75,6 +75,7 @@ Status StatefulRngSpmdPartitioner::PreprocessSharding(HloModule* module) {
 bool StatefulRngSpmdPartitioner::CanSideEffectingHaveReplicatedSharding(
     const HloInstruction* hlo) {
   if (hlo->opcode() == HloOpcode::kRngGetAndUpdateState) return true;
+  // Alpa-specific changes for profling
   if (hlo->opcode() == HloOpcode::kAllReduce &&
       Cast<HloAllReduceInstruction>(hlo)->use_global_device_ids()) return true;
   return spmd::SpmdPartitioner::CanSideEffectingHaveReplicatedSharding(hlo);

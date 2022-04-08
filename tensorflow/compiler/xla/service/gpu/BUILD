@@ -1520,7 +1520,6 @@ cc_library(
     deps = [
         ":alias_passthrough_params",
         ":all_reduce_blueconnect",
-        ":cudnn_batchnorm_rewriter",
         ":common_computation_elimination",
         ":fusion_bitcast_lift",
         ":fusion_merger",
@@ -1652,9 +1651,6 @@ cc_library(
         "//tensorflow/compiler/xla/service:zero_sized_hlo_elimination",
         "//tensorflow/compiler/xla/service/gpu/llvm_gpu_backend",
         "//tensorflow/compiler/xla/service/llvm_ir:llvm_util",
-        "//tensorflow/compiler/xla/service/spmd:auto_sharding",
-        "//tensorflow/compiler/xla/service/spmd:grad_acc_rewrite",
-        "//tensorflow/compiler/xla/service/spmd:slice_auto_sharded_stages",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core/platform:regexp",
@@ -2520,37 +2516,6 @@ cc_library(
 
 # These tests are intended to be run with --test_env=XLA_FLAGS=--xla_gpu_bef_thunk
 # See tap/tensorflow.xla_gpu_tfrt.
-cc_library(
-    name = "common_computation_elimination",
-    srcs = [
-        "common_computation_elimination.cc",
-    ],
-    hdrs = [
-        "common_computation_elimination.h",
-    ],
-    deps = [
-        "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:hlo_pass",
-    ],
-)
-
-cc_library(
-    name = "gpu_cost_model",
-    srcs = [
-        "gpu_cost_model.cc",
-    ],
-    hdrs = [
-        "gpu_cost_model.h",
-    ],
-    deps = [
-        ":backend_configs_cc",
-        ":cublas_cudnn",
-        "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:pass_context",
-        "//tensorflow/compiler/xla/service/spmd:auto_sharding",
-    ],
-)
-
 # TODO(b/187959015): Expand test patterns; see cl/377552996.
 test_suite(
     name = "bef_thunk_tests",

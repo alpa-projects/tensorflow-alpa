@@ -462,7 +462,7 @@ absl::optional<ReduceScatterSpec> MatchReduceScatter(
     if (!IsPerIdOffset(user->operand(spec.split_dim + 1),
                        user->dynamic_slice_sizes()[spec.split_dim], map_id,
                        group_size, ar)) {
-      VLOG(2) << "IsPerIdOffset() failed " << ar->ToString();
+      VLOG(2) << "IsPerIdOffsets() failed " << ar->ToString();
       return absl::nullopt;
     }
   }

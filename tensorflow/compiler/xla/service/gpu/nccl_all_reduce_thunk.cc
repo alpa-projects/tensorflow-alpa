@@ -87,9 +87,10 @@ Status RunAllReduce(const NcclAllReduceConfig& config,
         //  std::cerr << "skip-copy all-reduce " << config.config.op_id << ",
         //  size: " << size <<  std::endl;
         //}
-        XLA_CUDA_RETURN_IF_ERROR(cudaMemcpyAsync(recv_buffer, send_buffer, size,
-                                                 cudaMemcpyDeviceToDevice,
-                                                 *cu_stream));
+        auto ret = cudaMemcpyAsync(recv_buffer, send_buffer, size,
+                                   cudaMemcpyDeviceToDevice,
+                                   gpu_stream);
+        CHECK_EQ(ret, 0);
       }
     }
     return Status::OK();

@@ -51,7 +51,7 @@ bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
 
 // Return whether the instruction is followed by a broadcast.
 bool IsFollowedByBroadcast(const HloInstruction* ins) {
-  int max_depth = 6;
+  const int max_depth = 6;
   for (int i = 0; i < max_depth; ++i) {
     if (ins->users().empty()) {
       return false;
@@ -59,6 +59,8 @@ bool IsFollowedByBroadcast(const HloInstruction* ins) {
     ins = PassThroughCustomCallMarkerUser(ins->users().front(), ins);
     if (ins->opcode() == HloOpcode::kBroadcast) {
       return true;
+    } else if (ins->opcode() == HloOpcode::kReshape) {
+      i--;
     }
   }
 
@@ -281,6 +283,9 @@ InstructionDepthMap BuildInstructionDepthMap(
             // broadcast.
             case HloOpcode::kBroadcast:
               delta = -5;
+              break;
+            case HloOpcode::kReshape:
+              delta = 0;
               break;
             default:
               delta = 1;

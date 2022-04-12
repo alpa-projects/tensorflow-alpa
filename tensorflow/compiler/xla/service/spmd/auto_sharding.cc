@@ -427,7 +427,7 @@ std::pair<int64_t, bool> ChooseOperandToFollow(
   bool tie = false;
   double max_priority = -1e20;
   double depth_normalizer = 0.1 / max_depth;
-  double range_delta = 2 * depth_normalizer;
+  double range_delta = 4 * depth_normalizer;
 
   for (int64_t i = 0; i < ins->operand_count(); ++i) {
     const HloInstruction* operand = ins->operand(i);
@@ -457,9 +457,10 @@ std::pair<int64_t, bool> ChooseOperandToFollow(
 // Return whether an instruciton can follow one of its operand when
 // more than one operand have the same priority.
 bool AllowTieFollowing(const HloInstruction* ins) {
-  if (ins->opcode() == HloOpcode::kCompare) {
-    // This is used to resolve a tricky case where an iota and a parameter
-    // has the same priority. This happens for embedding / onehot.
+  if (ins->opcode() == HloOpcode::kCompare || ins->opcode() == HloOpcode::kAnd) {
+    // This is used to resolve tricky cases where an iota and a parameter
+    // has the same priority. This happens for embedding, onehot or
+    // make_attention_mask.
     return false;
   }
   if (ins->operand_count() == 3) {
@@ -507,6 +508,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
   for (auto iter : depth_map) {
     max_depth = std::max(max_depth, iter.second);
   }
+
+  int64_t no_follow = 0;
 
   // Register strategies and their costs for each instruction.
   for (size_t instruction_id = 0; instruction_id < instructions.size();
@@ -1000,6 +1003,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         CHECK(!src_strategies->is_tuple);
         if (!tie || AllowTieFollowing(ins)) {
           strategies->following = src_strategies;
+        } else {
+          no_follow++;
         }
 
         for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
@@ -1971,8 +1976,8 @@ std::string PrintAutoShardingSolution(
          << ins->shape().tuple_shapes(ct).ToString() << "  ";
     }
 
-    // os << " depth: " << depth_map.at(ins)
-    //    << " max_num_tiles: " << MaxNumTiles(strategy_map, ins) << " ";
+    os << " depth: " << depth_map.at(ins)
+       << " max_num_tiles: " << MaxNumTiles(strategy_map, ins) << " ";
 
     if (cost_graph.follow_idx[i] < 0) {
       os << stra.name << " ";

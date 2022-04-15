@@ -6345,6 +6345,7 @@ cc_library(
     deps = [
         ":hlo",
         ":hlo_pass",
+        "//tensorflow/compiler/xla:shape_util",
     ],
 )
 

@@ -18,10 +18,10 @@ enum VisitState { kVisiting, kVisited };
 std::unique_ptr<HloModule> CreateStageModule(
     HloModule* full_module, HloInstruction* stage_start_instruction,
     HloInstruction* stage_end_instruction, std::string stage_name_suffix) {
-  CHECK(stage_start_instruction->IsCustomCall(kXlaPipelineMarker));
+  CHECK(stage_start_instruction->IsCustomCall(kPipelineMarker));
   CHECK_EQ(stage_start_instruction->metadata().op_type(),
            kPipelineMarkerStartType);
-  CHECK(stage_end_instruction->IsCustomCall(kXlaPipelineMarker));
+  CHECK(stage_end_instruction->IsCustomCall(kPipelineMarker));
   CHECK_EQ(stage_end_instruction->metadata().op_type(), kPipelineMarkerEndType);
   CHECK_EQ(stage_start_instruction->metadata().op_name(),
            stage_end_instruction->metadata().op_name());
@@ -141,7 +141,7 @@ std::vector<std::string> HookShardingProto(HloModule* module) {
   for (HloInstruction* inst : entry->instructions()) {
     if (inst->IsCustomCall(kIdentityMarker)) {
       auto* custom_call = Cast<HloCustomCallInstruction>(inst);
-      if (custom_call->opaque() != "hook") {
+      if (custom_call->metadata().op_type() != "hook") {
         continue;
       }
       for (HloInstruction* operand : custom_call->operands()) {
@@ -161,7 +161,7 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   absl::flat_hash_map<std::string, std::pair<HloInstruction*, HloInstruction*>>
       stage_start_end_instructions;
   for (HloInstruction* ins : entry->instructions()) {
-    if (ins->IsCustomCall(kXlaPipelineMarker)) {
+    if (ins->IsCustomCall(kPipelineMarker)) {
       std::string pipeline_stage_name = ins->metadata().op_name();
       std::string marker_type = ins->metadata().op_type();
       if (!stage_start_end_instructions.contains(pipeline_stage_name)) {

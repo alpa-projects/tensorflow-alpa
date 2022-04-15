@@ -1,6 +1,8 @@
 #include "tensorflow/compiler/xla/service/remat_identity_fixer.h"
 
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_instructions.h"
+#include "tensorflow/compiler/xla/shape_util.h"
 
 namespace xla {
 
@@ -63,6 +65,21 @@ StatusOr<bool> RematIdentityFixer::Run(HloModule* module) {
             to_remove.push_back(user);
           }
         }
+      }
+
+      if (ins->IsCustomCall("pipeline_marker") ||
+          ins->IsCustomCall("identity")) {
+        std::vector<std::pair<ShapeIndex, std::pair<int64_t, ShapeIndex>>>
+            aliasing;
+
+        ShapeUtil::VisitorFunction visitor = [&](const Shape& shape,
+                                                 const ShapeIndex& idx) {
+          aliasing.push_back(std::make_pair(idx, std::make_pair(0, idx)));
+        };
+        ShapeUtil::ForEachSubshape(ins->shape(), visitor);
+
+        HloCustomCallInstruction* call = Cast<HloCustomCallInstruction>(ins);
+        call->set_output_to_operand_aliasing(aliasing);
       }
     }
 

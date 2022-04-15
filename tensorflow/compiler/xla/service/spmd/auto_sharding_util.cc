@@ -18,7 +18,7 @@ NullStream& NullStream::Global() {
   return stream;
 }
 
-const char* const kXlaPipelineMarker = "xla_pipeline_marker";
+const char* const kPipelineMarker = "pipeline_marker";
 const char* const kIdentityMarker = "identity";
 
 // Return whether a reshape instruction is a special reshape that switches
@@ -109,7 +109,7 @@ bool IsActivationFromAnotherStage(const HloInstruction* ins,
 
   for (const HloInstruction* user : ins->users()) {
     if (!(user->opcode() == HloOpcode::kTuple && user->users().size() == 1 &&
-          user->users().front()->IsCustomCall(kXlaPipelineMarker) &&
+          user->users().front()->IsCustomCall(kPipelineMarker) &&
           user->users().front()->metadata().op_type().find("start") !=
               std::string::npos)) {
       return false;
@@ -339,7 +339,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       }
     }
 
-    if (ins->IsCustomCall(kXlaPipelineMarker) &&
+    if (ins->IsCustomCall(kPipelineMarker) &&
         ins->metadata().op_type().find("start") != std::string::npos) {
       // Reset the status after meet a new pipeline marker.
       set_the_next_dot_conv = true;

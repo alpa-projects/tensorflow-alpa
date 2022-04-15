@@ -27,7 +27,7 @@ using ReshardingCache =
     absl::flat_hash_map<const HloInstruction*,
                         std::vector<std::pair<HloSharding, HloInstruction*>>>;
 
-extern const char* const kXlaPipelineMarker;
+extern const char* const kPipelineMarker;
 extern const char* const kIdentityMarker;
 constexpr absl::string_view kPipelineMarkerStartType = "start";
 constexpr absl::string_view kPipelineMarkerEndType = "end";
@@ -243,7 +243,7 @@ inline void ReplaceOperand(HloInstruction* inst,
 
 // Return whether this instruction is a custom call marker introduced by us.
 inline bool IsCustomCallMarker(const HloInstruction* inst) {
-  return inst->IsCustomCall(kXlaPipelineMarker) ||
+  return inst->IsCustomCall(kPipelineMarker) ||
          inst->IsCustomCall(kIdentityMarker);
 }
 
@@ -372,7 +372,7 @@ inline std::vector<const HloInstruction*> GetGradientComputationInstructions(
   for (size_t i = 0; i < instructions.size(); ++i) {
     const HloInstruction* ins = instructions[i];
 
-    if (ins->IsCustomCall(kXlaPipelineMarker) &&
+    if (ins->IsCustomCall(kPipelineMarker) &&
         (ins->metadata().op_name().find("compute_grad") != std::string::npos ||
          ins->metadata().op_name().find("backward") != std::string::npos) &&
         ins->metadata().op_type() == kPipelineMarkerEndType) {

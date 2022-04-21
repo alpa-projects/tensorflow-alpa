@@ -851,27 +851,22 @@ class CostGraph {
 
     // Merge edge cost matrix
     std::vector<int> adj_list(adjacency[src].begin(), adjacency[src].end());
-    if (adj_list.size() > 1) {
-      for (int adj : adj_list) {
-        if (adj == dst) {
-          continue;
+    for (int adj : adj_list) {
+      if (adj == dst) {
+        for (int i = 0; i < node_lens[dst]; ++i) {
+          extra_node_costs[dst][i] += edge_cost(i, reindexing[i]);
         }
+      } else {
         Matrix added_edge_cost(node_lens[dst], node_lens[adj]);
+        Matrix edge_cost_src_adj = GetEdgeCost(src, adj);
 
         for (int i = 0; i < node_lens[dst]; ++i) {
-          int j = reindexing[i];
-          Matrix edge_cost_src_adj = GetEdgeCost(src, adj);
           for (int k = 0; k < node_lens[adj]; ++k) {
-            added_edge_cost(i, k) = edge_cost(i, j) + edge_cost_src_adj(j, k);
+            added_edge_cost(i, k) = edge_cost_src_adj(reindexing[i], k);
           }
         }
 
         AddEdgeCost(dst, adj, added_edge_cost);
-      }
-    } else {
-      for (int i = 0; i < node_lens[dst]; ++i) {
-        int j = reindexing[i];
-        extra_node_costs[dst][i] += edge_cost(i, j);
       }
     }
 

@@ -2046,8 +2046,13 @@ void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
     AutoShardingSolverOption& solver_option) {
   int64_t batch_size = (((int64_t)1) << 31) - 1;
   for (auto iter : batch_dim_map) {
-    batch_size =
-        std::min(batch_size, iter.first->shape().dimensions(iter.second));
+    int64_t tmp_batch_size;
+    if (iter.first->shape().IsTuple()) {
+      tmp_batch_size = iter.first->shape().tuple_shapes(0).dimensions(iter.second);
+    } else {
+      tmp_batch_size = iter.first->shape().dimensions(iter.second);
+    }
+    batch_size = std::min(batch_size, tmp_batch_size);
   }
 
   if (batch_size % num_devices != 0) {

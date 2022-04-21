@@ -407,10 +407,22 @@ int64_t MaxNumTiles(const StrategyMap& strategy_map,
     strategies = strategies->following;
   }
   int64_t max_num_tiles = -1;
-  for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
-    max_num_tiles = std::max(
-        max_num_tiles, strategies->leaf_vector[i].output_sharding.NumTiles());
-  }
+
+  std::function<void(const StrategyVector*)> visit_all;
+  visit_all = [&](const StrategyVector* stra) {
+    if (stra->is_tuple) {
+      for (const auto& child : stra->childs) {
+        visit_all(child.get());
+      }
+    } else {
+      for (size_t i = 0; i < stra->leaf_vector.size(); ++i) {
+        max_num_tiles = std::max(
+            max_num_tiles, stra->leaf_vector[i].output_sharding.NumTiles());
+      }
+    }
+  };
+
+  visit_all(strategies);
 
   return max_num_tiles;
 }
@@ -457,7 +469,8 @@ std::pair<int64_t, bool> ChooseOperandToFollow(
 // Return whether an instruciton can follow one of its operand when
 // more than one operand have the same priority.
 bool AllowTieFollowing(const HloInstruction* ins) {
-  if (ins->opcode() == HloOpcode::kCompare || ins->opcode() == HloOpcode::kAnd) {
+  if (ins->opcode() == HloOpcode::kCompare ||
+      ins->opcode() == HloOpcode::kAnd) {
     // This is used to resolve tricky cases where an iota and a parameter
     // has the same priority. This happens for embedding, onehot or
     // make_attention_mask.
@@ -1055,16 +1068,23 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       case HloOpcode::kReduce: {
-        strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
-                                              leaf_strategies);
+        // Choose an operand to follow
+        int64_t follow_idx;
+        bool tie;
+        std::tie(follow_idx, tie) = ChooseOperandToFollow(
+            strategy_map, depth_map, alias_map, undefined_set, max_depth, ins);
+        CHECK_LT(follow_idx, ins->operand_count() / 2);
 
-        const HloInstruction* operand = ins->operand(0);
-        const HloInstruction* unit = ins->operand(1);
-        if (undefined_set.count(operand)) {
-          break;
-        }
+        const HloInstruction* operand = ins->operand(follow_idx);
+        const StrategyVector* src_strategies = strategy_map.at(operand).get();
+        CHECK(!src_strategies->is_tuple);
 
-        // Map old dims to new dim
+        // Create main child strategy for the 0-th output
+        auto main_stra = CreateLeafStrategyVector(
+            instruction_id, ins, strategy_map, leaf_strategies);
+        main_stra->following = src_strategies;
+
+        // Map old dims to new dims
         const auto& dimensions = ins->dimensions();
         std::vector<int64_t> old_dim_to_new_dim;
         old_dim_to_new_dim.reserve(operand->shape().rank());
@@ -1078,18 +1098,21 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             pt += 1;
           }
         }
-        CHECK_EQ(pt, ins->shape().rank());
+
+        Shape one_output_shape;
+        if (ins->shape().IsTuple()) {
+          one_output_shape = ins->shape().tuple_shapes(0);
+        } else {
+          one_output_shape = ins->shape();
+        }
+        CHECK_EQ(pt, one_output_shape.rank());
 
         // Create follow strategies
-        const StrategyVector* src_strategies = strategy_map.at(operand).get();
-        CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies;
-
         for (size_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
+          const HloSharding& input_spec =
+              src_strategies->leaf_vector[sid].output_sharding;
           const auto& tensor_dim_to_mesh_dim =
-              cluster_env.GetTensorDimToMeshDim(
-                  operand->shape(),
-                  src_strategies->leaf_vector[sid].output_sharding);
+              cluster_env.GetTensorDimToMeshDim(operand->shape(), input_spec);
 
           std::vector<int64_t> tile_tensor_dims, tile_mesh_dims,
               all_reduce_dims;
@@ -1136,21 +1159,19 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
             std::vector<int> operand_tensor_dim_to_mesh_dim;
             int n_dim;
             std::tie(operand_tensor_dim_to_mesh_dim, n_dim) =
-                GetTensorDimToMeshDimInternal(
-                    operand->shape(),
-                    src_strategies->leaf_vector[sid].output_sharding);
+                GetTensorDimToMeshDimInternal(operand->shape(), input_spec);
 
             if (n_dim == 1) {
-              output_spec = Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims,
-                                 device_mesh_1d);
+              output_spec = Tile(one_output_shape, tile_tensor_dims,
+                                 tile_mesh_dims, device_mesh_1d);
               suffix = " 1d";
             } else {
-              output_spec = Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims,
-                                 device_mesh);
+              output_spec = Tile(one_output_shape, tile_tensor_dims,
+                                 tile_mesh_dims, device_mesh);
             }
           } else {
-            output_spec = Tile(ins->shape(), tile_tensor_dims, tile_mesh_dims,
-                               device_mesh);
+            output_spec = Tile(one_output_shape, tile_tensor_dims,
+                               tile_mesh_dims, device_mesh);
           }
 
           name += ToStringSimple(output_spec);
@@ -1166,18 +1187,50 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                 cluster_env.AllReduceCost(memory_cost, mesh_dim);
           }
 
-          strategies->leaf_vector.push_back(ShardingStrategy(
-              {name,
-               output_spec,
-               compute_cost,
-               communication_cost,
-               memory_cost,
-               {FollowInsCostVector(src_strategies->leaf_vector.size(), sid),
-                ReshardingCostVector(strategy_map.at(unit).get(), unit->shape(),
-                                     HloSharding::Replicate(), cluster_env)},
-               {}}));
+          std::vector<std::vector<double>> resharding_costs;
+
+          for (int64_t k = 0; k < ins->operand_count(); ++k) {
+            if (k == follow_idx) {
+              resharding_costs.push_back(
+                  FollowInsCostVector(src_strategies->leaf_vector.size(), sid));
+            } else if (k < ins->operand_count() / 2) {
+              resharding_costs.push_back(ReshardingCostVector(
+                  strategy_map.at(ins->operand(k)).get(),
+                  ins->operand(k)->shape(), input_spec, cluster_env));
+            } else {
+              resharding_costs.push_back(
+                  ReshardingCostVector(strategy_map.at(ins->operand(k)).get(),
+                                       ins->operand(k)->shape(),
+                                       HloSharding::Replicate(), cluster_env));
+            }
+          }
+
+          main_stra->leaf_vector.push_back(ShardingStrategy(
+              {name, output_spec, compute_cost, communication_cost, memory_cost,
+               std::move(resharding_costs)}));
         }
 
+        if (ins->shape().IsTuple()) {  // Variadic Reduce
+          // Create following child strategies for other outputs
+          // All costs are considered in the main_strategy, so we don't
+          // need to compute costs for other outputs. We only need
+          // to set the correct outptut_sharding for them and let them
+          // follow the main strategy.
+          strategies = CreateTupleStrategyVector(instruction_id);
+          strategies->childs.reserve(ins->operand_count() / 2);
+          const StrategyVector* main_stra_ptr = main_stra.get();
+          for (size_t i = 0; i < ins->operand_count() / 2; ++i) {
+            if (i == follow_idx) {
+              strategies->childs.push_back(std::move(main_stra));
+            } else {
+              strategies->childs.push_back(std::move(FollowInsStrategyVector(
+                  main_stra_ptr, ins->operand(i)->shape(), instruction_id, true,
+                  leaf_strategies)));
+            }
+          }
+        } else {
+          strategies = std::move(main_stra);
+        }
         break;
       }
       case HloOpcode::kDot: {
@@ -1221,127 +1274,87 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       case HloOpcode::kSort: {
-        if (ins->operand_count() == 1) {
-          strategies = CreateLeafStrategyVector(instruction_id, ins,
-                                                strategy_map, leaf_strategies);
+        // Choose an operand to follow
+        int64_t follow_idx;
+        bool tie;
+        std::tie(follow_idx, tie) = ChooseOperandToFollow(
+            strategy_map, depth_map, alias_map, undefined_set, max_depth, ins);
+        const HloInstruction* operand = ins->operand(follow_idx);
+        const StrategyVector* src_strategies = strategy_map.at(operand).get();
 
-          const StrategyVector* src_strategies =
-              strategy_map.at(ins->operand(0)).get();
-          strategies->following = src_strategies;
+        // Create main child strategy for the 0-th output
+        auto main_stra = CreateLeafStrategyVector(
+            instruction_id, ins, strategy_map, leaf_strategies);
+        main_stra->following = src_strategies;
 
-          for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
-               ++sid) {
-            HloSharding output_spec =
-                src_strategies->leaf_vector[sid].output_sharding;
+        for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
+          HloSharding output_spec =
+              src_strategies->leaf_vector[sid].output_sharding;
 
-            std::string name = ToStringSimple(output_spec);
-            double compute_cost = 0;
-            double memory_cost =
-                GetBytes(ins->shape()) / output_spec.NumTiles();
+          std::string name = ToStringSimple(output_spec);
+          double compute_cost = 0;
+          double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
 
-            bool need_all_gather = false;
-            if (output_spec.IsTuple()) {
-              for (int64_t dim : ins->dimensions()) {
-                if (output_spec.tile_assignment().dim(dim) > 1) {
-                  need_all_gather = true;
-                }
-              }
+          bool need_all_gather = false;
+          for (int64_t dim : ins->dimensions()) {
+            if (output_spec.tile_assignment().dim(dim) > 1) {
+              need_all_gather = true;
+              break;
             }
-
-            double communication_cost =
-                need_all_gather
-                    ? cluster_env.ReshardingCost(ins->shape(), output_spec,
-                                                 HloSharding::Replicate())
-                    : 0;
-
-            strategies->leaf_vector.push_back(ShardingStrategy(
-                {name,
-                 output_spec,
-                 compute_cost,
-                 communication_cost,
-                 memory_cost,
-                 {FollowInsCostVector(src_strategies->leaf_vector.size(), sid)},
-                 {}}));
-          }
-        } else {
-          // Choose an operand to follow
-          int64_t follow_idx;
-          bool tie;
-          std::tie(follow_idx, tie) =
-              ChooseOperandToFollow(strategy_map, depth_map, alias_map,
-                                    undefined_set, max_depth, ins);
-          const StrategyVector* src_strategies =
-              strategy_map.at(ins->operand(follow_idx)).get();
-
-          // Create main child strategy for the 0-th output
-          auto main_child_stra = CreateLeafStrategyVector(
-              instruction_id, ins, strategy_map, leaf_strategies);
-          main_child_stra->following = src_strategies;
-
-          for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
-               ++sid) {
-            HloSharding output_spec =
-                src_strategies->leaf_vector[sid].output_sharding;
-
-            std::string name = ToStringSimple(output_spec);
-            double compute_cost = 0;
-            double memory_cost =
-                GetBytes(ins->shape()) / output_spec.NumTiles();
-
-            bool need_all_gather = false;
-            if (output_spec.IsTuple()) {
-              for (int64_t dim : ins->dimensions()) {
-                if (output_spec.tile_assignment().dim(dim) > 1) {
-                  need_all_gather = true;
-                  break;
-                }
-              }
-            }
-
-            double communication_cost =
-                need_all_gather
-                    ? cluster_env.ReshardingCost(ins->shape(), output_spec,
-                                                 HloSharding::Replicate())
-                    : 0;
-            HloSharding input_spec =
-                need_all_gather ? HloSharding::Replicate() : output_spec;
-
-            std::vector<std::vector<double>> resharding_costs;
-            for (int64_t k = 0; k < ins->operand_count(); ++k) {
-              if (k == follow_idx) {
-                resharding_costs.push_back(FollowInsCostVector(
-                    src_strategies->leaf_vector.size(), sid));
-              } else {
-                resharding_costs.push_back(ReshardingCostVector(
-                    strategy_map.at(ins->operand(k)).get(),
-                    ins->operand(k)->shape(), input_spec, cluster_env));
-              }
-            }
-
-            main_child_stra->leaf_vector.push_back(
-                ShardingStrategy({name,
-                                  output_spec,
-                                  compute_cost,
-                                  communication_cost,
-                                  memory_cost,
-                                  std::move(resharding_costs),
-                                  {}}));
           }
 
-          // Create following child strategies for other outputs
+          double communication_cost =
+              need_all_gather
+                  ? cluster_env.ReshardingCost(operand->shape(), output_spec,
+                                               HloSharding::Replicate())
+                  : 0;
+          HloSharding input_spec =
+              need_all_gather ? HloSharding::Replicate() : output_spec;
+
+          std::vector<std::vector<double>> resharding_costs;
+          for (int64_t k = 0; k < ins->operand_count(); ++k) {
+            if (k == follow_idx) {
+              resharding_costs.push_back(
+                  FollowInsCostVector(src_strategies->leaf_vector.size(), sid));
+            } else {
+              resharding_costs.push_back(ReshardingCostVector(
+                  strategy_map.at(ins->operand(k)).get(),
+                  ins->operand(k)->shape(), input_spec, cluster_env));
+            }
+          }
+
+          main_stra->leaf_vector.push_back(
+              ShardingStrategy({name,
+                                output_spec,
+                                compute_cost,
+                                communication_cost,
+                                memory_cost,
+                                std::move(resharding_costs),
+                                {}}));
+        }
+
+        if (ins->shape().IsTuple()) {
+          // Create following child strategies for other outputs.
+          // All costs are considered in the main_strategy, so we don't
+          // need to compute costs for other outputs. We only need
+          // to set the correct outptut_sharding for them and let them
+          // follow the main strategy.
           strategies = CreateTupleStrategyVector(instruction_id);
           strategies->childs.reserve(ins->operand_count());
-          const StrategyVector* main_child_ptr = main_child_stra.get();
+          const StrategyVector* main_stra_ptr = main_stra.get();
           for (size_t i = 0; i < ins->operand_count(); ++i) {
             if (i == follow_idx) {
-              strategies->childs.push_back(std::move(main_child_stra));
+              strategies->childs.push_back(std::move(main_stra));
             } else {
               strategies->childs.push_back(std::move(FollowInsStrategyVector(
-                  main_child_ptr, ins->operand(i)->shape(), instruction_id,
-                  true, leaf_strategies)));
+                  main_stra_ptr, ins->operand(i)->shape(), instruction_id, true,
+                  leaf_strategies)));
             }
           }
+        } else {
+          strategies = std::move(main_stra);
         }
+
         break;
       }
       case HloOpcode::kTuple: {
@@ -1748,37 +1761,49 @@ void SetHloSharding(const HloInstructionSequence& sequence,
       ShapeTree<HloSharding> tuple_sharding(out_shape, Undefined());
       std::vector<HloSharding> flattened_shardings;
 
-      // std::function<void(const StrategyVector*)> get_flattened_shardings;
-      // get_flattened_shardings = [&](const StrategyVector* cur) {
-      //  if (cur->is_tuple) {
-      //    for (const auto& child : strategies->childs) {
-      //      get_flattened_shardings(child.get());
-      //    }
-      //  } else {
-      //    CHECK(cur->following != nullptr);
-      //    int node_idx = cur->id;
-      //    int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
-      //    flattened_shardings.push_back(
-      //        cur->leaf_vector[stra_idx].output_sharding);
-      //  }
-      //};
-      // get_flattened_shardings(strategies);
-
-      // Read shardings from operand instructions
-      std::function<void(const HloInstruction*)> get_flattened_shardings;
-      get_flattened_shardings = [&](const HloInstruction* cur) {
-        for (const HloInstruction* operand : cur->operands()) {
-          if (operand->shape().IsTuple()) {
-            get_flattened_shardings(operand);
-          } else {
-            CHECK(operand->has_sharding());
-            flattened_shardings.push_back(operand->sharding());
+      if (inst->opcode() == HloOpcode::kTuple || IsCustomCallMarker(inst)) {
+        // Directly copy operands' shardings to output.
+        //
+        // This special handling is required after GenerateReduceScatter.
+        // In GenerateReduceScatter, we may forcibly set the sharding of one
+        // operand without correctly updating the sharding in `strategies`
+        // (because this update is very hard to do). This leads to inconsistency
+        // between one operand's sharding and the sharding in
+        // `strategies->childs`, so we should read the shardings from operands
+        // instead of `strategies->childs`.
+        std::function<void(const HloInstruction*)> get_flattened_shardings;
+        get_flattened_shardings = [&](const HloInstruction* cur) {
+          for (const HloInstruction* operand : cur->operands()) {
+            if (operand->shape().IsTuple()) {
+              get_flattened_shardings(operand);
+            } else {
+              CHECK(operand->has_sharding());
+              flattened_shardings.push_back(operand->sharding());
+            }
           }
-        }
-      };
-      get_flattened_shardings(inst);
+        };
+        get_flattened_shardings(inst);
+      } else {
+        // Otherwise, copy shardings from `strategies.childs`
+        std::function<void(const StrategyVector*)> get_flattened_shardings;
+        get_flattened_shardings = [&](const StrategyVector* cur) {
+          if (cur->is_tuple) {
+            for (const auto& child : strategies->childs) {
+              get_flattened_shardings(child.get());
+            }
+          } else {
+            int node_idx = cur->id;
+            int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
+            flattened_shardings.push_back(
+                cur->leaf_vector[stra_idx].output_sharding);
+          }
+        };
+        get_flattened_shardings(strategies);
+      }
 
       // Create Tuple HloSharding
+      // TODO(lmzheng, zhuohan): Rewrite this with ShapeTree and support
+      // nested tuple in the output.
       int i = 0;
       for (auto& leaf : tuple_sharding.leaves()) {
         leaf.second = flattened_shardings[i++];

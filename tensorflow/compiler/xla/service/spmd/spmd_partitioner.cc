@@ -2396,6 +2396,7 @@ Status SpmdPartitioningVisitor::HandleAllReduce(HloInstruction* hlo) {
         }
       }
     }
+    return HandleElementwise(hlo);
   }
   return DefaultAction(hlo);
 }

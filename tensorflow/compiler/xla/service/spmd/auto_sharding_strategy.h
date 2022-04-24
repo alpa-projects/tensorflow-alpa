@@ -974,7 +974,13 @@ inline const ShardingStrategy& GetShardingStrategy_(
     const HloInstruction* inst, const StrategyMap& strategy_map,
     const CostGraph& cost_graph, const std::vector<int64_t>& s_val) {
   const StrategyVector* strategies = strategy_map.at(inst).get();
-  CHECK(!strategies->is_tuple);
+  if (strategies->is_tuple) {
+    if (inst->opcode() == HloOpcode::kReduce) {
+      strategies = strategies->childs[0].get();
+    } else {
+      LOG(FATAL) << "Unhandled instruction: " << inst->ToString();
+    }
+  }
   int node_idx = strategies->id;
   int stra_idx = cost_graph.RemapIndex(node_idx, s_val[node_idx]);
   return strategies->leaf_vector[stra_idx];

@@ -1094,6 +1094,7 @@ void SetSharding(HloInstruction* to_split, const HloSharding& output_spec,
                  const HloInstruction* ref_inst,
                  const HloInstruction* shape_inst,
                  absl::flat_hash_set<const HloInstruction*>& modified) {
+  CHECK(!to_split->shape().IsTuple()) << to_split->ToString();
   modified.insert(to_split);
   if (DimensionsEqual(to_split->shape(), ref_inst->shape())) {
     to_split->set_sharding(output_spec);

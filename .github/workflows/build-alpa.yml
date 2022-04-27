@@ -10,6 +10,10 @@ on:
         required: true
         default: main
 
+env:
+  TF_BRANCH: ${{github.ref}}
+  ALPA_BRANCH: ${{github.event.inputs.alpa}}
+
 jobs:
   dispatch:
     if: github.repository == 'alpa-projects/tensorflow-alpa'  # Don't do this in forks
@@ -18,9 +22,6 @@ jobs:
       - run: |
           echo "Building with tensorflow-alpa/${TF_BRANCH##*/}"
           echo "Building with alpa/$ALPA_BRANCH"
-        env:
-          TF_BRANCH: ${{github.ref}}
-          ALPA_BRANCH: ${{github.event.inputs.alpa}}
 
       - uses: actions/github-script@v6
         with:

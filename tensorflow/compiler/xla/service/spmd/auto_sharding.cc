@@ -206,6 +206,7 @@ void EnumerateAll1DPartition(const HloInstruction* ins,
                              const StrategyMap& strategy_map,
                              std::unique_ptr<StrategyVector>& strategies,
                              bool only_allow_divisible,
+							 double penalty,
                              const std::string& suffix) {
   // Split one dim
   for (int64_t i = 0; i < ins->shape().rank(); ++i) {
@@ -222,7 +223,7 @@ void EnumerateAll1DPartition(const HloInstruction* ins,
 
       std::string name = absl::StrFormat("S%d @ %d", i, j) + suffix;
       HloSharding output_spec = Tile(ins->shape(), {i}, {j}, device_mesh);
-      double compute_cost = 0, communication_cost = 0;
+      double compute_cost = penalty, communication_cost = 0;
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
 
       std::vector<std::vector<double>> resharding_costs;
@@ -539,30 +540,26 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
         // Split 1 dim
         EnumerateAll1DPartition(ins, device_mesh, cluster_env, strategy_map,
-                                strategies, true, "");
+                                strategies, true, replicated_penalty * 0.6, "");
 
-        // Split 2 dims only for input data and activations
-        if (IsActivationFromAnotherStage(ins, batch_dim_map)) {
-          EnumerateAll2DPartition(ins, device_mesh, cluster_env, strategy_map,
-                                  strategies, true);
-        }
+        // Split 2 dims
+        EnumerateAll2DPartition(ins, device_mesh, cluster_env, strategy_map,
+                                strategies, true);
 
         if (solver_option.allow_mixed_mesh_shape &&
             cluster_env.non_zero_mesh_dims.size() > 1) {
-          // Set penalty for 1d partial tiled layout
-          for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
-            strategies->leaf_vector[i].compute_cost += replicated_penalty * 0.8;
-          }
 
           // Split 1 dim, but for 1d mesh
           EnumerateAll1DPartition(ins, device_mesh_1d, cluster_env,
-                                  strategy_map, strategies, true, " 1d");
+                                  strategy_map, strategies, true, 0, " 1d");
         }
 
         if (solver_option.allow_replicated_parameters) {
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty);
         }
+
+        RemoveDuplicatedStrategy(strategies);
 
         // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies
         // and only keep the data parallel strategies.
@@ -661,19 +658,16 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
       case HloOpcode::kReshape: {
         strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
                                               leaf_strategies);
-
         const HloInstruction* operand = ins->operand(0);
-        if (undefined_set.count(operand)) {
-          break;
-        }
 
         // Create follow strategies
-        const StrategyVector* src_strategies = strategy_map.at(operand).get();
-        CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies;
+        if (!undefined_set.count(operand) &&
+			((ins->users().size() == 1 && !IsBatchDimSwitchReshape(ins)) ||
+            (mesh_nn_dims >= 2 && !solver_option.allow_mixed_mesh_shape))) {
+          const StrategyVector* src_strategies = strategy_map.at(operand).get();
+          CHECK(!src_strategies->is_tuple);
+          strategies->following = src_strategies;
 
-        if ((ins->users().size() == 1 && !IsBatchDimSwitchReshape(ins)) ||
-            (mesh_nn_dims >= 2 && !solver_option.allow_mixed_mesh_shape)) {
           for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
                ++sid) {
             absl::optional<HloSharding> output_spec =
@@ -728,6 +722,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           // Replicate
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty);
+
+          RemoveDuplicatedStrategy(strategies);
         }
         break;
       }
@@ -1261,9 +1257,9 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
         if (solver_option.allow_mixed_mesh_shape &&
             cluster_env.non_zero_mesh_dims.size() > 1) {
-          // Split 1 dim for 1d mesh
+          // Split 1 dim, but for 1d mesh
           EnumerateAll1DPartition(ins, device_mesh_1d, cluster_env,
-                                  strategy_map, strategies, false, " 1d");
+                                  strategy_map, strategies, false, 0, " 1d");
         }
 
         if (strategies->leaf_vector.empty() || IsFollowedByBroadcast(ins)) {
@@ -1271,6 +1267,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty * 5);
         }
+
+        RemoveDuplicatedStrategy(strategies);
         break;
       }
       case HloOpcode::kSort: {

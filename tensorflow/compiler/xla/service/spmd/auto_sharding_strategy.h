@@ -1005,6 +1005,8 @@ std::unique_ptr<StrategyVector> CreateLeafStrategyVector(
     size_t instruction_id, const HloInstruction* ins,
     const StrategyMap& strategy_map, LeafStrategies& leaf_strategies);
 
+void RemoveDuplicatedStrategy(std::unique_ptr<StrategyVector>& strategies);
+
 Status FilterStrategy(const HloInstruction* ins,
                       std::unique_ptr<StrategyVector>& strategies,
                       const ClusterEnvironment& cluster_env,

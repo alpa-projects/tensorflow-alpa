@@ -850,6 +850,25 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   return batch_map;
 }
 
+
+// Remove duplicated strategies with the same output sharding spec.
+void RemoveDuplicatedStrategy(std::unique_ptr<StrategyVector>& strategies) {
+  std::vector<ShardingStrategy> new_vector;
+  absl::flat_hash_set<HloSharding> added;
+
+  CHECK(!strategies->is_tuple);
+
+  for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
+    if (!added.count(strategies->leaf_vector[i].output_sharding)) {
+      added.insert(strategies->leaf_vector[i].output_sharding);
+      new_vector.push_back(std::move(strategies->leaf_vector[i]));
+    }
+  }
+
+  strategies->leaf_vector = std::move(new_vector);
+}
+
+
 // Filter strategies according to the solver_option.force_batch_dim_to_mesh_dim.
 // This can be used to forcibly generate data-parallel strategies.
 Status FilterStrategy(const HloInstruction* ins,

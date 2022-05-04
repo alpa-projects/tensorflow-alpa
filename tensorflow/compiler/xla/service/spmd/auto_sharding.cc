@@ -430,6 +430,9 @@ int64_t MaxNumTiles(const StrategyMap& strategy_map,
 // Choose an operand to follow.
 // We choose to follow the operand with the highest priority.
 // priority(operand) = max(x.output_spec.num_tiles for x in operand.strategies)
+//
+// Return `tie == True` if there are two operands with very close priorities and
+// we cannot decide which one to follow.
 std::pair<int64_t, bool> ChooseOperandToFollow(
     const StrategyMap& strategy_map, const InstructionDepthMap& depth_map,
     const AliasMap& alias_map,
@@ -522,7 +525,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
     max_depth = std::max(max_depth, iter.second);
   }
 
-  int64_t no_follow = 0;
+  int64_t disallowed_follow = 0;
 
   // Register strategies and their costs for each instruction.
   for (size_t instruction_id = 0; instruction_id < instructions.size();
@@ -541,28 +544,34 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         EnumerateAll1DPartition(ins, device_mesh, cluster_env, strategy_map,
                                 strategies, true, "");
 
-        // Split 2 dims only for input data and activations
-        if (IsActivationFromAnotherStage(ins, batch_dim_map)) {
-          EnumerateAll2DPartition(ins, device_mesh, cluster_env, strategy_map,
-                                  strategies, true);
-        }
-
-        if (solver_option.allow_mixed_mesh_shape &&
-            cluster_env.non_zero_mesh_dims.size() > 1) {
-          // Set penalty for 1d partial tiled layout
+        // Split 2 dims
+        if (cluster_env.non_zero_mesh_dims.size() > 1) {
+          // Add penalty for 1d partial tiled layout
           for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
             strategies->leaf_vector[i].compute_cost += replicated_penalty * 0.8;
           }
 
-          // Split 1 dim, but for 1d mesh
-          EnumerateAll1DPartition(ins, device_mesh_1d, cluster_env,
-                                  strategy_map, strategies, true, " 1d");
+          if (batch_dim_map.count(ins)) {
+            // This is a pruning heuristic: only allow 2d partition
+            // for parameters with a batch dim. These parameters are
+            // typically input data and intermediate activations.
+            EnumerateAll2DPartition(ins, device_mesh, cluster_env, strategy_map,
+                                    strategies, true);
+          }
+
+          if (solver_option.allow_mixed_mesh_shape) {
+            // Split 1 dim, but for 1d mesh
+            EnumerateAll1DPartition(ins, device_mesh_1d, cluster_env,
+                                    strategy_map, strategies, true, " 1d");
+          }
         }
 
         if (solver_option.allow_replicated_parameters) {
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty);
         }
+
+        RemoveDuplicatedStrategy(strategies);
 
         // If force_batch_dim_to_mesh_dim is set, filter out invalid strategies
         // and only keep the data parallel strategies.
@@ -654,6 +663,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           // Replicate
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty);
+
+          RemoveDuplicatedStrategy(strategies);
         }
 
         break;
@@ -661,19 +672,16 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
       case HloOpcode::kReshape: {
         strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
                                               leaf_strategies);
-
         const HloInstruction* operand = ins->operand(0);
-        if (undefined_set.count(operand)) {
-          break;
-        }
 
         // Create follow strategies
-        const StrategyVector* src_strategies = strategy_map.at(operand).get();
-        CHECK(!src_strategies->is_tuple);
-        strategies->following = src_strategies;
+        if (!undefined_set.count(operand) &&
+            ((ins->users().size() == 1 && !IsBatchDimSwitchReshape(ins)) ||
+             (mesh_nn_dims >= 2 && !solver_option.allow_mixed_mesh_shape))) {
+          const StrategyVector* src_strategies = strategy_map.at(operand).get();
+          CHECK(!src_strategies->is_tuple);
+          strategies->following = src_strategies;
 
-        if ((ins->users().size() == 1 && !IsBatchDimSwitchReshape(ins)) ||
-            (mesh_nn_dims >= 2 && !solver_option.allow_mixed_mesh_shape)) {
           for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
                ++sid) {
             absl::optional<HloSharding> output_spec =
@@ -728,6 +736,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           // Replicate
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty);
+
+          RemoveDuplicatedStrategy(strategies);
         }
         break;
       }
@@ -1010,43 +1020,61 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         std::tie(follow_idx, tie) = ChooseOperandToFollow(
             strategy_map, depth_map, alias_map, undefined_set, max_depth, ins);
 
-        // Create follow strategies
-        const StrategyVector* src_strategies =
-            strategy_map.at(ins->operand(follow_idx)).get();
-        CHECK(!src_strategies->is_tuple);
         if (!tie || AllowTieFollowing(ins)) {
-          strategies->following = src_strategies;
+          strategies->following =
+              strategy_map.at(ins->operand(follow_idx)).get();
         } else {
-          no_follow++;
+          strategies->following = nullptr;
+          disallowed_follow++;
         }
 
-        for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
-          HloSharding output_spec =
-              src_strategies->leaf_vector[sid].output_sharding;
+        // Get all possible sharding specs from operands
+        for (int64_t i = 0; i < ins->operand_count(); ++i) {
+          const StrategyVector* src_strategies =
+              strategy_map.at(ins->operand(i)).get();
+          CHECK(!src_strategies->is_tuple);
 
-          std::string name = ToStringSimple(output_spec);
-          double compute_cost = 0, communication_cost = 0;
-          double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
-          std::vector<std::vector<double>> resharding_costs;
-          for (int64_t k = 0; k < ins->operand_count(); ++k) {
-            if (k == follow_idx) {
-              resharding_costs.push_back(
-                  FollowInsCostVector(src_strategies->leaf_vector.size(), sid));
-            } else {
-              resharding_costs.push_back(ReshardingCostVector(
-                  strategy_map.at(ins->operand(k)).get(),
-                  ins->operand(k)->shape(), output_spec, cluster_env));
-            }
+          if (strategies->following != nullptr &&
+              strategies->following != src_strategies) {
+            // If ins follows one operand, do not consider sharding specs from
+            // other operands.
+            continue;
           }
 
-          strategies->leaf_vector.push_back(
-              ShardingStrategy({name,
-                                output_spec,
-                                compute_cost,
-                                communication_cost,
-                                memory_cost,
-                                std::move(resharding_costs),
-                                {}}));
+          for (int64_t sid = 0; sid < src_strategies->leaf_vector.size();
+               ++sid) {
+            HloSharding output_spec =
+                src_strategies->leaf_vector[sid].output_sharding;
+
+            std::string name = ToStringSimple(output_spec);
+            double compute_cost = 0, communication_cost = 0;
+            double memory_cost =
+                GetBytes(ins->shape()) / output_spec.NumTiles();
+            std::vector<std::vector<double>> resharding_costs;
+            for (int64_t k = 0; k < ins->operand_count(); ++k) {
+              if (strategies->following == src_strategies && k == follow_idx) {
+                resharding_costs.push_back(FollowInsCostVector(
+                    src_strategies->leaf_vector.size(), sid));
+              } else {
+                resharding_costs.push_back(ReshardingCostVector(
+                    strategy_map.at(ins->operand(k)).get(),
+                    ins->operand(k)->shape(), output_spec, cluster_env));
+              }
+            }
+
+            strategies->leaf_vector.push_back(
+                ShardingStrategy({name,
+                                  output_spec,
+                                  compute_cost,
+                                  communication_cost,
+                                  memory_cost,
+                                  std::move(resharding_costs),
+                                  {}}));
+          }
+        }
+
+        if (strategies->following == nullptr) {
+          RemoveDuplicatedStrategy(strategies);
         }
 
         if (ins->opcode() == HloOpcode::kAdd) {
@@ -1261,7 +1289,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
         if (solver_option.allow_mixed_mesh_shape &&
             cluster_env.non_zero_mesh_dims.size() > 1) {
-          // Split 1 dim for 1d mesh
+          // Split 1 dim, but for 1d mesh
           EnumerateAll1DPartition(ins, device_mesh_1d, cluster_env,
                                   strategy_map, strategies, false, " 1d");
         }
@@ -1271,6 +1299,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
                                 replicated_penalty * 5);
         }
+
+        RemoveDuplicatedStrategy(strategies);
         break;
       }
       case HloOpcode::kSort: {
@@ -2048,7 +2078,8 @@ void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
   for (auto iter : batch_dim_map) {
     int64_t tmp_batch_size;
     if (iter.first->shape().IsTuple()) {
-      tmp_batch_size = iter.first->shape().tuple_shapes(0).dimensions(iter.second);
+      tmp_batch_size =
+          iter.first->shape().tuple_shapes(0).dimensions(iter.second);
     } else {
       tmp_batch_size = iter.first->shape().dimensions(iter.second);
     }

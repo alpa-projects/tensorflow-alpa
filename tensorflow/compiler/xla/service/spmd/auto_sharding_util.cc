@@ -508,7 +508,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
               break;
             }
           }
-          if (value == lhs_space_dims[0]) {
+          if (!lhs_space_dims.empty() && value == lhs_space_dims[0]) {
             batch_map[ins] = space_base_dim;
           }
         }
@@ -521,7 +521,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
               break;
             }
           }
-          if (value == rhs_space_dims[0]) {
+          if (!rhs_space_dims.empty() && value == rhs_space_dims[0]) {
             batch_map[ins] = space_base_dim + 1;
           }
         }
@@ -750,7 +750,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
                 break;
               }
             }
-            if (value == space_base_dim) {
+            if (!lhs_space_dims.empty() && value == space_base_dim) {
               batch_map[lhs] = lhs_space_dims[0];
             }
           }
@@ -762,7 +762,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
                 break;
               }
             }
-            if (value == space_base_dim + 1) {
+            if (!rhs_space_dims.empty() && value == space_base_dim + 1) {
               batch_map[rhs] = rhs_space_dims[0];
             }
           }
@@ -2035,6 +2035,88 @@ void AnnotateShardingWithSimpleHeuristic(
   }
   CHECK_EQ(i, flattened_shardings.size());
   output->set_sharding(HloSharding::Tuple(tuple_sharding));
+}
+
+StatusOr<bool> NormalizeDotDimension(HloModule* module) {
+  bool changed = false;
+
+  for (HloComputation *computation : module->MakeNonfusionComputations()) {
+    std::vector<HloInstruction*> to_remove;
+
+    for (HloInstruction *ins : computation->instructions()) {
+      if (ins->opcode() == HloOpcode::kDot) {
+        HloInstruction* lhs = ins->mutable_operand(0);
+        HloInstruction* rhs = ins->mutable_operand(1);
+        const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
+        const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
+        const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
+        std::vector<int64_t> lhs_space_dims, rhs_space_dims;
+        std::tie(lhs_space_dims, rhs_space_dims) =
+            GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
+
+        CHECK(lhs_space_dims.size() <= 1 && rhs_space_dims.size() <= 1 &&
+              lhs_con_dims.size() == 1 && rhs_con_dims.size() == 1)
+          << "Invalid dot. Call DotDecomposer before this pass.";
+
+        if (lhs_space_dims.size() == 0 || rhs_space_dims.size() == 0) {
+          CHECK(lhs_space_dims.size() != 0 || rhs_space_dims.size() != 0) << ins->ToString();
+
+          HloInstruction* new_lhs = lhs, *new_rhs = rhs;
+          std::vector<int64_t> new_dot_shape_dims(ins->shape().dimensions().begin(),
+                                                  ins->shape().dimensions().end());
+		  DotDimensionNumbers new_dnums = dot_dnums;
+
+          if (lhs_space_dims.size() == 0) {
+            // Create a new lhs
+            std::vector<int64_t> new_lhs_shape_dims(lhs->shape().dimensions().begin(),
+                                                    lhs->shape().dimensions().end());
+            new_lhs_shape_dims.insert(new_lhs_shape_dims.begin() + dot_dnums.lhs_batch_dimensions_size(),
+                                      1);
+            Shape new_lhs_shape = ShapeUtil::MakeShape(
+                lhs->shape().element_type(), new_lhs_shape_dims);
+            new_lhs = ins->parent()->AddInstruction(HloInstruction::CreateReshape(new_lhs_shape, lhs));
+
+            new_dot_shape_dims.insert(new_dot_shape_dims.begin() + dot_dnums.lhs_batch_dimensions_size(),
+                                      1);
+            (*new_dnums.mutable_lhs_contracting_dimensions())[0] += 1;
+          }
+
+          if (rhs_space_dims.size() == 0) {
+            // Create a new rhs
+            std::vector<int64_t> new_rhs_shape_dims(rhs->shape().dimensions().begin(),
+                                                    rhs->shape().dimensions().end());
+            new_rhs_shape_dims.insert(new_rhs_shape_dims.begin() + dot_dnums.rhs_batch_dimensions_size(),
+                                      1);
+            Shape new_rhs_shape = ShapeUtil::MakeShape(
+                rhs->shape().element_type(), new_rhs_shape_dims);
+            new_rhs = ins->parent()->AddInstruction(HloInstruction::CreateReshape(new_rhs_shape, rhs));
+
+            new_dot_shape_dims.insert(new_dot_shape_dims.begin() + dot_dnums.lhs_batch_dimensions_size() + 1,
+                                      1);
+            (*new_dnums.mutable_rhs_contracting_dimensions())[0] += 1;
+          }
+
+          Shape new_dot_shape = ShapeUtil::MakeShape(
+              ins->shape().element_type(), new_dot_shape_dims);
+
+          HloInstruction* new_dot = ins->parent()->AddInstruction(
+              HloInstruction::CreateDot(new_dot_shape, new_lhs, new_rhs,
+                                        new_dnums, ins->precision_config()));
+
+          HloInstruction* new_ins = ins->parent()->AddInstruction(
+              HloInstruction::CreateReshape(ins->shape(), new_dot));
+          ins->ReplaceAllUsesWith(new_ins);
+          to_remove.push_back(ins);
+        }
+      }
+    }
+
+    for (HloInstruction* ins : to_remove) {
+      computation->RemoveInstruction(ins);
+    }
+  }
+
+  return changed;
 }
 
 }  // namespace spmd

@@ -2157,6 +2157,9 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   // std::cerr << module->ToString();
   // std::cerr << "=====================================" << std::endl;
 
+  // ----- Pre-process to normalize the dot dimensions -----
+  NormalizeDotDimension(module);
+
   // ----- Get a sequential schedule and do liveness analysis -----
   auto size_fn = [](const BufferValue& buffer) {
     return GetBytes(buffer.shape());

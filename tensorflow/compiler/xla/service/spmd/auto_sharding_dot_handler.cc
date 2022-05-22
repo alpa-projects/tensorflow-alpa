@@ -56,8 +56,8 @@ class DotHandler {
     std::tie(lhs_space_dims, rhs_space_dims) =
         GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
 
-    CHECK_EQ(lhs_space_dims.size(), 1);
-    CHECK_EQ(rhs_space_dims.size(), 1);
+    CHECK_EQ(lhs_space_dims.size(), 1) << ins->ToString();
+    CHECK_EQ(rhs_space_dims.size(), 1) << ins->ToString();
     CHECK_EQ(lhs_con_dims.size(), 1);
     CHECK_EQ(rhs_con_dims.size(), 1);
 

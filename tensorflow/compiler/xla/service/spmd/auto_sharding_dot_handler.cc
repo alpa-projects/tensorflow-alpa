@@ -61,7 +61,8 @@ class DotHandler {
     CHECK_EQ(lhs_con_dims.size(), 1);
     CHECK_EQ(rhs_con_dims.size(), 1);
 
-    // The dimension in the output that corresponds to the lhs space dim or rhs space dim
+    // The dimension in the output that corresponds to the lhs space dim or rhs
+    // space dim
     out_lhs_space_dim = dot_dnums.lhs_batch_dimensions_size();
     out_rhs_space_dim = out_lhs_space_dim + 1;
 
@@ -70,8 +71,10 @@ class DotHandler {
   }
 
   void SplitLhsSpaceRhsSpace(int mesh_dim0, int mesh_dim1) {
-     if (ins->shape().dimensions(out_lhs_space_dim) < device_mesh.dim(mesh_dim0) ||
-         ins->shape().dimensions(out_rhs_space_dim) < device_mesh.dim(mesh_dim1)) {
+    if (ins->shape().dimensions(out_lhs_space_dim) <
+            device_mesh.dim(mesh_dim0) ||
+        ins->shape().dimensions(out_rhs_space_dim) <
+            device_mesh.dim(mesh_dim1)) {
       return;  // Do not allow padding the output tensor
     }
 
@@ -90,7 +93,8 @@ class DotHandler {
   }
 
   void SplitLhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
-    if (lhs->shape().dimensions(out_lhs_space_dim) < device_mesh.dim(mesh_dim0)) {
+    if (lhs->shape().dimensions(out_lhs_space_dim) <
+        device_mesh.dim(mesh_dim0)) {
       return;  // Do not allow padding the output tensor
     }
 
@@ -116,7 +120,8 @@ class DotHandler {
   }
 
   void SplitRhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
-    if (ins->shape().dimensions(out_rhs_space_dim) < device_mesh.dim(mesh_dim1)) {
+    if (ins->shape().dimensions(out_rhs_space_dim) <
+        device_mesh.dim(mesh_dim1)) {
       return;  // Do not allow padding the output tensor
     }
 

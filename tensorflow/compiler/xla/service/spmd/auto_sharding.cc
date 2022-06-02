@@ -2158,7 +2158,7 @@ StatusOr<bool> AutoSharding::Run(HloModule* module) {
   // std::cerr << "=====================================" << std::endl;
 
   // ----- Pre-process to normalize the dot dimensions -----
-  NormalizeDotDimension(module);
+  TF_ASSIGN_OR_RETURN(bool changed, NormalizeDotDimension(module));
 
   // ----- Get a sequential schedule and do liveness analysis -----
   auto size_fn = [](const BufferValue& buffer) {

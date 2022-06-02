@@ -36,8 +36,8 @@ namespace xla {
 
 namespace spmd {
 
-const char kBeforeAutoShardingDumpName[] = "before_auto_sharding";
-const char kBeforeSpmdPartitionDumpName[] = "before_spmd_partitioning";
+const char kBeforeAutoShardingDumpName[] = "before_run_auto_sharding";
+const char kBeforeSpmdPartitionDumpName[] = "before_run_spmd_partitioner";
 // TODO(yonghao): Check correctness of compile options and modules
 Status PreCompileCheck(const XlaComputation& computation,
                        CompileOptions options) {
@@ -120,6 +120,7 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
       // "slow" minmax means we propagate nan.
       options.set_minmax_propagate_nan(
           !debug_options.xla_gpu_enable_fast_min_max());
+      options.set_enable_dot_strength_reduction(false);
       spmd_simplify.AddPass<AlgebraicSimplifier>(options);
 
       spmd_simplify.AddPass<SortSimplifier>();

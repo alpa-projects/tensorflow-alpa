@@ -49,35 +49,39 @@ class DotHandler {
         lhs(ins->operand(0)),
         rhs(ins->operand(1)),
         dot_dnums(ins->dot_dimension_numbers()),
-        space_base_dim(dot_dnums.lhs_batch_dimensions_size()),
-        lhs_con_dims(ins->dot_dimension_numbers().lhs_contracting_dimensions()),
-        rhs_con_dims(ins->dot_dimension_numbers().rhs_contracting_dimensions()),
-        lhs_batch_dims(ins->dot_dimension_numbers().lhs_batch_dimensions()),
-        rhs_batch_dims(ins->dot_dimension_numbers().rhs_batch_dimensions()) {
+        lhs_con_dims(dot_dnums.lhs_contracting_dimensions()),
+        rhs_con_dims(dot_dnums.rhs_contracting_dimensions()),
+        lhs_batch_dims(dot_dnums.lhs_batch_dimensions()),
+        rhs_batch_dims(dot_dnums.rhs_batch_dimensions()) {
     std::tie(lhs_space_dims, rhs_space_dims) =
         GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
 
-    CHECK_EQ(lhs_space_dims.size(), 1);
-    CHECK_EQ(rhs_space_dims.size(), 1);
+    CHECK_EQ(lhs_space_dims.size(), 1) << ins->ToString();
+    CHECK_EQ(rhs_space_dims.size(), 1) << ins->ToString();
     CHECK_EQ(lhs_con_dims.size(), 1);
     CHECK_EQ(rhs_con_dims.size(), 1);
+
+    // The dimension in the output that corresponds to the lhs space dim or rhs
+    // space dim
+    out_lhs_space_dim = dot_dnums.lhs_batch_dimensions_size();
+    out_rhs_space_dim = out_lhs_space_dim + 1;
 
     // Only support 2 dimensional device mesh
     CHECK_EQ(device_mesh.num_dimensions(), 2);
   }
 
   void SplitLhsSpaceRhsSpace(int mesh_dim0, int mesh_dim1) {
-    // if (ins->shape().dimensions(space_base_dim) < device_mesh.dim(mesh_dim0)
-    // ||
-    //    ins->shape().dimensions(space_base_dim + 1) <
-    //    device_mesh.dim(mesh_dim1)) {
-    //  return;  // The dimension length is to small to be parallelzied.
-    //}
+    if (ins->shape().dimensions(out_lhs_space_dim) <
+            device_mesh.dim(mesh_dim0) ||
+        ins->shape().dimensions(out_rhs_space_dim) <
+            device_mesh.dim(mesh_dim1)) {
+      return;  // Do not allow padding the output tensor
+    }
 
     std::string name =
         absl::StrFormat("SS = SR x RS @ {%d,%d}", mesh_dim0, mesh_dim1);
     HloSharding output_spec =
-        Tile(ins->shape(), {space_base_dim, space_base_dim + 1},
+        Tile(ins->shape(), {out_lhs_space_dim, out_rhs_space_dim},
              {mesh_dim0, mesh_dim1}, device_mesh);
     HloSharding lhs_spec =
         Tile(lhs->shape(), {lhs_space_dims[0]}, {mesh_dim0}, device_mesh);
@@ -89,19 +93,17 @@ class DotHandler {
   }
 
   void SplitLhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
-    // if (lhs->shape().dimensions(lhs_space_dims[0]) <
-    // device_mesh.dim(mesh_dim0) ||
-    //    lhs->shape().dimensions(lhs_con_dims[0]) < device_mesh.dim(mesh_dim1))
-    //    {
-    //  return;  // The dimension length is to small to be parallelzied.
-    //}
+    if (lhs->shape().dimensions(out_lhs_space_dim) <
+        device_mesh.dim(mesh_dim0)) {
+      return;  // Do not allow padding the output tensor
+    }
 
     if (device_mesh.dim(mesh_dim0) > 1 && device_mesh.dim(mesh_dim1) > 1) {
       std::string name =
           absl::StrFormat("SR = SS x SR @ {%d,%d} (allreduce @ %d)", mesh_dim0,
                           mesh_dim1, mesh_dim1);
       HloSharding output_spec =
-          Tile(ins->shape(), {space_base_dim}, {mesh_dim0}, device_mesh);
+          Tile(ins->shape(), {out_lhs_space_dim}, {mesh_dim0}, device_mesh);
       HloSharding lhs_spec =
           Tile(lhs->shape(), {lhs_space_dims[0], lhs_con_dims[0]},
                {mesh_dim0, mesh_dim1}, device_mesh);
@@ -118,19 +120,17 @@ class DotHandler {
   }
 
   void SplitRhsSpaceBothContract(int mesh_dim0, int mesh_dim1) {
-    // if (rhs->shape().dimensions(rhs_con_dims[0]) < device_mesh.dim(mesh_dim0)
-    // ||
-    //    rhs->shape().dimensions(rhs_space_dims[0]) <
-    //    device_mesh.dim(mesh_dim1)) {
-    //  return;  // The dimension length is to small to be parallelzied.
-    //}
+    if (ins->shape().dimensions(out_rhs_space_dim) <
+        device_mesh.dim(mesh_dim1)) {
+      return;  // Do not allow padding the output tensor
+    }
 
     if (device_mesh.dim(mesh_dim0) > 1) {
       std::string name =
           absl::StrFormat("RS = RS x SS @ {%d,%d} (allreduce @ %d)", mesh_dim0,
                           mesh_dim1, mesh_dim0);
       HloSharding output_spec =
-          Tile(ins->shape(), {space_base_dim + 1}, {mesh_dim1}, device_mesh);
+          Tile(ins->shape(), {out_rhs_space_dim}, {mesh_dim1}, device_mesh);
       HloSharding lhs_spec =
           Tile(lhs->shape(), {lhs_con_dims[0]}, {mesh_dim0}, device_mesh);
       HloSharding rhs_spec =
@@ -192,7 +192,7 @@ class DotHandler {
         device_mesh.dim(mesh_dim1) > 1) {
       std::string name =
           absl::StrFormat("SbSi = SbSi x SbR @ {%d,%d}", mesh_dim0, mesh_dim1);
-      HloSharding output_spec = Tile(ins->shape(), {0, space_base_dim},
+      HloSharding output_spec = Tile(ins->shape(), {0, out_lhs_space_dim},
                                      {mesh_dim0, mesh_dim1}, device_mesh);
       HloSharding lhs_spec =
           Tile(lhs->shape(), {lhs_batch_dims[0], lhs_space_dims[0]},
@@ -210,7 +210,7 @@ class DotHandler {
         device_mesh.dim(mesh_dim1) > 1) {
       std::string name =
           absl::StrFormat("SbSj = SbR x SbSj @ {%d,%d}", mesh_dim0, mesh_dim1);
-      HloSharding output_spec = Tile(ins->shape(), {0, space_base_dim + 1},
+      HloSharding output_spec = Tile(ins->shape(), {0, out_rhs_space_dim},
                                      {mesh_dim0, mesh_dim1}, device_mesh);
       HloSharding lhs_spec =
           Tile(lhs->shape(), {lhs_batch_dims[0]}, {mesh_dim0}, device_mesh);
@@ -277,7 +277,7 @@ class DotHandler {
       if (lhs->shape().dimensions(lhs_space_dims[0]) % num_devices == 0) {
         std::string name = absl::StrFormat("Si = Si x R @ %d", mesh_dim);
         HloSharding output_spec =
-            Tile(ins->shape(), {space_base_dim}, {mesh_dim}, device_mesh_1d);
+            Tile(ins->shape(), {out_lhs_space_dim}, {mesh_dim}, device_mesh_1d);
         HloSharding lhs_spec =
             Tile(lhs->shape(), {lhs_space_dims[0]}, {mesh_dim}, device_mesh_1d);
         HloSharding rhs_spec = HloSharding::Replicate();
@@ -421,12 +421,12 @@ class DotHandler {
 
   // Dimension information
   const DotDimensionNumbers& dot_dnums;
-  int64_t space_base_dim;
-  std::vector<int64_t> lhs_space_dims, rhs_space_dims;
   const tensorflow::protobuf::RepeatedField<int64_t>& lhs_con_dims;
   const tensorflow::protobuf::RepeatedField<int64_t>& rhs_con_dims;
   const tensorflow::protobuf::RepeatedField<int64_t>& lhs_batch_dims;
   const tensorflow::protobuf::RepeatedField<int64_t>& rhs_batch_dims;
+  std::vector<int64_t> lhs_space_dims, rhs_space_dims;
+  int64_t out_lhs_space_dim, out_rhs_space_dim;
 };
 
 // Register strategies for dot instructions.

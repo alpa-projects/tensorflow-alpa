@@ -1,6 +1,7 @@
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 
 #include "tensorflow/compiler/xla/primitive_util.h"
+#include "tensorflow/compiler/xla/service/hlo_creation_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding_util.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_strategy.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -508,7 +509,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
               break;
             }
           }
-          if (value == lhs_space_dims[0]) {
+          if (!lhs_space_dims.empty() && value == lhs_space_dims[0]) {
             batch_map[ins] = space_base_dim;
           }
         }
@@ -521,7 +522,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
               break;
             }
           }
-          if (value == rhs_space_dims[0]) {
+          if (!rhs_space_dims.empty() && value == rhs_space_dims[0]) {
             batch_map[ins] = space_base_dim + 1;
           }
         }
@@ -750,7 +751,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
                 break;
               }
             }
-            if (value == space_base_dim) {
+            if (!lhs_space_dims.empty() && value == space_base_dim) {
               batch_map[lhs] = lhs_space_dims[0];
             }
           }
@@ -762,7 +763,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
                 break;
               }
             }
-            if (value == space_base_dim + 1) {
+            if (!rhs_space_dims.empty() && value == space_base_dim + 1) {
               batch_map[rhs] = rhs_space_dims[0];
             }
           }
@@ -850,7 +851,6 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   return batch_map;
 }
 
-
 // Remove duplicated strategies with the same output sharding spec.
 void RemoveDuplicatedStrategy(std::unique_ptr<StrategyVector>& strategies) {
   std::vector<ShardingStrategy> new_vector;
@@ -867,7 +867,6 @@ void RemoveDuplicatedStrategy(std::unique_ptr<StrategyVector>& strategies) {
 
   strategies->leaf_vector = std::move(new_vector);
 }
-
 
 // Filter strategies according to the solver_option.force_batch_dim_to_mesh_dim.
 // This can be used to forcibly generate data-parallel strategies.
@@ -2035,6 +2034,159 @@ void AnnotateShardingWithSimpleHeuristic(
   }
   CHECK_EQ(i, flattened_shardings.size());
   output->set_sharding(HloSharding::Tuple(tuple_sharding));
+}
+
+HloComputation* GetOrCreateScalarAddComputation(HloComputation* computation,
+                                                PrimitiveType primitive_type) {
+  HloComputation::Builder b("scalar_add_computation");
+  Shape shape = ShapeUtil::MakeShape(primitive_type, {});
+  auto scalar_lhs =
+      b.AddInstruction(HloInstruction::CreateParameter(0, shape, "scalar_lhs"));
+  auto scalar_rhs =
+      b.AddInstruction(HloInstruction::CreateParameter(1, shape, "scalar_rhs"));
+  auto scalar_op = b.AddInstruction(HloInstruction::CreateBinary(
+      shape, HloOpcode::kAdd, scalar_lhs, scalar_rhs));
+  return computation->parent()->AddEmbeddedComputation(b.Build(scalar_op));
+}
+
+HloInstruction* AsType(HloInstruction* hlo, const PrimitiveType element_type) {
+  if (hlo->shape().element_type() == element_type) {
+    return hlo;
+  }
+  Shape changed_shape =
+      ShapeUtil::ChangeElementType(hlo->shape(), element_type);
+  return hlo->parent()->AddInstruction(
+      HloInstruction::CreateConvert(changed_shape, hlo));
+}
+
+HloInstruction* AddReduce(HloInstruction* hlo, absl::Span<const int64_t> dims,
+                          PrimitiveType type) {
+  HloComputation* computation = hlo->parent();
+
+  HloInstruction* zero =
+      computation->AddInstruction(HloInstruction::CreateConstant(
+          std::move(LiteralUtil::Zero(hlo->shape().element_type()).Clone())));
+  HloComputation* AddReduce_computation =
+      GetOrCreateScalarAddComputation(computation, type);
+  Shape shape = ShapeUtil::FilterDimensions(
+      [&](int64_t dim) { return !absl::c_linear_search(dims, dim); },
+      hlo->shape());
+  return computation->AddInstruction(HloInstruction::CreateReduce(
+      shape, hlo, zero, dims, AddReduce_computation));
+}
+
+StatusOr<bool> NormalizeDotDimension(HloModule* module) {
+  bool changed = false;
+
+  for (HloComputation* computation : module->MakeNonfusionComputations()) {
+    for (HloInstruction* ins : computation->MakeInstructionPostOrder()) {
+      if (ins->opcode() == HloOpcode::kDot) {
+        HloInstruction* lhs = ins->mutable_operand(0);
+        HloInstruction* rhs = ins->mutable_operand(1);
+        const DotDimensionNumbers& dot_dnums = ins->dot_dimension_numbers();
+        const auto& lhs_con_dims = dot_dnums.lhs_contracting_dimensions();
+        const auto& rhs_con_dims = dot_dnums.rhs_contracting_dimensions();
+        std::vector<int64_t> lhs_space_dims, rhs_space_dims;
+        std::tie(lhs_space_dims, rhs_space_dims) =
+            GetSpaceDims(lhs->shape(), rhs->shape(), dot_dnums);
+
+        CHECK(lhs_space_dims.size() <= 1 && rhs_space_dims.size() <= 1 &&
+              lhs_con_dims.size() == 1 && rhs_con_dims.size() == 1)
+            << "Invalid dot. Call DotDecomposer before this pass.";
+
+        if (lhs_space_dims.size() == 0 && rhs_space_dims.size() == 0) {
+          // Normalize dot.1: f32[batch, 128] = dot([batch, 128], [batch, 128])
+          // to reduce(multiply([batch, 128], [batch, 128]))
+          //
+          // The code below is modified from
+          // AlgebraicSimplifierVisitor::HandleDot's
+          // enable_dot_strength_reduction branch. We have to do this
+          // because this simplification is disabled previsouly.
+          HloInstruction *dot = ins, *new_lhs = lhs, *new_rhs = rhs;
+          if (!ShapeUtil::SameElementType(dot->shape(), new_lhs->shape())) {
+            new_lhs = MakeConvertToHlo(new_lhs, dot->shape().element_type());
+          }
+          if (!ShapeUtil::SameElementType(dot->shape(), new_rhs->shape())) {
+            new_rhs = MakeConvertToHlo(new_rhs, dot->shape().element_type());
+          }
+
+          TF_ASSIGN_OR_RETURN(
+              HloInstruction * new_dot,
+              MakeBinaryHlo(HloOpcode::kMultiply, new_lhs, new_rhs));
+          std::vector<int64_t> reduce_dims(
+              dot_dnums.lhs_contracting_dimensions_size());
+
+          PrimitiveType dot_type =
+              ShapeUtil::ElementIsFloating(dot->shape())
+                  ? (dot->shape().element_type() == F64 ? F64 : F32)
+                  : dot->shape().element_type();
+          new_dot = AsType(new_dot, dot_type);
+          absl::c_iota(reduce_dims, dot_dnums.lhs_batch_dimensions_size());
+          new_dot = AddReduce(new_dot, reduce_dims, dot_type);
+          new_dot = AsType(new_dot, dot->shape().element_type());
+          dot->parent()->ReplaceInstruction(dot, new_dot);
+        } else if (lhs_space_dims.size() == 0 || rhs_space_dims.size() == 0) {
+          // Normalize dot.1: f32[128] = dot([128], [128, 64]) to
+          //           dot.1: f32[1, 128] = dot([1, 128], [128, 64])
+          HloInstruction *new_lhs = lhs, *new_rhs = rhs;
+          std::vector<int64_t> new_dot_shape_dims(
+              ins->shape().dimensions().begin(),
+              ins->shape().dimensions().end());
+          DotDimensionNumbers new_dnums = dot_dnums;
+
+          if (lhs_space_dims.size() == 0) {
+            // Create a new lhs
+            std::vector<int64_t> new_lhs_shape_dims(
+                lhs->shape().dimensions().begin(),
+                lhs->shape().dimensions().end());
+            new_lhs_shape_dims.insert(new_lhs_shape_dims.begin() +
+                                          dot_dnums.lhs_batch_dimensions_size(),
+                                      1);
+            Shape new_lhs_shape = ShapeUtil::MakeShape(
+                lhs->shape().element_type(), new_lhs_shape_dims);
+            new_lhs = ins->parent()->AddInstruction(
+                HloInstruction::CreateReshape(new_lhs_shape, lhs));
+
+            new_dot_shape_dims.insert(new_dot_shape_dims.begin() +
+                                          dot_dnums.lhs_batch_dimensions_size(),
+                                      1);
+            (*new_dnums.mutable_lhs_contracting_dimensions())[0] += 1;
+          }
+
+          if (rhs_space_dims.size() == 0) {
+            // Create a new rhs
+            std::vector<int64_t> new_rhs_shape_dims(
+                rhs->shape().dimensions().begin(),
+                rhs->shape().dimensions().end());
+            new_rhs_shape_dims.insert(new_rhs_shape_dims.begin() +
+                                          dot_dnums.rhs_batch_dimensions_size(),
+                                      1);
+            Shape new_rhs_shape = ShapeUtil::MakeShape(
+                rhs->shape().element_type(), new_rhs_shape_dims);
+            new_rhs = ins->parent()->AddInstruction(
+                HloInstruction::CreateReshape(new_rhs_shape, rhs));
+
+            new_dot_shape_dims.insert(
+                new_dot_shape_dims.begin() +
+                    dot_dnums.lhs_batch_dimensions_size() + 1,
+                1);
+            (*new_dnums.mutable_rhs_contracting_dimensions())[0] += 1;
+          }
+
+          Shape new_dot_shape = ShapeUtil::MakeShape(
+              ins->shape().element_type(), new_dot_shape_dims);
+
+          HloInstruction* new_dot = ins->parent()->AddInstruction(
+              HloInstruction::CreateDot(new_dot_shape, new_lhs, new_rhs,
+                                        new_dnums, ins->precision_config()));
+          auto new_ins = HloInstruction::CreateReshape(ins->shape(), new_dot);
+          ins->parent()->ReplaceWithNewInstruction(ins, std::move(new_ins));
+        }
+      }
+    }
+  }
+
+  return changed;
 }
 
 }  // namespace spmd

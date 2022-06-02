@@ -393,6 +393,7 @@ absl::optional<ReduceScatterSpec> MatchReduceScatter(
   std::vector<int64_t> split_dims;
   // First find a single dimension where the input and output of dynamic slice
   // differ.
+  CHECK_EQ(ar->shape().rank(), user->shape().rank());
   int num_dims = 0;
   for (int64_t dim = 0; dim < ar->shape().rank(); ++dim) {
     if (ar->shape().dimensions(dim) == user->shape().dimensions(dim)) {

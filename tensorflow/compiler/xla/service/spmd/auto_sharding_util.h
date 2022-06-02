@@ -360,6 +360,13 @@ void FixMixedMeshShapeResharding(HloInstruction* inst, int operand_num,
                                  const Array<int64_t>& device_mesh,
                                  ReshardingCache* resharding_cache);
 
+// Normalize the dimension number of dot.
+// After normalization, each operand always have one contracting dim and
+// one space dim. The number of batch dims is unrestricted. For example,
+// This normalizes dot.1: f32[128] = dot([128], [128, 64]) to
+//                 dot.1: f32[1, 128] = dot([1, 128], [128, 64])
+StatusOr<bool> NormalizeDotDimension(HloModule* module);
+
 /*
  * Gradient accumulation
  */

@@ -620,6 +620,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:platform_util",
         "//tensorflow/compiler/xla/service:pass_context",
         "//tensorflow/compiler/xla/service/gpu:gpu_cost_model",
+        "//tensorflow/compiler/xla/service/spmd:alpa_compiler",
         "//tensorflow/compiler/xla/service/spmd:grad_acc_rewrite",
         "//tensorflow/core:lib",
         "@com_google_absl//absl/hash",
@@ -681,7 +682,6 @@ pybind_extension(
         "//tensorflow/compiler/xla/pjrt/distributed",
         "//tensorflow/compiler/xla/pjrt/distributed:client",
         "//tensorflow/compiler/xla/pjrt/distributed:service",
-        "//tensorflow/compiler/xla/service/spmd:alpa_compilation",
         "//tensorflow/core:lib",
         # Do NOT remove this dependency. The XLA Python extension must not
         # depend on any part of TensorFlow at runtime, **including**

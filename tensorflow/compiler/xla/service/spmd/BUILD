@@ -236,7 +236,7 @@ cc_library(
 )
 
 cc_library(
-    name = "alpa_compilation",
+    name = "alpa_compiler",
     srcs = ["alpa_compile.cc"],
     hdrs = ["alpa_compile.h"],
     deps = [

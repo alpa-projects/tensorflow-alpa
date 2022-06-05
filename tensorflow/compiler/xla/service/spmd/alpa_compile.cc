@@ -38,9 +38,9 @@ namespace spmd {
 
 const char kBeforeAutoShardingDumpName[] = "before_run_auto_sharding";
 const char kBeforeSpmdPartitionDumpName[] = "before_run_spmd_partitioner";
+
 // TODO(yonghao): Check correctness of compile options and modules
-Status PreCompileCheck(const XlaComputation& computation,
-                       CompileOptions options) {
+Status PreCompileCheck(const CompileOptions& options) {
   const ExecutableBuildOptions& build_options =
       options.executable_build_options;
   if (build_options.has_device_assignment()) {
@@ -68,34 +68,30 @@ Status PreCompileCheck(const XlaComputation& computation,
   return Status::OK();
 }
 
-StatusOr<std::shared_ptr<xla::HloModule>> CreateHloModule(
-    const XlaComputation& computation, CompileOptions options) {
-  PreCompileCheck(computation, options);
+StatusOr<HloModuleConfig> CreateHloModuleConfig(
+    const HloModule* hlo_module, const CompileOptions options) {
+  PreCompileCheck(options);
 
-  const HloModuleProto& module_proto = computation.proto();
-  // The device ordinal of the option might be -1, but it will not be used.
   const ExecutableBuildOptions& build_options =
       options.executable_build_options;
-  const ProgramShape program_shape(module_proto.host_program_shape());
+  const ProgramShape& program_shape =
+      hlo_module->entry_computation_layout().ComputeProgramShape();
   const ExecutionOptions execution_options =
       CreateExecutionOptions(build_options, &program_shape);
+
   TF_ASSIGN_OR_RETURN(
       auto module_config,
-      HloModule::CreateModuleConfigFromProto(
-          module_proto, build_options.debug_options(), &execution_options));
-
-  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
-                      CreateModuleFromProto(
-                          module_proto, module_config,
-                          options.executable_build_options.run_backend_only()));
-  return hlo_module;
+      HloModule::CreateModuleConfigFromShape(
+          program_shape, build_options.debug_options(), &execution_options));
+  return module_config;
 }
 
-StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
-    const XlaComputation& computation, CompileOptions options) {
-  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
-                      CreateHloModule(computation, options));
+Status RunAutoShardingPass(HloModule* hlo_module, const CompileOptions& options) {
+  TF_ASSIGN_OR_RETURN(auto module_config,
+                      CreateHloModuleConfig(hlo_module, options));
+  hlo_module->set_config(module_config);
   DumpHloModuleIfEnabled(*hlo_module, kBeforeAutoShardingDumpName);
+
   // TODO(yonghao): TF Profiler Traceme
   const DebugOptions& debug_options = hlo_module->config().debug_options();
   if (hlo_module->config().use_spmd_partitioning()) {
@@ -158,16 +154,19 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();
     }
-    TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module.get()).status());
+    TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
   }
-  return hlo_module;
+  return Status::OK();
 }
 
-StatusOr<std::shared_ptr<HloModule>> RunSpmdPartitionerPass(
-    const XlaComputation& computation, CompileOptions options) {
-  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
-                      CreateHloModule(computation, options));
+// Run the SPMD partitioner pass.
+Status RunSpmdPartitionerPass(HloModule* hlo_module, const CompileOptions& options) {
+  TF_ASSIGN_OR_RETURN(auto module_config,
+                      CreateHloModuleConfig(hlo_module, options));
+  hlo_module->set_config(module_config);
+
   DumpHloModuleIfEnabled(*hlo_module, kBeforeSpmdPartitionDumpName);
+
   // TODO(yonghao): TF Profiler Traceme
   if (hlo_module->config().use_spmd_partitioning()) {
     HloPassPipeline spmd_pipeline("spmd-partitioner");
@@ -183,10 +182,10 @@ StatusOr<std::shared_ptr<HloModule>> RunSpmdPartitionerPass(
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();
     }
-    TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module.get()).status());
+    TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
   }
-  return hlo_module;
+  return Status::OK();
 }
-};  // namespace spmd
 
+};  // namespace spmd
 };  // namespace xla

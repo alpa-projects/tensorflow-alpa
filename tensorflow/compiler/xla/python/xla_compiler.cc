@@ -49,6 +49,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/platform_util.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_cost_model.h"
+#include "tensorflow/compiler/xla/service/spmd/alpa_compile.h"
 #include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -504,6 +505,18 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .def("set_spmd_output_sharding", &HloModule::set_spmd_output_sharding)
       .def("set_spmd_parameters_shardings", &HloModule::set_spmd_parameters_shardings)
       .def("infer_spmd_shardings", &HloModule::infer_spmd_shardings)
+      .def("setup_alias", [](std::shared_ptr<HloModule> hlo_module,
+                             const std::vector<int64_t>& output_index,
+                             int64_t param_number,
+                             const std::vector<int64_t>& param_index) {
+            hlo_module->input_output_alias_config().SetUpAlias(
+               ShapeIndex(output_index.begin(), output_index.end()),
+               param_number,
+               ShapeIndex(param_index.begin(), param_index.end()));
+          })
+      .def("program_shape", [](const HloModule& hlo_module) {
+            return hlo_module.entry_computation_layout().ComputeProgramShape();
+          })
       .def("parameter_shapes", [](const HloModule& hlo_module) -> std::vector<Shape>{
             const auto params = hlo_module.entry_computation()->parameter_instructions();
             std::vector<Shape> ret(params.size());
@@ -798,6 +811,22 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds,
         "get grad all-reduce channel ids", py::arg("module"),
         py::arg("grad_idx") = absl::nullopt);
+
+  m.def("run_auto_sharding", 
+        [](std::shared_ptr<HloModule> hlo_module, const CompileOptions& options) {
+          py::gil_scoped_release gil_release;
+          TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module.get(), options));
+          return Status::OK();
+        }, 
+        py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
+
+  m.def("run_spmd_partitioner", 
+        [](std::shared_ptr<HloModule> hlo_module, const CompileOptions& options) {
+          py::gil_scoped_release gil_release;
+          TF_RETURN_IF_ERROR(spmd::RunSpmdPartitionerPass(hlo_module.get(), options));
+          return Status::OK();
+        }, 
+        py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)

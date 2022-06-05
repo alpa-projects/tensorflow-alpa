@@ -49,6 +49,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/platform_util.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_cost_model.h"
+#include "tensorflow/compiler/xla/service/spmd/alpa_compile.h"
 #include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -798,6 +799,22 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds,
         "get grad all-reduce channel ids", py::arg("module"),
         py::arg("grad_idx") = absl::nullopt);
+
+  m.def("run_auto_sharding", 
+        [](std::shared_ptr<HloModule> hlo_module, const CompileOptions& options) {
+          py::gil_scoped_release gil_release;
+          TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module.get(), options));
+          return Status::OK();
+        }, 
+        py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
+
+  m.def("run_spmd_partitioner", 
+        [](std::shared_ptr<HloModule> hlo_module, const CompileOptions& options) {
+          py::gil_scoped_release gil_release;
+          TF_RETURN_IF_ERROR(spmd::RunSpmdPartitionerPass(hlo_module.get(), options));
+          return Status::OK();
+        }, 
+        py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)

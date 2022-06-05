@@ -54,7 +54,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/python/transfer_guard_lib.h"
 #include "tensorflow/compiler/xla/python/types.h"
 #include "tensorflow/compiler/xla/python/xla_compiler.h"
-#include "tensorflow/compiler/xla/service/spmd/alpa_compile.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/statusor.h"
@@ -534,20 +533,6 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("pprof_profile_to_json", &PprofProfileToJson,
         "Decodes an uncompressed pprof Profile protocol buffer into a JSON "
         "representation");
-
-  m.def("run_auto_sharding", 
-        [](const XlaComputation& computation, CompileOptions options) {
-          py::gil_scoped_release gil_release;
-          return spmd::RunAutoShardingPass(computation, options);
-        }, 
-        py::arg("computation"), py::arg("compile_options") = CompileOptions());
-  m.def("run_spmd_partitioner", 
-        [](const XlaComputation& computation, CompileOptions options) {
-          py::gil_scoped_release gil_release;
-          return spmd::RunSpmdPartitionerPass(computation, options);
-        }, 
-        py::arg("computation"), py::arg("compile_options") = CompileOptions());
-
 }  // NOLINT(readability/fn_size)
 
 }  // namespace xla

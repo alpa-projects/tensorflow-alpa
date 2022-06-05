@@ -505,6 +505,18 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .def("set_spmd_output_sharding", &HloModule::set_spmd_output_sharding)
       .def("set_spmd_parameters_shardings", &HloModule::set_spmd_parameters_shardings)
       .def("infer_spmd_shardings", &HloModule::infer_spmd_shardings)
+      .def("setup_alias", [](std::shared_ptr<HloModule> hlo_module,
+                             const std::vector<int64_t>& output_index,
+                             int64_t param_number,
+                             const std::vector<int64_t>& param_index) {
+            hlo_module->input_output_alias_config().SetUpAlias(
+               ShapeIndex(output_index.begin(), output_index.end()),
+               param_number,
+               ShapeIndex(param_index.begin(), param_index.end()));
+          })
+      .def("program_shape", [](const HloModule& hlo_module) {
+            return hlo_module.entry_computation_layout().ComputeProgramShape();
+          })
       .def("parameter_shapes", [](const HloModule& hlo_module) -> std::vector<Shape>{
             const auto params = hlo_module.entry_computation()->parameter_instructions();
             std::vector<Shape> ret(params.size());

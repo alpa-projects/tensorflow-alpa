@@ -191,10 +191,6 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
   }
 
   // ----- Put the sharded HLO module back to Python -----
-  HloModuleProto module_proto = module->ToProto();
-  std::string serilaized_module_proto;
-  CHECK(module_proto.SerializeToString(&serilaized_module_proto));
-
   PyGILState_STATE gstate = PyGILState_Ensure();
   {
     py::object submodule =
@@ -205,12 +201,9 @@ std::vector<std::unique_ptr<HloModule>> SliceAutoShardedStagesInternal(
       py::str python_name(name);
       stage_names.append(name);
     }
-    for (const auto& stage_module : pipeline_stages) {
-      HloModuleProto module_proto = stage_module->ToProto();
-      std::string serilaized_module_proto;
-      CHECK(module_proto.SerializeToString(&serilaized_module_proto));
-      py::bytes serilaized_module_proto_bytes(serilaized_module_proto);
-      stage_modules.append(serilaized_module_proto_bytes);
+    for (auto& stage_module : pipeline_stages) {
+      std::shared_ptr<HloModule> module = std::move(stage_module);
+      stage_modules.append(module);
     }
     py::tuple stages = py::make_tuple(stage_names, stage_modules);
     py::object set_auto_sharded_hlo_stages =

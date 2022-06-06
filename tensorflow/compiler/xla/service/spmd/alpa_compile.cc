@@ -187,5 +187,21 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module, const CompileOptions& optio
   return Status::OK();
 }
 
+Status SetHloModuleOutputShardings(HloModule* module,
+                                   const std::vector<OpSharding>& op_shardings) {
+  HloComputation* entry = module->entry_computation();
+  HloInstruction* output_tuple = entry->root_instruction();
+
+  CHECK_EQ(op_shardings.size(), output_tuple->operand_count());
+
+  for (size_t i = 0; i < output_tuple->operand_count(); ++i) {
+    TF_ASSIGN_OR_RETURN(auto hlo_sharding,
+                        HloSharding::FromProto(op_shardings[i]));
+    output_tuple->mutable_operand(i)->set_sharding(hlo_sharding);
+  }
+
+  return Status::OK();
+}
+
 };  // namespace spmd
 };  // namespace xla

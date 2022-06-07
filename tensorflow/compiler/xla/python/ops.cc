@@ -29,6 +29,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/client/lib/math.h"
 #include "tensorflow/compiler/xla/client/lib/qr.h"
 #include "tensorflow/compiler/xla/client/lib/self_adjoint_eig.h"
+#include "tensorflow/compiler/xla/client/lib/slicing.h"
 #include "tensorflow/compiler/xla/client/lib/sorting.h"
 #include "tensorflow/compiler/xla/client/lib/svd.h"
 #include "tensorflow/compiler/xla/client/xla_builder.h"
@@ -401,6 +402,10 @@ void BuildOpsSubmodule(py::module* m) {
   ops.def("RegularizedIncompleteBeta", &RegularizedIncompleteBeta, py::arg("a"),
           py::arg("b"), py::arg("x"));
   ops.def("Zeta", &Zeta, py::arg("x"), py::arg("q"));
+
+  // ops exposed by Alpa 
+  ops.def("IndexSelect", &TorchIndexSelect, py::arg("input"), py::arg("index"),
+          py::arg("dim"), py::arg("batch_dims") = 0);
 
 #define BINARY_OP(op)                                                   \
   ops.def(                                                              \

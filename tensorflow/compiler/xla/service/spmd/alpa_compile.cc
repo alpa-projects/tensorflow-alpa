@@ -172,7 +172,9 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module, const CompileOptions& optio
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
-      spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
+      spmd_pipeline.AddPass<ShardingPropagation>(
+      /*is_spmd=*/true, /*propagate_metadata=*/false,
+      /*allow_spmd_sharding_propagation_to_output=*/true);
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<GradAccRewrite>();

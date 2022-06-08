@@ -191,6 +191,7 @@ class IrEmitterUnnested : public IrEmitter {
   Status EmitInfeed(mlir::Operation* op);
   Status EmitOutfeed(mlir::Operation* op);
   Status EmitRngGetAndUpdateState(mlir::Operation* op);
+  Status EmitRngGetAndUpdateStateThunk(mlir::Operation* op);
   Status EmitScatter(mlir::Operation* op);
   Status EmitSort(mlir::Operation* op);
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM

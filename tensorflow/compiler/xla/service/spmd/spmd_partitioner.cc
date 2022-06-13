@@ -1504,16 +1504,16 @@ std::vector<ReplicaGroup> SpmdPartitioningVisitor::CreateReplicaGroups(
 }
 
 Status SpmdPartitioningVisitor::DefaultAction(HloInstruction* hlo) {
+  if (hlo->IsCustomCall("identity") || hlo->IsCustomCall("pipeline_marker")) {
+    return HandleElementwise(hlo);
+  }
+
   if (hlo->HasSideEffect()) {
     return Unimplemented("Side-effect ops cannot be replicated: %s",
                          hlo->ToString());
   }
 
   if (hlo->IsElementwise() && hlo->operand_count() > 0) {
-    return HandleElementwise(hlo);
-  }
-
-  if (hlo->IsCustomCall("identity")) {
     return HandleElementwise(hlo);
   }
 

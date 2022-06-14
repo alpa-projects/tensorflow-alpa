@@ -60,8 +60,12 @@ limitations under the License.
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/python/lib/core/bfloat16.h"
+#include "third_party/nccl/nccl.h"
+#include "tensorflow/compiler/xla/service/gpu/alpa_nccl_wrapper.h"
 
 // TODO(phawkins): remove host_id properties after JAX is update to avoid them.
+
+PYBIND11_MAKE_OPAQUE(std::vector<ncclComm_t>);
 
 namespace xla {
 namespace {
@@ -533,6 +537,27 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("pprof_profile_to_json", &PprofProfileToJson,
         "Decodes an uncompressed pprof Profile protocol buffer into a JSON "
         "representation");
+
+  py::class_<std::vector<ncclComm_t>, std::shared_ptr<std::vector<ncclComm_t>>> ncclComm_vec(m, "ncclComm_vec");
+  py::class_<ncclUniqueId> nccl_UniqueId(m, "ncclUniqueId");
+  m.def("InitCommunicator", &alpa_nccl::InitCommunicator,
+        "Initialize single thread communicators");
+  m.def("LocalAllGather", &alpa_nccl::LocalAllGather, "Do local allgather");
+  m.def("nccl_InitCommunicator", &alpa_nccl::nccl_InitCommunicator,
+        "Initialize single thread communicators");
+  m.def("nccl_LocalAllGather", &alpa_nccl::nccl_LocalAllGather, "Do local allgather");
+  m.def("nccl_DestroyComms", &alpa_nccl::nccl_DestroyComms, "destroy comms");
+  m.def("nccl_GetUniqueId", &alpa_nccl::nccl_GetUniqueId, "get unique nccl id");
+  m.def("nccl_GetVersion", &alpa_nccl::nccl_GetVersion, "get nccl version");
+  m.def("nccl_BroadcastPartialGPUs", &alpa_nccl::nccl_BroadcastPartialGPUs, 
+        "nccl broadcast with only a subset of gpus in the host are involved");
+  m.def("nccl_CreateCommunicators", &alpa_nccl::nccl_CreateCommunicators, 
+        "nccl create communicators for multiple threads case");
+  m.def("get_buffer_device_id", &alpa_nccl::get_buffer_device_id, 
+        "get the local device id for one pybuffer");
+  m.def("nccl_Recv", &alpa_nccl::nccl_Recv, "nccl recv data");
+  m.def("nccl_Send", &alpa_nccl::nccl_Send, "nccl send data");
+
 }  // NOLINT(readability/fn_size)
 
 }  // namespace xla

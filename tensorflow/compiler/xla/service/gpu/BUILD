@@ -560,6 +560,50 @@ tf_cuda_library(
     ]),
 )
 
+alias(
+    name = "alpa_nccl_wrapper",
+    actual = if_nccl(":_alpa_nccl_wrapper", ":empty"),
+)
+
+tf_cuda_library(
+    name = "_alpa_nccl_wrapper",
+    srcs = if_gpu_is_configured(["alpa_nccl_wrapper.cc"]),
+    hdrs = if_gpu_is_configured(["alpa_nccl_wrapper.h"]),
+    # Override tf_cuda_library()'s internal default value of ["//buildenv/target:gce"].
+    copts = [
+        "-fexceptions",
+        # "-fno-strict-aliasing",
+    ],
+    compatible_with = [],
+    defines = if_gpu_is_configured(["XLA_ENABLE_XCCL"]),
+    tags = ["manual"],  # Only builds with if_nccl().
+    deps = if_gpu_is_configured([
+        ":gpu_executable_run_options",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
+        "//tensorflow/compiler/xla:debug_options_flags",
+        "//tensorflow/compiler/xla:status",
+        "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla:statusor",
+        "//tensorflow/compiler/xla:xla_data_proto_cc",
+        "//tensorflow/compiler/xla/service:collective_ops_utils",
+        "//tensorflow/compiler/xla/service:global_device_id",
+        "//tensorflow/compiler/xla/pjrt/distributed:client",
+        "//tensorflow/compiler/xla/pjrt:pjrt_client",
+        "//tensorflow/compiler/xla/pjrt:tfrt_cpu_pjrt_client",
+        "//tensorflow/compiler/xla/python:py_client",
+        "//tensorflow/compiler/xla/tools:driver",
+        "//tensorflow/core:lib",
+        "@pybind11",
+    ]) + if_cuda_is_configured([
+        "@local_config_nccl//:nccl",
+    ]) + if_rocm_is_configured([
+        "@local_config_rocm//rocm:rccl",
+    ]),
+)
+
 bool_flag(
     name = "enable_xlir",
     build_setting_default = if_google(True, False),

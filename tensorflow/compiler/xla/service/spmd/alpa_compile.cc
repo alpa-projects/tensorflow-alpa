@@ -142,8 +142,10 @@ Status RunAutoShardingPass(HloModule* hlo_module, const CompileOptions& options)
       spmd_simplify.AddPass<HloDCE>();
 
       spmd_pipeline.AddPass<AutoSharding>();
+      spmd_pipeline.AddPass<ShardingPropagation>(
+          /*is_spmd=*/true, /*propagate_metadata=*/false,
+          /*allow_spmd_sharding_propagation_to_output=*/true);
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
-      spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<RedundantSliceEliminator>();
@@ -172,14 +174,11 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module, const CompileOptions& optio
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
-      spmd_pipeline.AddPass<ShardingPropagation>(
-      /*is_spmd=*/true, /*propagate_metadata=*/false,
-      /*allow_spmd_sharding_propagation_to_output=*/true);
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
+      spmd_pipeline.AddPass<RedundantSliceEliminator>();
       spmd_pipeline.AddPass<GradAccRewrite>();
     } else {
-      spmd_pipeline.AddPass<SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();
@@ -194,13 +193,17 @@ Status SetHloModuleOutputShardings(HloModule* module,
   HloComputation* entry = module->entry_computation();
   HloInstruction* output_tuple = entry->root_instruction();
 
-  CHECK_EQ(op_shardings.size(), output_tuple->operand_count());
+  ShapeTree<HloSharding> tuple_sharding(output_tuple->shape(),
+                                        HloSharding::Replicate());
+  CHECK_EQ(tuple_sharding.leaf_count(), op_shardings.size());
 
-  for (size_t i = 0; i < output_tuple->operand_count(); ++i) {
-    TF_ASSIGN_OR_RETURN(auto hlo_sharding,
-                        HloSharding::FromProto(op_shardings[i]));
-    output_tuple->mutable_operand(i)->set_sharding(hlo_sharding);
+  size_t i = 0;
+  for (auto& leaf : tuple_sharding.leaves()) {
+    TF_ASSIGN_OR_RETURN(HloSharding hlo_sharding,
+                        HloSharding::FromProto(op_shardings[i++]));
+	leaf.second = hlo_sharding;
   }
+  output_tuple->set_sharding(HloSharding::Tuple(tuple_sharding));
 
   return Status::OK();
 }

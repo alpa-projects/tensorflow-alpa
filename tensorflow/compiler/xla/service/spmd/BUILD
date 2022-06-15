@@ -154,6 +154,7 @@ cc_library(
     hdrs = ["stateful_rng_spmd_partitioner.h"],
     deps = [
         ":spmd_partitioner",
+        ":auto_sharding",
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
         "@com_google_absl//absl/memory",

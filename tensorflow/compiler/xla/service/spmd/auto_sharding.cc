@@ -1834,11 +1834,11 @@ void SetHloSharding(const HloInstructionSequence& sequence,
       // Create Tuple HloSharding
       // TODO(lmzheng, zhuohan): Rewrite this with ShapeTree and support
       // nested tuple in the output.
-      int i = 0;
+      CHECK_EQ(tuple_sharding.leaf_count(), flattened_shardings.size());
+      size_t i = 0;
       for (auto& leaf : tuple_sharding.leaves()) {
         leaf.second = flattened_shardings[i++];
       }
-      CHECK_EQ(i, flattened_shardings.size());
       inst->set_sharding(HloSharding::Tuple(tuple_sharding));
     } else {
       const HloSharding& sharding_spec =
@@ -2100,6 +2100,10 @@ void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
 }
 
 StatusOr<bool> AutoSharding::Run(HloModule* module) {
+  if (!pass_context::GetBool("auto_sharding::enable", true)) {
+    return false;
+  }
+
   // ----- Read options of this pass -----
   AutoShardingSolverOption solver_option;
   solver_option.override_all_gather_cost = false;

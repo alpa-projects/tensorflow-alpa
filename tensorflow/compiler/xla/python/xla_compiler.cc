@@ -805,28 +805,30 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   DefRepeatedProperty(op_sharding, "last_tile_dims",
                       &xla::OpSharding::mutable_last_tile_dims);
 
+  /***** Alpa Functions Begin *****/
   m.def("set_pass_context", &pass_context::SetPassContext);
   m.def("clear_pass_context", &pass_context::ClearPassContext);
   m.def("estimate_hlo_module_cost", &gpu::EstimateHloModuleCost);
+  m.def("set_hlo_module_output_shardings", &spmd::SetHloModuleOutputShardings);
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds,
-        "get grad all-reduce channel ids", py::arg("module"),
-        py::arg("grad_idx") = absl::nullopt);
+        py::arg("module"), py::arg("grad_idx") = absl::nullopt);
 
   m.def("run_auto_sharding", 
-        [](std::shared_ptr<HloModule> hlo_module, const CompileOptions& options) {
+        [](HloModule* hlo_module, const CompileOptions& options) {
           py::gil_scoped_release gil_release;
-          TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module.get(), options));
+          TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module, options));
           return Status::OK();
         }, 
         py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 
   m.def("run_spmd_partitioner", 
-        [](std::shared_ptr<HloModule> hlo_module, const CompileOptions& options) {
+        [](HloModule* hlo_module, const CompileOptions& options) {
           py::gil_scoped_release gil_release;
-          TF_RETURN_IF_ERROR(spmd::RunSpmdPartitionerPass(hlo_module.get(), options));
+          TF_RETURN_IF_ERROR(spmd::RunSpmdPartitionerPass(hlo_module, options));
           return Status::OK();
         }, 
         py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
+  /***** Alpa Functions End *****/
 
   py::enum_<PrecisionConfig::Precision>(m, "PrecisionConfig_Precision")
       .value("DEFAULT", PrecisionConfig::DEFAULT)

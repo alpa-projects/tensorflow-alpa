@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+// This file contains nccl api for alpa to use. 
+
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_NCCL_UTILS_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_NCCL_UTILS_H_
 
@@ -46,14 +48,6 @@ ncclDataType_t MyToNcclDataType(PrimitiveType element_type);
 
 int SizeOfType(ncclDataType_t element_type);
 
-std::shared_ptr< std::vector<ncclComm_t> > InitCommunicator(int n_devices, std::vector<int> devices_vec);
-
-void LocalAllGather(int n_devices, 
-                    std::vector<ncclComm_t> comms, 
-                    std::vector<PyBuffer::object> buffers, 
-                    std::vector<int> devices_ids, 
-                    uint n_elements);
-
 std::shared_ptr< std::vector<ncclComm_t> > nccl_InitCommunicator(int n_devices, std::vector<int> devices_vec);
 
 void nccl_LocalAllGather(int n_devices, 
@@ -85,7 +79,11 @@ void nccl_Recv(std::vector<ncclComm_t> comms,
                uint n_elements, 
                int peer_p2p_rank);
 
-ncclUniqueId nccl_GetUniqueId();
+std::vector<char> nccl_uid_serialize(ncclUniqueId nccl_uid);
+
+ncclUniqueId nccl_uid_deserialize(std::vector<char> nccl_uid_chars);
+
+std::vector<char> nccl_GetUniqueId();
 
 int nccl_GetVersion();
 
@@ -93,7 +91,7 @@ std::shared_ptr< std::vector<ncclComm_t> > nccl_CreateCommunicators(int n_device
                                                                     int world_size, 
                                                                     std::vector<int> devices_global_rank, 
                                                                     std::vector<int> devices_ids, 
-                                                                    ncclUniqueId nccl_uid);
+                                                                    std::vector<char> nccl_uid);
 
 int get_buffer_device_id(PyBuffer::object buffer);
 

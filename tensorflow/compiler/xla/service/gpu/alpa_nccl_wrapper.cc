@@ -13,10 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+// This file implements nccl apis for alpa to use. 
+
 #include "tensorflow/compiler/xla/service/gpu/alpa_nccl_wrapper.h"
 
 #include <memory>
 #include <utility>
+#include <stdexcept>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_format.h"
@@ -93,34 +96,6 @@ int SizeOfType(ncclDataType_t element_type) {
     default:
       return 4;
   }
-}
-
-std::shared_ptr< std::vector<ncclComm_t> > InitCommunicator(int n_devices, std::vector<int> devices_vec) {
-    ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*n_devices);
-
-    int* devices_ids = devices_vec.data();
-
-    ncclCommInitAll(comms, n_devices, devices_ids);
-
-    std::vector<ncclComm_t> comm_vec(comms, comms+n_devices);
-    return std::make_shared< std::vector<ncclComm_t> >(std::move(comm_vec));
-}
-
-void LocalAllGather(int n_devices, 
-                    std::vector<ncclComm_t> comms, 
-                    std::vector<PyBuffer::object> buffers, 
-                    std::vector<int> devices_ids, 
-                    uint n_elements) {
-  ncclDataType_t dtype = MyToNcclDataType(buffers[0].buf()->buffer()->on_device_shape().element_type());
-  int dtype_size = SizeOfType(dtype);
-  ncclGroupStart();
-  for (int i = 0; i < n_devices; ++i) {
-    std::uintptr_t sendbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
-    sendbuff = sendbuff + n_elements*i*dtype_size;
-    std::uintptr_t recvbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
-    ncclAllGather((void*)sendbuff, (void*)recvbuff, n_elements, dtype, comms[i], cudaStreamLegacy);
-  }
-  ncclGroupEnd();
 }
 
 std::shared_ptr< std::vector<ncclComm_t> > nccl_InitCommunicator(int n_devices, std::vector<int> devices_vec) {
@@ -201,23 +176,39 @@ void nccl_Recv(std::vector<ncclComm_t> comms,
   ncclRecv((void*)recvbuff, n_elements, dtype, peer_p2p_rank, comms[0], cudaStreamLegacy);
 }
 
-ncclUniqueId nccl_GetUniqueId() {
+std::vector<char> nccl_uid_serialize(ncclUniqueId nccl_uid) {
+  char* id_chars = (char*)malloc(sizeof(char)*128);
+  memcpy(id_chars, &nccl_uid, sizeof(nccl_uid));
+  std::vector<char> id_vec(id_chars, id_chars+128);
+  return id_vec;
+}
+
+ncclUniqueId nccl_uid_deserialize(std::vector<char> nccl_uid_vec) {
+  char * nccl_uid_chars = nccl_uid_vec.data();
+  ncclUniqueId nccl_uid;
+  memcpy(&nccl_uid, nccl_uid_chars, sizeof(nccl_uid));
+  return nccl_uid;
+}
+
+std::vector<char> nccl_GetUniqueId() {
   ncclUniqueId id;
   ncclGetUniqueId(&id);
-  return id;
+  std::vector<char> id_vec = nccl_uid_serialize(id);
+  return id_vec;
 }
 
 int nccl_GetVersion() {
-  int *version;
-  ncclGetVersion(version);
-  return *version;
+  int version;
+  ncclGetVersion(&version);
+  return version;
 }
 
 std::shared_ptr< std::vector<ncclComm_t> > nccl_CreateCommunicators(int n_devices, 
                                                                     int world_size, 
                                                                     std::vector<int> devices_global_rank, 
                                                                     std::vector<int> devices_ids, 
-                                                                    ncclUniqueId nccl_uid) {
+                                                                    std::vector<char> nccl_uid_vec) {
+  ncclUniqueId nccl_uid = nccl_uid_deserialize(nccl_uid_vec);
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*n_devices);
 
   ncclGroupStart();
@@ -231,7 +222,6 @@ std::shared_ptr< std::vector<ncclComm_t> > nccl_CreateCommunicators(int n_device
 }
 
 int get_buffer_device_id(PyBuffer::object buffer){
-  printf("local hardware id = %d\n", buffer.buf()->device()->local_hardware_id());
   return buffer.buf()->device()->local_hardware_id();
 }
 

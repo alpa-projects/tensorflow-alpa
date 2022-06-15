@@ -540,12 +540,9 @@ PYBIND11_MODULE(xla_extension, m) {
 
   py::class_<std::vector<ncclComm_t>, std::shared_ptr<std::vector<ncclComm_t>>> ncclComm_vec(m, "ncclComm_vec");
   py::class_<ncclUniqueId> nccl_UniqueId(m, "ncclUniqueId");
-  m.def("InitCommunicator", &alpa_nccl::InitCommunicator,
-        "Initialize single thread communicators");
-  m.def("LocalAllGather", &alpa_nccl::LocalAllGather, "Do local allgather");
   m.def("nccl_InitCommunicator", &alpa_nccl::nccl_InitCommunicator,
         "Initialize single thread communicators");
-  m.def("nccl_LocalAllGather", &alpa_nccl::nccl_LocalAllGather, "Do local allgather");
+  m.def("nccl_LocalAllGather", &alpa_nccl::nccl_LocalAllGather, "nccl local allgather");
   m.def("nccl_DestroyComms", &alpa_nccl::nccl_DestroyComms, "destroy comms");
   m.def("nccl_GetUniqueId", &alpa_nccl::nccl_GetUniqueId, "get unique nccl id");
   m.def("nccl_GetVersion", &alpa_nccl::nccl_GetVersion, "get nccl version");

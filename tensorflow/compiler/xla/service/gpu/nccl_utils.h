@@ -32,73 +32,8 @@ limitations under the License.
 #include "third_party/nccl/nccl.h"
 #endif
 
-// #include "pybind11/pybind11.h"
-// #include "pybind11/attr.h"
-// #include "pybind11/cast.h"
-// #include "pybind11/numpy.h"
-// #include "pybind11/pytypes.h"
-// #include "pybind11/stl_bind.h"
-
-// #include "tensorflow/compiler/xla/python/py_buffer.h"
-// #include "tensorflow/compiler/xla/python/py_client.h"
-
 namespace xla {
 namespace gpu {
-
-// ncclDataType_t MyToNcclDataType(PrimitiveType element_type);
-
-// int SizeOfType(ncclDataType_t element_type);
-
-// std::shared_ptr< std::vector<ncclComm_t> > InitCommunicator(int n_devices, std::vector<int> devices_vec);
-
-// void LocalAllGather(int n_devices, 
-//                     std::vector<ncclComm_t> comms, 
-//                     std::vector<PyBuffer::object> buffers, 
-//                     std::vector<int> devices_ids, 
-//                     uint n_elements);
-
-// std::shared_ptr< std::vector<ncclComm_t> > nccl_InitCommunicator(int n_devices, std::vector<int> devices_vec);
-
-// void nccl_LocalAllGather(int n_devices, 
-//                          std::vector<ncclComm_t> comms, 
-//                          std::vector<PyBuffer::object> buffers, 
-//                          std::vector<int> devices_ids, 
-//                          std::vector<uint> local_starts, 
-//                          uint global_start, 
-//                          uint n_elements);
-
-// void nccl_DestroyComms(std::vector<ncclComm_t> comms);
-
-// void nccl_BroadcastPartialGPUs(int n_devices, 
-//                                std::vector<ncclComm_t> comms, 
-//                                std::vector<PyBuffer::object> buffers, 
-//                                std::vector<uint> local_start_positions, 
-//                                uint n_elements, 
-//                                int root_rank);
-
-// void nccl_Send(std::vector<ncclComm_t> comms, 
-//                PyBuffer::object buffer, 
-//                uint start, 
-//                uint n_elements, 
-//                int peer_p2p_rank);
-
-// void nccl_Recv(std::vector<ncclComm_t> comms, 
-//                PyBuffer::object buffer, 
-//                uint start, 
-//                uint n_elements, 
-//                int peer_p2p_rank);
-
-// ncclUniqueId nccl_GetUniqueId();
-
-// int nccl_GetVersion();
-
-// std::shared_ptr< std::vector<ncclComm_t> > nccl_CreateCommunicators(int n_devices, 
-//                                                                     int world_size, 
-//                                                                     std::vector<int> devices_global_rank, 
-//                                                                     std::vector<int> devices_ids, 
-//                                                                     ncclUniqueId nccl_uid);
-
-// int get_buffer_device_id(PyBuffer::object buffer);
 
 ncclRedOp_t ToNcclReduction(ReductionKind kind);
 StatusOr<std::pair<ncclDataType_t, int>> ToNcclDataTypeAndCountMultiplier(

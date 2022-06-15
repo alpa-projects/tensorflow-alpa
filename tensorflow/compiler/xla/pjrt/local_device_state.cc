@@ -170,6 +170,11 @@ void LocalDeviceState::ReturnStreamToPool(std::unique_ptr<se::Stream> stream) {
   usage_stream_pool_.push(std::move(stream));
 }
 
+void LocalDeviceState::SetPrngSeed(int seed) {
+  absl::MutexLock lock(&mu_);
+  prng_seed_generator_.seed(seed);
+}
+
 int LocalDeviceState::GetNewPrngSeed() {
   absl::MutexLock lock(&mu_);
   int x = 0;

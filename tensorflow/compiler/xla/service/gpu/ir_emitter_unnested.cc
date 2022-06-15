@@ -94,6 +94,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/outfeed_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/parallel_loop_emitter.h"
 #include "tensorflow/compiler/xla/service/gpu/replica_id_thunk.h"
+#include "tensorflow/compiler/xla/service/gpu/rng_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/sequential_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/swap_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/target_util.h"
@@ -2486,6 +2487,24 @@ Status IrEmitterUnnested::EmitRngGetAndUpdateState(mlir::Operation* op) {
                           output_address->getType()->getPointerAddressSpace()));
   Store(old_state, output_address);
 
+  return Status::OK();
+}
+
+Status IrEmitterUnnested::EmitRngGetAndUpdateStateThunk(mlir::Operation* op) {
+  // Replace the RngGetAndUpdateState with a custom thunk.
+  // So we can flexibly adjust the random seed at runtime.
+  auto casted = mlir::dyn_cast<mlir::lmhlo::RngGetAndUpdateStateOp>(op);
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice result_slice,
+                      GetAllocationSlice(casted.state()));
+  std::unique_ptr<Thunk> thunk;
+  if (IsBefThunkEnabled(hlo_module_config_)) {
+    TF_ASSIGN_OR_RETURN(thunk,
+                        CreateBefThunk(GetThunkInfo(op), op, {result_slice}));
+  } else {
+    thunk = absl::make_unique<RngGetAndUpdateStateThunk>(
+        GetThunkInfo(op), result_slice, casted.delta());
+  }
+  AddThunkToThunkSequence(std::move(thunk));
   return Status::OK();
 }
 
@@ -5764,7 +5783,7 @@ Status IrEmitterUnnested::EmitOp(mlir::Operation* op) {
   }
 
   if (mlir::isa<mlir::lmhlo::RngGetAndUpdateStateOp>(op)) {
-    return EmitRngGetAndUpdateState(op);
+    return EmitRngGetAndUpdateStateThunk(op);
   }
 
   if (mlir::isa<mlir::lmhlo::ScatterOp>(op)) {

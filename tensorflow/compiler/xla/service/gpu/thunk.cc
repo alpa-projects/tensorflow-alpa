@@ -26,6 +26,7 @@ Thunk::ExecuteParams::ExecuteParams(
       stream(stream),
       async_comms_stream(async_comms_stream),
       run_id(run_options.run_options().run_id()),
+      rng_seed(run_options.run_options().rng_seed()),
       device_assn(run_options.run_options().device_assignment()) {
   const GpuExecutableRunOptions* gpu_options =
       run_options.run_options().gpu_executable_run_options();
@@ -92,6 +93,8 @@ StatusOr<GlobalDeviceId> Thunk::ExecuteParams::GetGlobalDeviceId() const {
       return "kOutfeed";
     case Thunk::kReplicaId:
       return "kReplicaId";
+    case Thunk::kRngGetAndUpdateState:
+      return "kRngGetAndUpdateState";
     case Thunk::kPartitionId:
       return "kPartitionId";
     case Thunk::kSequential:
@@ -106,6 +109,8 @@ StatusOr<GlobalDeviceId> Thunk::ExecuteParams::GetGlobalDeviceId() const {
       return "kTriangularSolve";
     case Thunk::kWhile:
       return "kWhile";
+    default:
+      LOG(FATAL) << "Invalid thunk kind: " << kind;
   }
 }
 

@@ -22,6 +22,7 @@
 #include "tensorflow/compiler/xla/service/sharding_remover.h"
 #include "tensorflow/compiler/xla/service/sort_simplifier.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding.h"
+#include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 #include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
 #include "tensorflow/compiler/xla/service/spmd/redundant_slice_eliminator.h"
 #include "tensorflow/compiler/xla/service/spmd/slice_auto_sharded_stages.h"
@@ -33,7 +34,6 @@
 #include "tensorflow/compiler/xla/service/zero_sized_hlo_elimination.h"
 
 namespace xla {
-
 namespace spmd {
 
 const char kBeforeAutoShardingDumpName[] = "before_run_auto_sharding";
@@ -68,8 +68,8 @@ Status PreCompileCheck(const CompileOptions& options) {
   return Status::OK();
 }
 
-StatusOr<HloModuleConfig> CreateHloModuleConfig(
-    const HloModule* hlo_module, const CompileOptions options) {
+StatusOr<HloModuleConfig> CreateHloModuleConfig(const HloModule* hlo_module,
+                                                const CompileOptions options) {
   PreCompileCheck(options);
 
   const ExecutableBuildOptions& build_options =
@@ -86,7 +86,8 @@ StatusOr<HloModuleConfig> CreateHloModuleConfig(
   return module_config;
 }
 
-Status RunAutoShardingPass(HloModule* hlo_module, const CompileOptions& options) {
+Status RunAutoShardingPass(HloModule* hlo_module,
+                           const CompileOptions& options) {
   TF_ASSIGN_OR_RETURN(auto module_config,
                       CreateHloModuleConfig(hlo_module, options));
   hlo_module->set_config(module_config);
@@ -142,8 +143,10 @@ Status RunAutoShardingPass(HloModule* hlo_module, const CompileOptions& options)
       spmd_simplify.AddPass<HloDCE>();
 
       spmd_pipeline.AddPass<AutoSharding>();
+      spmd_pipeline.AddPass<ShardingPropagation>(
+          /*is_spmd=*/true, /*propagate_metadata=*/false,
+          /*allow_spmd_sharding_propagation_to_output=*/true);
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
-      spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<RedundantSliceEliminator>();
@@ -159,8 +162,8 @@ Status RunAutoShardingPass(HloModule* hlo_module, const CompileOptions& options)
   return Status::OK();
 }
 
-// Run the SPMD partitioner pass.
-Status RunSpmdPartitionerPass(HloModule* hlo_module, const CompileOptions& options) {
+Status RunSpmdPartitionerPass(HloModule* hlo_module,
+                              const CompileOptions& options) {
   TF_ASSIGN_OR_RETURN(auto module_config,
                       CreateHloModuleConfig(hlo_module, options));
   hlo_module->set_config(module_config);
@@ -172,18 +175,52 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module, const CompileOptions& optio
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
-      spmd_pipeline.AddPass<ShardingPropagation>(/*is_spmd=*/true);
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
+      spmd_pipeline.AddPass<RedundantSliceEliminator>();
       spmd_pipeline.AddPass<GradAccRewrite>();
     } else {
-      spmd_pipeline.AddPass<SliceAutoShardedStages>();
       // Remove redundant sharding ops when partition_count == 1.
       spmd_pipeline.AddPass<ShardingRemover>();
       spmd_pipeline.AddPass<HloDCE>();
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
   }
+  return Status::OK();
+}
+
+Status SetHloModuleOutputShardings(
+    HloModule* module, const std::vector<OpSharding>& op_shardings) {
+  // Run TupleSimplifier pass to remove redundant tuples.
+  // Otherwise, these redundant tuples and other custom call markers together
+  // will make the propagation generate unexpected results.
+  TupleSimplifier tuple_simplifier;
+  tuple_simplifier.Run(module);
+
+  // Set the sharding for the output tuple
+  HloComputation* entry = module->entry_computation();
+  HloInstruction* output_tuple = entry->root_instruction();
+
+  ShapeTree<HloSharding> tuple_sharding(output_tuple->shape(),
+                                        HloSharding::Replicate());
+  CHECK_EQ(tuple_sharding.leaf_count(), op_shardings.size());
+
+  size_t i = 0;
+  for (auto& leaf : tuple_sharding.leaves()) {
+    TF_ASSIGN_OR_RETURN(HloSharding hlo_sharding,
+                        HloSharding::FromProto(op_shardings[i++]));
+    leaf.second = hlo_sharding;
+  }
+  output_tuple->set_sharding(HloSharding::Tuple(tuple_sharding));
+
+  if (output_tuple->IsCustomCall(kPipelineMarker) ||
+      output_tuple->IsCustomCall(kIdentityMarker)) {
+    // Also set the operand. Otherwise, the propagation generates unexpected
+    // results.
+    output_tuple->mutable_operand(0)->set_sharding(
+        HloSharding::Tuple(tuple_sharding));
+  }
+
   return Status::OK();
 }
 

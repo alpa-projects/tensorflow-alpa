@@ -13,6 +13,10 @@ Status RunAutoShardingPass(HloModule* hlo_module, const CompileOptions& options)
 // Run the SPMD partitioner pass.
 Status RunSpmdPartitionerPass(HloModule* hlo_module, const CompileOptions& options);
 
+// Set the shardings for output tensors.
+Status SetHloModuleOutputShardings(HloModule* hlo_module,
+                                   const std::vector<OpSharding>& op_shardings);
+
 };  // namespace spmd
 };  // namespace xla
 

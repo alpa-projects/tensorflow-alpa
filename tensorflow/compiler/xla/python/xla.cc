@@ -134,9 +134,15 @@ PYBIND11_MODULE(xla_extension, m) {
       .def_property_readonly(
           "client",
           [](const ClientAndPtr<PjRtDevice>& device) { return device.client; })
-      .def(
-          "memory_allocated",
-          [](const PjRtDevice& device) {
+      .def("set_seed", [](const PjRtDevice& device, int seed) {
+            xla::PjRtClient* client = device.client();
+            xla::PjRtStreamExecutorClient* stream_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+
+            stream_client->device_state(device.local_hardware_id()).SetPrngSeed(seed);
+            return Status::OK();
+          })
+      .def("memory_allocated", [](const PjRtDevice& device) {
             const int64_t invalid = -1;
 
             xla::PjRtClient* client = device.client();
@@ -147,9 +153,7 @@ PYBIND11_MODULE(xla_extension, m) {
                 dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
             return gpu_client->allocator()->bytes_used(device.local_hardware_id());
           })
-      .def(
-          "max_memory_allocated",
-          [](const PjRtDevice& device) {
+      .def("max_memory_allocated", [](const PjRtDevice& device) {
             const int64_t invalid = -1;
 
             xla::PjRtClient* client = device.client();
@@ -160,9 +164,7 @@ PYBIND11_MODULE(xla_extension, m) {
                 dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
             return gpu_client->allocator()->bytes_peak_in_use(device.local_hardware_id());
           })
-      .def(
-          "available_memory",
-          [](const PjRtDevice& device) {
+      .def("available_memory", [](const PjRtDevice& device) {
             const int64_t invalid = -1;
 
             xla::PjRtClient* client = device.client();
@@ -173,9 +175,7 @@ PYBIND11_MODULE(xla_extension, m) {
                 dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
             return gpu_client->allocator()->bytes_available(device.local_hardware_id());
           })
-      .def(
-        "clear_memory_stats",
-        [](const PjRtDevice& device) {
+      .def("clear_memory_stats", [](const PjRtDevice& device) {
             const bool invalid = false;
 
             xla::PjRtClient* client = device.client();

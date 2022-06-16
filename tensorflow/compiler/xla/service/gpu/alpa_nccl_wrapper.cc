@@ -45,9 +45,9 @@ limitations under the License.
 PYBIND11_MAKE_OPAQUE(std::vector<ncclComm_t>);
 
 namespace xla {
-namespace alpa_nccl {
+namespace gpu {
 
-ncclDataType_t MyToNcclDataType(PrimitiveType element_type) {
+ncclDataType_t ToNcclDataType(PrimitiveType element_type) {
   switch (element_type) {
     case S8:
       return ncclInt8;
@@ -98,27 +98,29 @@ int SizeOfType(ncclDataType_t element_type) {
   }
 }
 
-std::shared_ptr< std::vector<ncclComm_t> > nccl_InitCommunicator(int n_devices, std::vector<int> devices_vec) {
-    ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*n_devices);
-    int* devices_ids = devices_vec.data();
-    ncclCommInitAll(comms, n_devices, devices_ids);
-    std::vector<ncclComm_t> comm_vec(comms, comms+n_devices);
-    return std::make_shared< std::vector<ncclComm_t> >(std::move(comm_vec));
+std::shared_ptr< std::vector<ncclComm_t> > NcclInitCommunicator(std::vector<int> devices_vec) {
+    int n_devices = devices_vec.size();
+    std::vector<ncclComm_t> comms;
+    comms.resize(n_devices);
+    ncclCommInitAll(comms.data(), n_devices, devices_vec.data());
+    return std::make_shared< std::vector<ncclComm_t> >(std::move(comms));
 }
 
-void nccl_LocalAllGather(int n_devices, 
-                         std::vector<ncclComm_t> comms, 
+void NcclLocalAllGather(std::vector<ncclComm_t> comms, 
                          std::vector<PyBuffer::object> buffers, 
-                         std::vector<int> devices_ids, 
-                         std::vector<uint> local_starts, // TODO(hexu): is the range of uint too small?
+                         std::vector<uint> local_start_positions, // TODO(hexu): is the range of uint too small?
                          uint global_start, 
                          uint n_elements) {
-  ncclDataType_t dtype = MyToNcclDataType(buffers[0].buf()->buffer()->on_device_shape().element_type());
+  int n_devices = comms.size();
+  CHECK_EQ(n_devices, buffers.size());
+  CHECK_EQ(n_devices, local_start_positions.size());
+
+  ncclDataType_t dtype = ToNcclDataType(buffers[0].buf()->buffer()->on_device_shape().element_type());
   int dtype_size = SizeOfType(dtype);
   ncclGroupStart();
   for (int i = 0; i < n_devices; ++i) {
     std::uintptr_t sendbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
-    sendbuff = sendbuff + local_starts[i]*dtype_size;
+    sendbuff = sendbuff + local_start_positions[i]*dtype_size;
     std::uintptr_t recvbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
     recvbuff = recvbuff + global_start*dtype_size;
     ncclAllGather((void*)sendbuff, (void*)recvbuff, n_elements, dtype, comms[i], cudaStreamLegacy);
@@ -127,18 +129,21 @@ void nccl_LocalAllGather(int n_devices,
 }
 
 
-void nccl_DestroyComms(std::vector<ncclComm_t> comms) {
+void NcclDestroyComms(std::vector<ncclComm_t> comms) {
   for (auto comm : comms) 
     ncclCommDestroy(comm);
 }
 
-void nccl_BroadcastPartialGPUs(int n_devices, 
-                               std::vector<ncclComm_t> comms, 
+void NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
                                std::vector<PyBuffer::object> buffers, 
                                std::vector<uint> local_start_positions, 
                                uint n_elements, 
                                int root_rank) {
-  ncclDataType_t dtype = MyToNcclDataType(buffers[0].buf()->buffer()->on_device_shape().element_type());
+  int n_devices = comms.size();
+  CHECK_EQ(n_devices, buffers.size());
+  CHECK_EQ(n_devices, local_start_positions.size());
+
+  ncclDataType_t dtype = ToNcclDataType(buffers[0].buf()->buffer()->on_device_shape().element_type());
   int dtype_size = SizeOfType(dtype);
   ncclGroupStart();
   for (int i = 0; i < n_devices; ++i) {
@@ -151,77 +156,76 @@ void nccl_BroadcastPartialGPUs(int n_devices,
   ncclGroupEnd();
 }
 
-void nccl_Send(std::vector<ncclComm_t> comms, 
+void NcclSend(std::vector<ncclComm_t> comms, 
                PyBuffer::object buffer, 
                uint start, 
                uint n_elements, 
                int peer_p2p_rank) {
-  ncclDataType_t dtype = MyToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
+  ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
   int dtype_size = SizeOfType(dtype);
   std::uintptr_t sendbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
   sendbuff = sendbuff + start*dtype_size;
   ncclSend((void*)sendbuff, n_elements, dtype, peer_p2p_rank, comms[0], cudaStreamLegacy);
 }
 
-void nccl_Recv(std::vector<ncclComm_t> comms, 
+void NcclRecv(std::vector<ncclComm_t> comms, 
                PyBuffer::object buffer, 
                uint start, 
                uint n_elements, 
                int peer_p2p_rank) {
-  ncclDataType_t dtype = MyToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
+  ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
   int dtype_size = SizeOfType(dtype);
-
   std::uintptr_t recvbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
   recvbuff = recvbuff + start*dtype_size;
   ncclRecv((void*)recvbuff, n_elements, dtype, peer_p2p_rank, comms[0], cudaStreamLegacy);
 }
 
-std::vector<char> nccl_uid_serialize(ncclUniqueId nccl_uid) {
-  char* id_chars = (char*)malloc(sizeof(char)*128);
-  memcpy(id_chars, &nccl_uid, sizeof(nccl_uid));
-  std::vector<char> id_vec(id_chars, id_chars+128);
-  return id_vec;
+std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid) {
+  std::vector<char> nccl_uid_vec(128, 0);
+  memcpy(nccl_uid_vec.data(), &nccl_uid, sizeof(nccl_uid));
+  return nccl_uid_vec;
 }
 
-ncclUniqueId nccl_uid_deserialize(std::vector<char> nccl_uid_vec) {
-  char * nccl_uid_chars = nccl_uid_vec.data();
+ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_vec) {
   ncclUniqueId nccl_uid;
-  memcpy(&nccl_uid, nccl_uid_chars, sizeof(nccl_uid));
+  memcpy(&nccl_uid, nccl_uid_vec.data(), sizeof(nccl_uid));
   return nccl_uid;
 }
 
-std::vector<char> nccl_GetUniqueId() {
+std::vector<char> NcclGetUniqueId() {
   ncclUniqueId id;
   ncclGetUniqueId(&id);
-  std::vector<char> id_vec = nccl_uid_serialize(id);
-  return id_vec;
+  std::vector<char> nccl_uid_vec = NcclUidSerialize(id);
+  return nccl_uid_vec;
 }
 
-int nccl_GetVersion() {
+int NcclGetVersion() {
   int version;
   ncclGetVersion(&version);
   return version;
 }
 
-std::shared_ptr< std::vector<ncclComm_t> > nccl_CreateCommunicators(int n_devices, 
-                                                                    int world_size, 
+std::shared_ptr< std::vector<ncclComm_t> > NcclCreateCommunicators(int world_size, 
                                                                     std::vector<int> devices_global_rank, 
                                                                     std::vector<int> devices_ids, 
                                                                     std::vector<char> nccl_uid_vec) {
-  ncclUniqueId nccl_uid = nccl_uid_deserialize(nccl_uid_vec);
-  ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*n_devices);
+  int n_devices = devices_global_rank.size();
+  CHECK_EQ(n_devices, devices_ids.size());
+  CHECK_EQ(128, nccl_uid_vec.size());
 
+  ncclUniqueId nccl_uid = NcclUidDeserialize(nccl_uid_vec);
+  std::vector<ncclComm_t> comms;
+  comms.resize(n_devices);
   ncclGroupStart();
   for (int i=0; i<n_devices; i++) {
     cudaSetDevice(devices_ids[i]);
-    ncclCommInitRank(comms+i, world_size, nccl_uid, devices_global_rank[i]);
+    ncclCommInitRank(comms.data()+i, world_size, nccl_uid, devices_global_rank[i]);
   }
   ncclGroupEnd();
-  std::vector<ncclComm_t> comm_vec(comms, comms+n_devices);
-  return std::make_shared< std::vector<ncclComm_t> >(std::move(comm_vec));
+  return std::make_shared< std::vector<ncclComm_t> >(std::move(comms));
 }
 
-int get_buffer_device_id(PyBuffer::object buffer){
+int GetBufferDeviceId(PyBuffer::object buffer) {
   return buffer.buf()->device()->local_hardware_id();
 }
 

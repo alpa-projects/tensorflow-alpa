@@ -42,58 +42,54 @@ limitations under the License.
 #include "tensorflow/compiler/xla/python/py_client.h"
 
 namespace xla {
-namespace alpa_nccl {
+namespace gpu {
 
-ncclDataType_t MyToNcclDataType(PrimitiveType element_type);
+ncclDataType_t ToNcclDataType(PrimitiveType element_type);
 
 int SizeOfType(ncclDataType_t element_type);
 
-std::shared_ptr< std::vector<ncclComm_t> > nccl_InitCommunicator(int n_devices, std::vector<int> devices_vec);
+std::shared_ptr< std::vector<ncclComm_t> > NcclInitCommunicator(std::vector<int> devices_vec);
 
-void nccl_LocalAllGather(int n_devices, 
-                         std::vector<ncclComm_t> comms, 
+void NcclLocalAllGather(std::vector<ncclComm_t> comms, 
                          std::vector<PyBuffer::object> buffers, 
-                         std::vector<int> devices_ids, 
-                         std::vector<uint> local_starts, 
+                         std::vector<uint> local_start_positions, 
                          uint global_start, 
                          uint n_elements);
 
-void nccl_DestroyComms(std::vector<ncclComm_t> comms);
+void NcclDestroyComms(std::vector<ncclComm_t> comms);
 
-void nccl_BroadcastPartialGPUs(int n_devices, 
-                               std::vector<ncclComm_t> comms, 
+void NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
                                std::vector<PyBuffer::object> buffers, 
                                std::vector<uint> local_start_positions, 
                                uint n_elements, 
                                int root_rank);
 
-void nccl_Send(std::vector<ncclComm_t> comms, 
+void NcclSend(std::vector<ncclComm_t> comms, 
                PyBuffer::object buffer, 
                uint start, 
                uint n_elements, 
                int peer_p2p_rank);
 
-void nccl_Recv(std::vector<ncclComm_t> comms, 
+void NcclRecv(std::vector<ncclComm_t> comms, 
                PyBuffer::object buffer, 
                uint start, 
                uint n_elements, 
                int peer_p2p_rank);
 
-std::vector<char> nccl_uid_serialize(ncclUniqueId nccl_uid);
+std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid);
 
-ncclUniqueId nccl_uid_deserialize(std::vector<char> nccl_uid_chars);
+ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_chars);
 
-std::vector<char> nccl_GetUniqueId();
+std::vector<char> NcclGetUniqueId();
 
-int nccl_GetVersion();
+int NcclGetVersion();
 
-std::shared_ptr< std::vector<ncclComm_t> > nccl_CreateCommunicators(int n_devices, 
-                                                                    int world_size, 
+std::shared_ptr< std::vector<ncclComm_t> > NcclCreateCommunicators(int world_size, 
                                                                     std::vector<int> devices_global_rank, 
                                                                     std::vector<int> devices_ids, 
                                                                     std::vector<char> nccl_uid);
 
-int get_buffer_device_id(PyBuffer::object buffer);
+int GetBufferDeviceId(PyBuffer::object buffer);
 
 
 }  // namespace alpa_nccl

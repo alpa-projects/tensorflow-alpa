@@ -539,21 +539,20 @@ PYBIND11_MODULE(xla_extension, m) {
         "representation");
 
   py::class_<std::vector<ncclComm_t>, std::shared_ptr<std::vector<ncclComm_t>>> ncclComm_vec(m, "ncclComm_vec");
-  py::class_<ncclUniqueId> nccl_UniqueId(m, "ncclUniqueId");
-  m.def("nccl_InitCommunicator", &alpa_nccl::nccl_InitCommunicator,
+  m.def("nccl_init_communicator", &gpu::NcclInitCommunicator,
         "Initialize single thread communicators");
-  m.def("nccl_LocalAllGather", &alpa_nccl::nccl_LocalAllGather, "nccl local allgather");
-  m.def("nccl_DestroyComms", &alpa_nccl::nccl_DestroyComms, "destroy comms");
-  m.def("nccl_GetUniqueId", &alpa_nccl::nccl_GetUniqueId, "get unique nccl id");
-  m.def("nccl_GetVersion", &alpa_nccl::nccl_GetVersion, "get nccl version");
-  m.def("nccl_BroadcastPartialGPUs", &alpa_nccl::nccl_BroadcastPartialGPUs, 
+  m.def("nccl_local_all_gather", &gpu::NcclLocalAllGather, "nccl local allgather");
+  m.def("nccl_destroy_comms", &gpu::NcclDestroyComms, "destroy comms");
+  m.def("nccl_get_unique_id", &gpu::NcclGetUniqueId, "get unique nccl id");
+  m.def("nccl_get_version", &gpu::NcclGetVersion, "get nccl version");
+  m.def("nccl_broadcast_partial_gpus", &gpu::NcclBroadcastPartialGPUs,
         "nccl broadcast with only a subset of gpus in the host are involved");
-  m.def("nccl_CreateCommunicators", &alpa_nccl::nccl_CreateCommunicators, 
+  m.def("nccl_create_communicators", &gpu::NcclCreateCommunicators, 
         "nccl create communicators for multiple threads case");
-  m.def("get_buffer_device_id", &alpa_nccl::get_buffer_device_id, 
+  m.def("get_buffer_device_id", &gpu::GetBufferDeviceId, 
         "get the local device id for one pybuffer");
-  m.def("nccl_Recv", &alpa_nccl::nccl_Recv, "nccl recv data");
-  m.def("nccl_Send", &alpa_nccl::nccl_Send, "nccl send data");
+  m.def("nccl_recv", &gpu::NcclRecv, "nccl recv data");
+  m.def("nccl_send", &gpu::NcclSend, "nccl send data");
 
 }  // NOLINT(readability/fn_size)
 

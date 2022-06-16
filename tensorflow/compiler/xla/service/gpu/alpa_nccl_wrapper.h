@@ -48,33 +48,33 @@ ncclDataType_t ToNcclDataType(PrimitiveType element_type);
 
 int SizeOfType(ncclDataType_t element_type);
 
-std::shared_ptr< std::vector<ncclComm_t> > NcclInitCommunicator(std::vector<int> devices_vec);
+std::shared_ptr< std::vector<ncclComm_t> > WrappedNcclInitCommunicator(std::vector<int> devices_vec);
 
 void NcclLocalAllGather(std::vector<ncclComm_t> comms, 
-                         std::vector<PyBuffer::object> buffers, 
-                         std::vector<uint> local_start_positions, 
-                         uint global_start, 
-                         uint n_elements);
+                        std::vector<PyBuffer::object> buffers, 
+                        std::vector<uint> local_start_positions, 
+                        uint global_start, 
+                        uint n_elements);
 
 void NcclDestroyComms(std::vector<ncclComm_t> comms);
 
 void NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
-                               std::vector<PyBuffer::object> buffers, 
-                               std::vector<uint> local_start_positions, 
-                               uint n_elements, 
-                               int root_rank);
+                              std::vector<PyBuffer::object> buffers, 
+                              std::vector<uint> local_start_positions, 
+                              uint n_elements, 
+                              int root_rank);
 
 void NcclSend(std::vector<ncclComm_t> comms, 
-               PyBuffer::object buffer, 
-               uint start, 
-               uint n_elements, 
-               int peer_p2p_rank);
+              PyBuffer::object buffer, 
+              uint start, 
+              uint n_elements, 
+              int peer_p2p_rank);
 
-void NcclRecv(std::vector<ncclComm_t> comms, 
-               PyBuffer::object buffer, 
-               uint start, 
-               uint n_elements, 
-               int peer_p2p_rank);
+void NcclRecv(std::vector<ncclComm_t> comms,
+              PyBuffer::object buffer,
+              uint start,
+              uint n_elements,
+              int peer_p2p_rank);
 
 std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid);
 
@@ -84,10 +84,10 @@ std::vector<char> NcclGetUniqueId();
 
 int NcclGetVersion();
 
-std::shared_ptr< std::vector<ncclComm_t> > NcclCreateCommunicators(int world_size, 
-                                                                    std::vector<int> devices_global_rank, 
-                                                                    std::vector<int> devices_ids, 
-                                                                    std::vector<char> nccl_uid);
+std::shared_ptr< std::vector<ncclComm_t> > NcclCreateCommunicators(int world_size,
+                                                                   std::vector<int> devices_global_rank,
+                                                                   std::vector<int> devices_ids,
+                                                                   std::vector<char> nccl_uid);
 
 int GetBufferDeviceId(PyBuffer::object buffer);
 

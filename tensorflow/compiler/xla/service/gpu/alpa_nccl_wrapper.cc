@@ -98,7 +98,7 @@ int SizeOfType(ncclDataType_t element_type) {
   }
 }
 
-std::shared_ptr< std::vector<ncclComm_t> > NcclInitCommunicator(std::vector<int> devices_vec) {
+std::shared_ptr< std::vector<ncclComm_t> > WrappedNcclInitCommunicator(std::vector<int> devices_vec) {
     int n_devices = devices_vec.size();
     std::vector<ncclComm_t> comms;
     comms.resize(n_devices);
@@ -107,10 +107,10 @@ std::shared_ptr< std::vector<ncclComm_t> > NcclInitCommunicator(std::vector<int>
 }
 
 void NcclLocalAllGather(std::vector<ncclComm_t> comms, 
-                         std::vector<PyBuffer::object> buffers, 
-                         std::vector<uint> local_start_positions, // TODO(hexu): is the range of uint too small?
-                         uint global_start, 
-                         uint n_elements) {
+                        std::vector<PyBuffer::object> buffers, 
+                        std::vector<uint> local_start_positions, // TODO(hexu): is the range of uint too small?
+                        uint global_start, 
+                        uint n_elements) {
   int n_devices = comms.size();
   CHECK_EQ(n_devices, buffers.size());
   CHECK_EQ(n_devices, local_start_positions.size());
@@ -135,10 +135,10 @@ void NcclDestroyComms(std::vector<ncclComm_t> comms) {
 }
 
 void NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
-                               std::vector<PyBuffer::object> buffers, 
-                               std::vector<uint> local_start_positions, 
-                               uint n_elements, 
-                               int root_rank) {
+                              std::vector<PyBuffer::object> buffers, 
+                              std::vector<uint> local_start_positions, 
+                              uint n_elements, 
+                              int root_rank) {
   int n_devices = comms.size();
   CHECK_EQ(n_devices, buffers.size());
   CHECK_EQ(n_devices, local_start_positions.size());
@@ -156,11 +156,11 @@ void NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms,
   ncclGroupEnd();
 }
 
-void NcclSend(std::vector<ncclComm_t> comms, 
-               PyBuffer::object buffer, 
-               uint start, 
-               uint n_elements, 
-               int peer_p2p_rank) {
+void NcclSend(std::vector<ncclComm_t> comms,
+              PyBuffer::object buffer,
+              uint start,
+              uint n_elements,
+              int peer_p2p_rank) {
   ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
   int dtype_size = SizeOfType(dtype);
   std::uintptr_t sendbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
@@ -168,11 +168,11 @@ void NcclSend(std::vector<ncclComm_t> comms,
   ncclSend((void*)sendbuff, n_elements, dtype, peer_p2p_rank, comms[0], cudaStreamLegacy);
 }
 
-void NcclRecv(std::vector<ncclComm_t> comms, 
-               PyBuffer::object buffer, 
-               uint start, 
-               uint n_elements, 
-               int peer_p2p_rank) {
+void NcclRecv(std::vector<ncclComm_t> comms,
+              PyBuffer::object buffer,
+              uint start,
+              uint n_elements,
+              int peer_p2p_rank) {
   ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
   int dtype_size = SizeOfType(dtype);
   std::uintptr_t recvbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
@@ -206,9 +206,9 @@ int NcclGetVersion() {
 }
 
 std::shared_ptr< std::vector<ncclComm_t> > NcclCreateCommunicators(int world_size, 
-                                                                    std::vector<int> devices_global_rank, 
-                                                                    std::vector<int> devices_ids, 
-                                                                    std::vector<char> nccl_uid_vec) {
+                                                                   std::vector<int> devices_global_rank, 
+                                                                   std::vector<int> devices_ids, 
+                                                                   std::vector<char> nccl_uid_vec) {
   int n_devices = devices_global_rank.size();
   CHECK_EQ(n_devices, devices_ids.size());
   CHECK_EQ(128, nccl_uid_vec.size());

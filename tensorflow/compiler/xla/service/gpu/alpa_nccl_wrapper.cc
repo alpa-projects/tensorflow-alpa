@@ -32,13 +32,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/core/platform/env.h"
 
-#include "pybind11/pybind11.h"
-#include "pybind11/attr.h"
-#include "pybind11/cast.h"
-#include "pybind11/numpy.h"
-#include "pybind11/pytypes.h"
-#include "pybind11/stl_bind.h"
-
 #include "tensorflow/compiler/xla/python/py_buffer.h"
 #include "tensorflow/compiler/xla/python/py_client.h"
 
@@ -98,7 +91,7 @@ int SizeOfType(ncclDataType_t element_type) {
   }
 }
 
-std::shared_ptr< std::vector<ncclComm_t> > WrappedNcclInitCommunicator(std::vector<int> devices_vec) {
+std::shared_ptr< std::vector<ncclComm_t> > NcclInitCommunicator(std::vector<int> devices_vec) {
     int n_devices = devices_vec.size();
     std::vector<ncclComm_t> comms;
     comms.resize(n_devices);

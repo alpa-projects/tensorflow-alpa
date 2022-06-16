@@ -539,7 +539,7 @@ PYBIND11_MODULE(xla_extension, m) {
         "representation");
 
   py::class_<std::vector<ncclComm_t>, std::shared_ptr<std::vector<ncclComm_t>>> ncclComm_vec(m, "ncclComm_vec");
-  m.def("nccl_init_communicator", &gpu::WrappedNcclInitCommunicator,
+  m.def("nccl_init_communicator", &gpu::NcclInitCommunicator,
         "Initialize single thread communicators");
   m.def("nccl_local_all_gather", &gpu::NcclLocalAllGather, "nccl local allgather");
   m.def("nccl_destroy_comms", &gpu::NcclDestroyComms, "destroy comms");

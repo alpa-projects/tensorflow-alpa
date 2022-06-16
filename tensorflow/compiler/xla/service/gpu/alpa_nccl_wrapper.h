@@ -48,7 +48,7 @@ ncclDataType_t ToNcclDataType(PrimitiveType element_type);
 
 int SizeOfType(ncclDataType_t element_type);
 
-std::shared_ptr< std::vector<ncclComm_t> > WrappedNcclInitCommunicator(std::vector<int> devices_vec);
+std::shared_ptr< std::vector<ncclComm_t> > NcclInitCommunicator(std::vector<int> devices_vec);
 
 void NcclLocalAllGather(std::vector<ncclComm_t> comms, 
                         std::vector<PyBuffer::object> buffers, 

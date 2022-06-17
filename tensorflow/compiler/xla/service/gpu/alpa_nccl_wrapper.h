@@ -44,55 +44,77 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
+Status ncclResultToStatus(ncclResult_t s, const char* file, int64_t line,
+                          const char* expr);
+
+#define XLA_CUDA_STATUS(expr) \
+  xla::gpu::ncclResultToStatus(expr, __FILE__, __LINE__, #expr)
+
+#define XLA_CUDA_RETURN_IF_ERROR(expr) \
+  do {                                 \
+    Status s = XLA_CUDA_STATUS(expr);  \
+    if (!s.ok()) {                     \
+      return s;                        \
+    }                                  \
+  } while (0)
+
+#define XLA_CUDA_WARN_IF_ERROR(expr)  \
+  do {                                \
+    Status s = XLA_CUDA_STATUS(expr); \
+    if (!s.ok()) {                    \
+      LOG(ERROR) << s.ToString();     \
+    }                                 \
+  } while (0)
+
 ncclDataType_t ToNcclDataType(PrimitiveType element_type);
 
 int SizeOfType(ncclDataType_t element_type);
 
-std::shared_ptr< std::vector<ncclComm_t> > NcclInitCommunicator(std::vector<int> devices_vec);
+tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclInitCommunicator(std::vector<int> devices_vec);
 
-void NcclLocalAllGather(std::vector<ncclComm_t> comms, 
-                        std::vector<PyBuffer::object> buffers, 
-                        std::vector<uint> local_start_positions, 
-                        uint global_start, 
-                        uint n_elements);
+tensorflow::Status NcclLocalAllGather(std::vector<ncclComm_t> comms, 
+                                      std::vector<PyBuffer::object> buffers, 
+                                      std::vector<uint> local_start_positions, 
+                                      uint global_start, 
+                                      uint n_elements);
 
-void NcclDestroyComms(std::vector<ncclComm_t> comms);
+tensorflow::Status NcclDestroyComms(std::vector<ncclComm_t> comms);
 
-void NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
-                              std::vector<PyBuffer::object> buffers, 
-                              std::vector<uint> local_start_positions, 
-                              uint n_elements, 
-                              int root_rank);
+tensorflow::Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
+                                            std::vector<PyBuffer::object> buffers, 
+                                            std::vector<uint> local_start_positions, 
+                                            uint n_elements, 
+                                            int root_rank);
 
-void NcclSend(std::vector<ncclComm_t> comms, 
-              PyBuffer::object buffer, 
-              uint start, 
-              uint n_elements, 
-              int peer_p2p_rank);
+tensorflow::Status NcclSend(std::vector<ncclComm_t> comms, 
+                            PyBuffer::object buffer, 
+                            uint start, 
+                            uint n_elements, 
+                            int peer_p2p_rank);
 
-void NcclRecv(std::vector<ncclComm_t> comms,
-              PyBuffer::object buffer,
-              uint start,
-              uint n_elements,
-              int peer_p2p_rank);
+tensorflow::Status NcclRecv(std::vector<ncclComm_t> comms,
+                            PyBuffer::object buffer,
+                            uint start,
+                            uint n_elements,
+                            int peer_p2p_rank);
 
 std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid);
 
 ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_chars);
 
-std::vector<char> NcclGetUniqueId();
+tensorflow::StatusOr< std::vector<char> > NcclGetUniqueId();
 
-int NcclGetVersion();
+tensorflow::StatusOr<int> NcclGetVersion();
 
-std::shared_ptr< std::vector<ncclComm_t> > NcclCreateCommunicators(int world_size,
-                                                                   std::vector<int> devices_global_rank,
-                                                                   std::vector<int> devices_ids,
-                                                                   std::vector<char> nccl_uid);
+tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclCreateCommunicators(int world_size,
+                                                                                           std::vector<int> devices_global_rank,
+                                                                                           std::vector<int> devices_ids,
+                                                                                           std::vector<char> nccl_uid);
 
-int GetBufferDeviceId(PyBuffer::object buffer);
+tensorflow::StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
 
 
-}  // namespace alpa_nccl
+}  // namespace gpu
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_NCCL_UTILS_H_

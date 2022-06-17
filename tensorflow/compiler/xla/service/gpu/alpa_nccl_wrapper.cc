@@ -214,13 +214,14 @@ tensorflow::Status NcclRecv(std::vector<ncclComm_t> comms,
 
 std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid) {
   std::vector<char> nccl_uid_vec(sizeof(nccl_uid.internal), 0);
-  memcpy(nccl_uid_vec.data(), &nccl_uid.internal, sizeof(nccl_uid));
+  memcpy(nccl_uid_vec.data(), &nccl_uid.internal, sizeof(nccl_uid.internal));
   return nccl_uid_vec;
 }
 
 ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_vec) {
   ncclUniqueId nccl_uid;
-  memcpy(&nccl_uid.internal, nccl_uid_vec.data(), sizeof(nccl_uid));
+  CHECK_EQ(sizeof(nccl_uid.internal), nccl_uid_vec.size());
+  memcpy(&nccl_uid.internal, nccl_uid_vec.data(), sizeof(nccl_uid.internal));
   return nccl_uid;
 }
 
@@ -252,7 +253,6 @@ tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclCreateCom
 #if XLA_ENABLE_XCCL
   int n_devices = devices_global_rank.size();
   CHECK_EQ(n_devices, devices_ids.size());
-  CHECK_EQ(128, nccl_uid_vec.size());
 
   ncclUniqueId nccl_uid = NcclUidDeserialize(nccl_uid_vec);
   std::vector<ncclComm_t> comms;

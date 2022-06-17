@@ -45,7 +45,7 @@ Status ncclResultToStatus(ncclResult_t s, const char* file, int64_t line,
   if (s == ncclSuccess) {
     return Status::OK();
   }
-  return errors::Internal(
+  return tensorflow::errors::Internal(
       absl::StrFormat("%s:%d: NCCL operation %s failed: %s", file, line, expr,
                       ncclGetErrorString(s)));
 }

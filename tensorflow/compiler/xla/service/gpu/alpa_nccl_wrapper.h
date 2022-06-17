@@ -70,48 +70,48 @@ ncclDataType_t ToNcclDataType(PrimitiveType element_type);
 
 int SizeOfType(ncclDataType_t element_type);
 
-tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclInitCommunicator(std::vector<int> devices_vec);
+StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclInitCommunicator(std::vector<int> devices_vec);
 
-tensorflow::Status NcclLocalAllGather(std::vector<ncclComm_t> comms, 
-                                      std::vector<PyBuffer::object> buffers, 
-                                      std::vector<uint> local_start_positions, 
-                                      uint global_start, 
-                                      uint n_elements);
+Status NcclLocalAllGather(std::vector<ncclComm_t> comms, 
+                          std::vector<PyBuffer::object> buffers, 
+                          std::vector<uint> local_start_positions, 
+                          uint global_start, 
+                          uint n_elements);
 
-tensorflow::Status NcclDestroyComms(std::vector<ncclComm_t> comms);
+Status NcclDestroyComms(std::vector<ncclComm_t> comms);
 
-tensorflow::Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
-                                            std::vector<PyBuffer::object> buffers, 
-                                            std::vector<uint> local_start_positions, 
-                                            uint n_elements, 
-                                            int root_rank);
+Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
+                                std::vector<PyBuffer::object> buffers, 
+                                std::vector<uint> local_start_positions, 
+                                uint n_elements, 
+                                int root_rank);
 
-tensorflow::Status NcclSend(std::vector<ncclComm_t> comms, 
-                            PyBuffer::object buffer, 
-                            uint start, 
-                            uint n_elements, 
-                            int peer_p2p_rank);
+Status NcclSend(std::vector<ncclComm_t> comms, 
+                PyBuffer::object buffer, 
+                uint start, 
+                uint n_elements, 
+                int peer_p2p_rank);
 
-tensorflow::Status NcclRecv(std::vector<ncclComm_t> comms,
-                            PyBuffer::object buffer,
-                            uint start,
-                            uint n_elements,
-                            int peer_p2p_rank);
+Status NcclRecv(std::vector<ncclComm_t> comms,
+                PyBuffer::object buffer,
+                uint start,
+                uint n_elements,
+                int peer_p2p_rank);
 
 std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid);
 
 ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_chars);
 
-tensorflow::StatusOr< std::vector<char> > NcclGetUniqueId();
+StatusOr< std::vector<char> > NcclGetUniqueId();
 
-tensorflow::StatusOr<int> NcclGetVersion();
+StatusOr<int> NcclGetVersion();
 
-tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclCreateCommunicators(int world_size,
-                                                                                           std::vector<int> devices_global_rank,
-                                                                                           std::vector<int> devices_ids,
-                                                                                           std::vector<char> nccl_uid);
+StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclCreateCommunicators(int world_size,
+                                                                               std::vector<int> devices_global_rank,
+                                                                               std::vector<int> devices_ids,
+                                                                               std::vector<char> nccl_uid);
 
-tensorflow::StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
+StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
 
 
 }  // namespace gpu

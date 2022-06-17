@@ -45,7 +45,7 @@ Status ncclResultToStatus(ncclResult_t s, const char* file, int64_t line,
   if (s == ncclSuccess) {
     return Status::OK();
   }
-  return tensorflow::errors::Internal(
+  return errors::Internal(
       absl::StrFormat("%s:%d: NCCL operation %s failed: %s", file, line, expr,
                       ncclGetErrorString(s)));
 }
@@ -101,7 +101,7 @@ int SizeOfType(ncclDataType_t element_type) {
   }
 }
 
-tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclInitCommunicator(std::vector<int> devices_vec) {
+StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclInitCommunicator(std::vector<int> devices_vec) {
 #if XLA_ENABLE_XCCL
     int n_devices = devices_vec.size();
     std::vector<ncclComm_t> comms;
@@ -113,11 +113,11 @@ tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclInitCommu
 #endif  // XLA_ENABLE_XCCL
 }
 
-tensorflow::Status NcclLocalAllGather(std::vector<ncclComm_t> comms, 
-                                      std::vector<PyBuffer::object> buffers, 
-                                      std::vector<uint> local_start_positions, // TODO(hexu): is the range of uint too small?
-                                      uint global_start, 
-                                      uint n_elements) {
+Status NcclLocalAllGather(std::vector<ncclComm_t> comms, 
+                          std::vector<PyBuffer::object> buffers, 
+                          std::vector<uint> local_start_positions, // TODO(hexu): is the range of uint too small?
+                          uint global_start, 
+                          uint n_elements) {
 #if XLA_ENABLE_XCCL
   int n_devices = comms.size();
   CHECK_EQ(n_devices, buffers.size());
@@ -141,7 +141,7 @@ tensorflow::Status NcclLocalAllGather(std::vector<ncclComm_t> comms,
 }
 
 
-tensorflow::Status NcclDestroyComms(std::vector<ncclComm_t> comms) {
+Status NcclDestroyComms(std::vector<ncclComm_t> comms) {
 #if XLA_ENABLE_XCCL
   for (auto comm : comms) 
     XLA_CUDA_RETURN_IF_ERROR(ncclCommDestroy(comm));
@@ -151,11 +151,11 @@ tensorflow::Status NcclDestroyComms(std::vector<ncclComm_t> comms) {
 #endif  // XLA_ENABLE_XCCL
 }
 
-tensorflow::Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
-                                            std::vector<PyBuffer::object> buffers, 
-                                            std::vector<uint> local_start_positions, 
-                                            uint n_elements, 
-                                            int root_rank) {
+Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
+                                std::vector<PyBuffer::object> buffers, 
+                                std::vector<uint> local_start_positions, 
+                                uint n_elements, 
+                                int root_rank) {
 #if XLA_ENABLE_XCCL
   int n_devices = comms.size();
   CHECK_EQ(n_devices, buffers.size());
@@ -178,11 +178,11 @@ tensorflow::Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms,
 #endif  // XLA_ENABLE_XCCL
 }
 
-tensorflow::Status NcclSend(std::vector<ncclComm_t> comms,
-                            PyBuffer::object buffer,
-                            uint start,
-                            uint n_elements,
-                            int peer_p2p_rank) {
+Status NcclSend(std::vector<ncclComm_t> comms,
+                PyBuffer::object buffer,
+                uint start,
+                uint n_elements,
+                int peer_p2p_rank) {
 #if XLA_ENABLE_XCCL
   ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
   int dtype_size = SizeOfType(dtype);
@@ -195,11 +195,11 @@ tensorflow::Status NcclSend(std::vector<ncclComm_t> comms,
 #endif  // XLA_ENABLE_XCCL
 }
 
-tensorflow::Status NcclRecv(std::vector<ncclComm_t> comms,
-                            PyBuffer::object buffer,
-                            uint start,
-                            uint n_elements,
-                            int peer_p2p_rank) {
+Status NcclRecv(std::vector<ncclComm_t> comms,
+                PyBuffer::object buffer,
+                uint start,
+                uint n_elements,
+                int peer_p2p_rank) {
 #if XLA_ENABLE_XCCL
   ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
   int dtype_size = SizeOfType(dtype);
@@ -225,7 +225,7 @@ ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_vec) {
   return nccl_uid;
 }
 
-tensorflow::StatusOr< std::vector<char> > NcclGetUniqueId() {
+StatusOr< std::vector<char> > NcclGetUniqueId() {
 #if XLA_ENABLE_XCCL
   ncclUniqueId id;
   XLA_CUDA_RETURN_IF_ERROR(ncclGetUniqueId(&id));
@@ -236,7 +236,7 @@ tensorflow::StatusOr< std::vector<char> > NcclGetUniqueId() {
 #endif  // XLA_ENABLE_XCCL
 }
 
-tensorflow::StatusOr<int> NcclGetVersion() {
+StatusOr<int> NcclGetVersion() {
 #if XLA_ENABLE_XCCL
   int version;
   XLA_CUDA_RETURN_IF_ERROR(ncclGetVersion(&version));
@@ -246,10 +246,10 @@ tensorflow::StatusOr<int> NcclGetVersion() {
 #endif  // XLA_ENABLE_XCCL
 }
 
-tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclCreateCommunicators(int world_size, 
-                                                                                           std::vector<int> devices_global_rank, 
-                                                                                           std::vector<int> devices_ids, 
-                                                                                           std::vector<char> nccl_uid_vec) {
+StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclCreateCommunicators(int world_size, 
+                                                                               std::vector<int> devices_global_rank, 
+                                                                               std::vector<int> devices_ids, 
+                                                                               std::vector<char> nccl_uid_vec) {
 #if XLA_ENABLE_XCCL
   int n_devices = devices_global_rank.size();
   CHECK_EQ(n_devices, devices_ids.size());
@@ -269,7 +269,7 @@ tensorflow::StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclCreateCom
 #endif  // XLA_ENABLE_XCCL
 }
 
-tensorflow::StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer) {
+StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer) {
   return buffer.buf()->device()->local_hardware_id();
 }
 

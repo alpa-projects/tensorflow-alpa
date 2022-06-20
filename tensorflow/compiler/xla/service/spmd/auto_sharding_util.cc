@@ -381,16 +381,41 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
         if (batch_map.count(operand)) {
           int value = batch_map[operand];
+          int64_t batch_size = operand->shape().dimensions(value);
+
+          int pt_operand = 0;
+          int pt_ins = 0;
+
+          auto skip_one_dims = [&]() {
+            if (batch_size != 1) {
+              while (pt_operand + 1 < operand->shape().rank() &&
+                     operand->shape().dimensions(pt_operand) == 1) {
+                pt_operand += 1;
+              }
+              while (pt_ins + 1 < ins->shape().rank() &&
+                     ins->shape().dimensions(pt_ins) == 1) {
+                pt_ins += 1;
+              }
+            }
+          };
+
+          skip_one_dims();
+
           bool match = true;
-          for (int i = 0; i < value; ++i) {
-            if (operand->shape().dimensions(i) != ins->shape().dimensions(i)) {
+          while (pt_operand < value) {
+            if (operand->shape().dimensions(pt_operand) !=
+                ins->shape().dimensions(pt_ins)) {
               match = false;
               break;
             }
+            pt_operand += 1;
+            pt_ins += 1;
+
+            skip_one_dims();
           }
 
           if (match) {
-            batch_map[ins] = value;
+            batch_map[ins] = pt_ins;
           }
         }
         break;
@@ -624,16 +649,41 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
 
         if (batch_map.count(ins) && !batch_map.count(operand)) {
           int value = batch_map[ins];
+          int64_t batch_size = ins->shape().dimensions(value);
+
+          int pt_operand = 0;
+          int pt_ins = 0;
+
+          auto skip_one_dims = [&]() {
+            if (batch_size != 1) {
+              while (pt_operand + 1 < operand->shape().rank() &&
+                     operand->shape().dimensions(pt_operand) == 1) {
+                pt_operand += 1;
+              }
+              while (pt_ins + 1 < ins->shape().rank() &&
+                     ins->shape().dimensions(pt_ins) == 1) {
+                pt_ins += 1;
+              }
+            }
+          };
+
+          skip_one_dims();
+
           bool match = true;
-          for (int i = 0; i < value; ++i) {
-            if (operand->shape().dimensions(i) != ins->shape().dimensions(i)) {
+          while (pt_ins < value) {
+            if (operand->shape().dimensions(pt_operand) !=
+                ins->shape().dimensions(pt_ins)) {
               match = false;
               break;
             }
+            pt_operand += 1;
+            pt_ins += 1;
+
+            skip_one_dims();
           }
 
           if (match) {
-            batch_map[operand] = value;
+            batch_map[operand] = pt_operand;
           }
         }
         break;
@@ -846,7 +896,6 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   //   }
   // }
   // std::cerr << "Batch dim map end" << std::endl;
-  // exit(-1);
 
   return batch_map;
 }

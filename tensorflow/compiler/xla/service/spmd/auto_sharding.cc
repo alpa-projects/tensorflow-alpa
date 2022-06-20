@@ -469,7 +469,7 @@ std::pair<int64_t, bool> ChooseOperandToFollow(
   return std::make_pair(follow_idx, tie);
 }
 
-// Return whether an instruciton can follow one of its operand when
+// Return whether an instruction can follow one of its operand when
 // more than one operand have the same priority.
 bool AllowTieFollowing(const HloInstruction* ins) {
   if (ins->opcode() == HloOpcode::kCompare ||
@@ -2074,7 +2074,10 @@ std::string PrintAutoShardingSolution(
 void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
     const InstructionBatchDimMap& batch_dim_map, int num_devices,
     AutoShardingSolverOption& solver_option) {
-  int64_t batch_size = (((int64_t)1) << 31) - 1;
+  int64_t min_batch_size = (((int64_t)1) << 31) - 1;
+  int64_t max_batch_size = -1;
+  const HloInstruction* min_ins = nullptr;
+
   for (auto iter : batch_dim_map) {
     int64_t tmp_batch_size;
     if (iter.first->shape().IsTuple()) {
@@ -2083,19 +2086,27 @@ void DisableIncompatibleMixedMeshShapeAndForceBatchDim(
     } else {
       tmp_batch_size = iter.first->shape().dimensions(iter.second);
     }
-    batch_size = std::min(batch_size, tmp_batch_size);
+    if (tmp_batch_size < min_batch_size) {
+      min_batch_size = tmp_batch_size;
+      min_ins = iter.first;
+    }
+    max_batch_size = std::max(max_batch_size, tmp_batch_size);
   }
 
-  if (batch_size % num_devices != 0) {
+  if (min_batch_size % num_devices != 0) {
     if (solver_option.allow_mixed_mesh_shape) {
       solver_option.allow_mixed_mesh_shape = false;
-      LOG(WARNING)
-          << "Mixed mesh shape is disabled due to indivisible batch size.";
+      LOG(WARNING) << "WARNING: Mixed mesh shape is disabled due to "
+                   << "indivisible batch size. Source instruction: "
+                   << (min_ins == nullptr ? "unknown" : min_ins->ToString());
     }
   }
 
-  if (batch_size == 1) {
+  if (min_batch_size == 1 && max_batch_size != 1) {
     solver_option.force_batch_dim_to_mesh_dim = -1;
+    LOG(WARNING) << "WARNING: force_batch_dim_to_mesh_dim is disabled due to "
+                 << "indivisible batch size. Source instruction: "
+                 << (min_ins == nullptr ? "unknown" : min_ins->ToString());
   }
 }
 

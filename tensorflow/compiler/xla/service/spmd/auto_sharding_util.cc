@@ -634,11 +634,11 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
           for (int i = 0; i < ins->shape().rank(); ++i) {
             if (absl::c_linear_search(dimensions, i)) {
               old_dim++;
-            }
 
-            if (i == value && old_dim >= 0) {
-              batch_map[operand] = old_dim;
-              break;
+              if (i == value) {
+                batch_map[operand] = old_dim;
+                break;
+              }
             }
           }
         }
@@ -888,7 +888,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
   // Print batch map for debugging
   // std::cerr << "Batch dim map begin" << std::endl;
   // for (const HloInstruction* ins : instructions) {
-  //   std::cerr << ins->ToString(HloPrintOptions::ShortParsable());
+  //   std::cerr << ins->ToString();
   //   if (batch_map.count(ins)) {
   //     std::cerr << " BATCH " << batch_map[ins] << std::endl;
   //   } else {

@@ -538,21 +538,22 @@ PYBIND11_MODULE(xla_extension, m) {
         "Decodes an uncompressed pprof Profile protocol buffer into a JSON "
         "representation");
 
-  py::class_<std::vector<ncclComm_t>, std::shared_ptr<std::vector<ncclComm_t>>> ncclComm_vec(m, "ncclComm_vec");
+  py::class_<gpu::collectiveStorage, std::shared_ptr<gpu::collectiveStorage>> collective_storage(m, "collective_storage");
+  // py::class_<std::vector<ncclComm_t>, std::shared_ptr<std::vector<ncclComm_t>>> ncclComm_vec(m, "ncclComm_vec");
   m.def("nccl_init_communicator", &gpu::NcclInitCommunicator,
         "Initialize single thread communicators");
   m.def("nccl_local_all_gather", &gpu::NcclLocalAllGather, "nccl local allgather");
-  m.def("nccl_destroy_comms", &gpu::NcclDestroyComms, "destroy comms");
+  // m.def("nccl_destroy_comms", &gpu::NcclDestroyComms, "destroy comms");
   m.def("nccl_get_unique_id", &gpu::NcclGetUniqueId, "get unique nccl id");
   m.def("nccl_get_version", &gpu::NcclGetVersion, "get nccl version");
-  m.def("nccl_broadcast_partial_gpus", &gpu::NcclBroadcastPartialGPUs,
-        "nccl broadcast with only a subset of gpus in the host are involved");
-  m.def("nccl_create_communicators", &gpu::NcclCreateCommunicators, 
-        "nccl create communicators for multiple threads case");
+  // m.def("nccl_broadcast_partial_gpus", &gpu::NcclBroadcastPartialGPUs,
+  //       "nccl broadcast with only a subset of gpus in the host are involved");
+  // m.def("nccl_create_communicators", &gpu::NcclCreateCommunicators, 
+  //       "nccl create communicators for multiple threads case");
   m.def("get_buffer_device_id", &gpu::GetBufferDeviceId, 
         "get the local device id for one pybuffer");
-  m.def("nccl_recv", &gpu::NcclRecv, "nccl recv data");
-  m.def("nccl_send", &gpu::NcclSend, "nccl send data");
+  // m.def("nccl_recv", &gpu::NcclRecv, "nccl recv data");
+  // m.def("nccl_send", &gpu::NcclSend, "nccl send data");
 
 }  // NOLINT(readability/fn_size)
 

@@ -38,9 +38,6 @@ limitations under the License.
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "third_party/gpus/cuda/include/cuda_runtime.h"
 
-PYBIND11_MAKE_OPAQUE(std::vector<ncclComm_t>);
-// PYBIND11_MAKE_OPAQUE(std::vector<xla::gpu::collectiveStorage>);
-
 namespace xla {
 namespace gpu {
 
@@ -105,7 +102,7 @@ int SizeOfType(ncclDataType_t element_type) {
   }
 }
 
-StatusOr< std::shared_ptr<collectiveStorage> > NcclInitCommunicator(std::vector<int> devices_vec) {
+StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<int> devices_vec) {
 #if XLA_ENABLE_XCCL
     int n_devices = devices_vec.size();
     std::vector<ncclComm_t> comms;
@@ -116,19 +113,18 @@ StatusOr< std::shared_ptr<collectiveStorage> > NcclInitCommunicator(std::vector<
     streams.resize(n_devices);
     for (int i = 0; i < n_devices; ++i) {
       cudaSetDevice(devices_vec[i]);
-      // cudaStreamCreate(streams.data()+i);
       cudaStreamCreateWithFlags(streams.data()+i, cudaStreamDefault);
     }
-    collectiveStorage storage;
+    NcclCommStorage storage;
     storage.comms = comms;
     storage.streams = streams;
-    return std::make_shared<collectiveStorage>(std::move(storage));
+    return std::make_shared<NcclCommStorage>(std::move(storage));
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
 #endif  // XLA_ENABLE_XCCL
 }
 
-Status NcclLocalAllGather(const collectiveStorage &storage,
+Status NcclLocalAllGather(const NcclCommStorage &storage,
                           std::vector<PyBuffer::object> buffers,
                           std::vector<uint> local_start_positions, // TODO(hexu): is the range of uint too small?
                           uint global_start, 
@@ -156,7 +152,7 @@ Status NcclLocalAllGather(const collectiveStorage &storage,
 #endif  // XLA_ENABLE_XCCL
 }
 
-Status NcclDestroyComms(collectiveStorage &storage) {
+Status NcclDestroyComms(NcclCommStorage &storage) {
 #if XLA_ENABLE_XCCL
   for (auto comm : storage.comms) 
     XLA_CUDA_RETURN_IF_ERROR(ncclCommDestroy(comm));
@@ -166,7 +162,7 @@ Status NcclDestroyComms(collectiveStorage &storage) {
 #endif  // XLA_ENABLE_XCCL
 }
 
-Status NcclBroadcastPartialGPUs(const collectiveStorage &storage,
+Status NcclBroadcastPartialGPUs(const NcclCommStorage &storage,
                                 std::vector<PyBuffer::object> buffers,
                                 std::vector<uint> local_start_positions,
                                 uint n_elements,
@@ -194,7 +190,7 @@ Status NcclBroadcastPartialGPUs(const collectiveStorage &storage,
 #endif  // XLA_ENABLE_XCCL
 }
 
-Status NcclSend(const collectiveStorage &storage,
+Status NcclSend(const NcclCommStorage &storage,
                 PyBuffer::object buffer,
                 uint start,
                 uint n_elements,
@@ -211,7 +207,7 @@ Status NcclSend(const collectiveStorage &storage,
 #endif  // XLA_ENABLE_XCCL
 }
 
-Status NcclRecv(const collectiveStorage &storage,
+Status NcclRecv(const NcclCommStorage &storage,
                 PyBuffer::object buffer,
                 uint start,
                 uint n_elements,
@@ -262,10 +258,10 @@ StatusOr<int> NcclGetVersion() {
 #endif  // XLA_ENABLE_XCCL
 }
 
-StatusOr< std::shared_ptr<collectiveStorage> > NcclCreateCommunicators(int world_size, 
-                                                                       std::vector<int> devices_global_rank, 
-                                                                       std::vector<int> devices_ids, 
-                                                                       std::vector<char> nccl_uid_vec) {
+StatusOr< std::shared_ptr<NcclCommStorage> > NcclCreateCommunicators(int world_size, 
+                                                                     std::vector<int> devices_global_rank, 
+                                                                     std::vector<int> devices_ids, 
+                                                                     std::vector<char> nccl_uid_vec) {
 #if XLA_ENABLE_XCCL
   int n_devices = devices_global_rank.size();
   CHECK_EQ(n_devices, devices_ids.size());
@@ -284,14 +280,13 @@ StatusOr< std::shared_ptr<collectiveStorage> > NcclCreateCommunicators(int world
   streams.resize(n_devices);
   for (int i=0; i<n_devices; i++) {
     cudaSetDevice(devices_ids[i]);
-    // cudaStreamCreate(streams.data()+i);
     cudaStreamCreateWithFlags(streams.data()+i, cudaStreamDefault);
   }
 
-  collectiveStorage storage;
+  NcclCommStorage storage;
   storage.comms = comms;
   storage.streams = streams;
-  return std::make_shared<collectiveStorage>(std::move(storage));
+  return std::make_shared<NcclCommStorage>(std::move(storage));
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
 #endif  // XLA_ENABLE_XCCL

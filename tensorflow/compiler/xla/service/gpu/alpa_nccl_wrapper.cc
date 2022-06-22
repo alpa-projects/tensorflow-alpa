@@ -116,7 +116,8 @@ StatusOr< std::shared_ptr<collectiveStorage> > NcclInitCommunicator(std::vector<
     streams.resize(n_devices);
     for (int i = 0; i < n_devices; ++i) {
       cudaSetDevice(devices_vec[i]);
-      cudaStreamCreate(streams.data()+i);
+      // cudaStreamCreate(streams.data()+i);
+      cudaStreamCreateWithFlags(streams.data()+i, cudaStreamDefault);
     }
     collectiveStorage storage;
     storage.comms = comms;
@@ -127,49 +128,7 @@ StatusOr< std::shared_ptr<collectiveStorage> > NcclInitCommunicator(std::vector<
 #endif  // XLA_ENABLE_XCCL
 }
 
-// StatusOr< std::shared_ptr<std::vector<collectiveStorage>> > NcclInitCommunicator(std::vector<int> devices_vec) {
-// #if XLA_ENABLE_XCCL
-//     int n_devices = devices_vec.size();
-//     std::vector<ncclComm_t> comms;
-//     comms.resize(n_devices);
-//     XLA_CUDA_RETURN_IF_ERROR(ncclCommInitAll(comms.data(), n_devices, devices_vec.data()));
-
-//     std::vector<cudaStream_t> streams;
-//     streams.resize(n_devices);
-//     for (int i = 0; i < n_devices; ++i) {
-//       cudaSetDevice(devices_vec[i]);
-//       cudaStreamCreate(streams.data()+i);
-//     }
-//     std::vector<collectiveStorage> storages;
-//     for (int i = 0; i < n_devices; ++i) storages.push_back(collectiveStorage(comms[i], streams[i]));
-
-//     return std::make_shared<std::vector<collectiveStorage>>(std::move(storages));
-// #else   // XLA_ENABLE_XCCL
-//   return Unimplemented("NCCL support is not available.");
-// #endif  // XLA_ENABLE_XCCL
-// }
-
-// StatusOr< std::tuple<std::shared_ptr<std::vector<ncclComm_t>>, std::shared_ptr<std::vector<cudaStream_t>>>> NcclInitCommunicator(std::vector<int> devices_vec) {
-// #if XLA_ENABLE_XCCL
-//     int n_devices = devices_vec.size();
-//     std::vector<ncclComm_t> comms;
-//     comms.resize(n_devices);
-//     XLA_CUDA_RETURN_IF_ERROR(ncclCommInitAll(comms.data(), n_devices, devices_vec.data()));
-
-//     std::vector<cudaStream_t> streams;
-//     streams.resize(n_devices);
-//     for (int i = 0; i < n_devices; ++i) {
-//       cudaSetDevice(devices_vec[i]);
-//       cudaStreamCreate(streams.data()+i);
-//     }
-
-//     return std::make_tuple(std::make_shared<std::vector<ncclComm_t>>(std::move(comms)), std::make_shared<std::vector<cudaStream_t>>(std::move(streams)));
-// #else   // XLA_ENABLE_XCCL
-//   return Unimplemented("NCCL support is not available.");
-// #endif  // XLA_ENABLE_XCCL
-// }
-
-Status NcclLocalAllGather(collectiveStorage storage,
+Status NcclLocalAllGather(const collectiveStorage &storage,
                           std::vector<PyBuffer::object> buffers,
                           std::vector<uint> local_start_positions, // TODO(hexu): is the range of uint too small?
                           uint global_start, 
@@ -197,81 +156,77 @@ Status NcclLocalAllGather(collectiveStorage storage,
 #endif  // XLA_ENABLE_XCCL
 }
 
+Status NcclDestroyComms(collectiveStorage &storage) {
+#if XLA_ENABLE_XCCL
+  for (auto comm : storage.comms) 
+    XLA_CUDA_RETURN_IF_ERROR(ncclCommDestroy(comm));
+  return Status::OK();
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented("NCCL support is not available.");
+#endif  // XLA_ENABLE_XCCL
+}
 
-// Status NcclDestroyComms(std::vector<ncclComm_t> comms) {
-// #if XLA_ENABLE_XCCL
-//   for (auto comm : comms) 
-//     XLA_CUDA_RETURN_IF_ERROR(ncclCommDestroy(comm));
-//   return Status::OK();
-// #else   // XLA_ENABLE_XCCL
-//   return Unimplemented("NCCL support is not available.");
-// #endif  // XLA_ENABLE_XCCL
-// }
+Status NcclBroadcastPartialGPUs(const collectiveStorage &storage,
+                                std::vector<PyBuffer::object> buffers,
+                                std::vector<uint> local_start_positions,
+                                uint n_elements,
+                                int root_rank) {
+#if XLA_ENABLE_XCCL
+  int n_devices = storage.comms.size();
+  CHECK_EQ(n_devices, buffers.size());
+  CHECK_EQ(n_devices, local_start_positions.size());
+  CHECK_EQ(n_devices, storage.streams.size());
 
-// Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
-//                                 std::vector<cudaStream_t> streams, 
-//                                 std::vector<PyBuffer::object> buffers, 
-//                                 std::vector<uint> local_start_positions, 
-//                                 uint n_elements, 
-//                                 int root_rank) {
-// #if XLA_ENABLE_XCCL
-//   int n_devices = comms.size();
-//   CHECK_EQ(n_devices, buffers.size());
-//   CHECK_EQ(n_devices, local_start_positions.size());
-//   CHECK_EQ(n_devices, streams.size());
+  ncclDataType_t dtype = ToNcclDataType(buffers[0].buf()->buffer()->on_device_shape().element_type());
+  int dtype_size = SizeOfType(dtype);
+  XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
+  for (int i = 0; i < n_devices; ++i) {
+    std::uintptr_t sendbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
+    sendbuff = sendbuff + local_start_positions[i]*dtype_size;
+    std::uintptr_t recvbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
+    recvbuff = recvbuff + local_start_positions[i]*dtype_size;
+    XLA_CUDA_RETURN_IF_ERROR(ncclBroadcast((void*)sendbuff, (void*)recvbuff, n_elements, dtype, root_rank, storage.comms[i], storage.streams[i]));
+  }
+  XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
+  return Status::OK();
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented("NCCL support is not available.");
+#endif  // XLA_ENABLE_XCCL
+}
 
-//   ncclDataType_t dtype = ToNcclDataType(buffers[0].buf()->buffer()->on_device_shape().element_type());
-//   int dtype_size = SizeOfType(dtype);
-//   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
-//   for (int i = 0; i < n_devices; ++i) {
-//     std::uintptr_t sendbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
-//     sendbuff = sendbuff + local_start_positions[i]*dtype_size;
-//     std::uintptr_t recvbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
-//     recvbuff = recvbuff + local_start_positions[i]*dtype_size;
-//     XLA_CUDA_RETURN_IF_ERROR(ncclBroadcast((void*)sendbuff, (void*)recvbuff, n_elements, dtype, root_rank, comms[i], streams[i]));
-//   }
-//   XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
-//   return Status::OK();
-// #else   // XLA_ENABLE_XCCL
-//   return Unimplemented("NCCL support is not available.");
-// #endif  // XLA_ENABLE_XCCL
-// }
+Status NcclSend(const collectiveStorage &storage,
+                PyBuffer::object buffer,
+                uint start,
+                uint n_elements,
+                int peer_p2p_rank) {
+#if XLA_ENABLE_XCCL
+  ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
+  int dtype_size = SizeOfType(dtype);
+  std::uintptr_t sendbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
+  sendbuff = sendbuff + start*dtype_size;
+  XLA_CUDA_RETURN_IF_ERROR(ncclSend((void*)sendbuff, n_elements, dtype, peer_p2p_rank, storage.comms[0], storage.streams[0]));
+  return Status::OK();
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented("NCCL support is not available.");
+#endif  // XLA_ENABLE_XCCL
+}
 
-// Status NcclSend(std::vector<ncclComm_t> comms,
-//                 std::vector<cudaStream_t> streams,
-//                 PyBuffer::object buffer,
-//                 uint start,
-//                 uint n_elements,
-//                 int peer_p2p_rank) {
-// #if XLA_ENABLE_XCCL
-//   ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
-//   int dtype_size = SizeOfType(dtype);
-//   std::uintptr_t sendbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
-//   sendbuff = sendbuff + start*dtype_size;
-//   XLA_CUDA_RETURN_IF_ERROR(ncclSend((void*)sendbuff, n_elements, dtype, peer_p2p_rank, comms[0], streams[0]));
-//   return Status::OK();
-// #else   // XLA_ENABLE_XCCL
-//   return Unimplemented("NCCL support is not available.");
-// #endif  // XLA_ENABLE_XCCL
-// }
-
-// Status NcclRecv(std::vector<ncclComm_t> comms,
-//                 std::vector<cudaStream_t> streams,
-//                 PyBuffer::object buffer,
-//                 uint start,
-//                 uint n_elements,
-//                 int peer_p2p_rank) {
-// #if XLA_ENABLE_XCCL
-//   ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
-//   int dtype_size = SizeOfType(dtype);
-//   std::uintptr_t recvbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
-//   recvbuff = recvbuff + start*dtype_size;
-//   XLA_CUDA_RETURN_IF_ERROR(ncclRecv((void*)recvbuff, n_elements, dtype, peer_p2p_rank, comms[0], streams[0]));
-//   return Status::OK();
-// #else   // XLA_ENABLE_XCCL
-//   return Unimplemented("NCCL support is not available.");
-// #endif  // XLA_ENABLE_XCCL
-// }
+Status NcclRecv(const collectiveStorage &storage,
+                PyBuffer::object buffer,
+                uint start,
+                uint n_elements,
+                int peer_p2p_rank) {
+#if XLA_ENABLE_XCCL
+  ncclDataType_t dtype = ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type());
+  int dtype_size = SizeOfType(dtype);
+  std::uintptr_t recvbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
+  recvbuff = recvbuff + start*dtype_size;
+  XLA_CUDA_RETURN_IF_ERROR(ncclRecv((void*)recvbuff, n_elements, dtype, peer_p2p_rank, storage.comms[0], storage.streams[0]));
+  return Status::OK();
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented("NCCL support is not available.");
+#endif  // XLA_ENABLE_XCCL
+}
 
 std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid) {
   std::vector<char> nccl_uid_vec(sizeof(nccl_uid.internal), 0);
@@ -307,36 +262,45 @@ StatusOr<int> NcclGetVersion() {
 #endif  // XLA_ENABLE_XCCL
 }
 
-// StatusOr< std::tuple<std::shared_ptr<std::vector<ncclComm_t>>, std::shared_ptr<std::vector<cudaStream_t>>>> NcclCreateCommunicators(int world_size, 
-//                                                                                                                                     std::vector<int> devices_global_rank, 
-//                                                                                                                                     std::vector<int> devices_ids, 
-//                                                                                                                                     std::vector<char> nccl_uid_vec) {
-// #if XLA_ENABLE_XCCL
-//   int n_devices = devices_global_rank.size();
-//   CHECK_EQ(n_devices, devices_ids.size());
+StatusOr< std::shared_ptr<collectiveStorage> > NcclCreateCommunicators(int world_size, 
+                                                                       std::vector<int> devices_global_rank, 
+                                                                       std::vector<int> devices_ids, 
+                                                                       std::vector<char> nccl_uid_vec) {
+#if XLA_ENABLE_XCCL
+  int n_devices = devices_global_rank.size();
+  CHECK_EQ(n_devices, devices_ids.size());
+  ncclUniqueId nccl_uid = NcclUidDeserialize(nccl_uid_vec);
 
-//   ncclUniqueId nccl_uid = NcclUidDeserialize(nccl_uid_vec);
-//   std::vector<ncclComm_t> comms;
-//   comms.resize(n_devices);
-//   std::vector<cudaStream_t> streams;
-//   streams.resize(n_devices);
-//   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
-//   for (int i=0; i<n_devices; i++) {
-//     cudaSetDevice(devices_ids[i]);
-//     XLA_CUDA_RETURN_IF_ERROR(ncclCommInitRank(comms.data()+i, world_size, nccl_uid, devices_global_rank[i]));
-//     cudaStreamCreate(streams.data()+i);
-//   }
-//   XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
-//   return std::make_tuple(std::make_shared<std::vector<ncclComm_t>>(std::move(comms)), std::make_shared<std::vector<cudaStream_t>>(std::move(streams)));
-// #else   // XLA_ENABLE_XCCL
-//   return Unimplemented("NCCL support is not available.");
-// #endif  // XLA_ENABLE_XCCL
-// }
+  std::vector<ncclComm_t> comms;
+  comms.resize(n_devices);
+  XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
+  for (int i=0; i<n_devices; i++) {
+    cudaSetDevice(devices_ids[i]);
+    XLA_CUDA_RETURN_IF_ERROR(ncclCommInitRank(comms.data()+i, world_size, nccl_uid, devices_global_rank[i]));
+  }
+  XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
+
+  std::vector<cudaStream_t> streams;
+  streams.resize(n_devices);
+  for (int i=0; i<n_devices; i++) {
+    cudaSetDevice(devices_ids[i]);
+    // cudaStreamCreate(streams.data()+i);
+    cudaStreamCreateWithFlags(streams.data()+i, cudaStreamDefault);
+  }
+
+  collectiveStorage storage;
+  storage.comms = comms;
+  storage.streams = streams;
+  return std::make_shared<collectiveStorage>(std::move(storage));
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented("NCCL support is not available.");
+#endif  // XLA_ENABLE_XCCL
+}
 
 StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer) {
   return buffer.buf()->device()->local_hardware_id();
 }
 
-}  // namespace alpa_nccl
+}  // namespace gpu
 
 }  // namespace xla

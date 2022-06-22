@@ -65,9 +65,9 @@ Status ncclResultToStatus(ncclResult_t s, const char* file, int64_t line,
     }                                 \
   } while (0)
 
-// ncclDataType_t ToNcclDataType(PrimitiveType element_type);
+ncclDataType_t ToNcclDataType(PrimitiveType element_type);
 
-// int SizeOfType(ncclDataType_t element_type);
+int SizeOfType(ncclDataType_t element_type);
 
 class collectiveStorage {
   public:
@@ -75,64 +75,46 @@ class collectiveStorage {
     std::vector<cudaStream_t> streams;
 };
 
-// class collectiveStorage {
-//   public:
-//     ncclComm_t comm;
-//     cudaStream_t stream;
-
-//   collectiveStorage(ncclComm_t x, cudaStream_t y) {
-//     comm = x;
-//     stream = y;
-//   }
-// };
-
 StatusOr< std::shared_ptr<collectiveStorage> > NcclInitCommunicator(std::vector<int> devices_vec);
 
-// StatusOr< std::shared_ptr<std::vector<collectiveStorage> >> NcclInitCommunicator(std::vector<int> devices_vec);
-
-// StatusOr< std::tuple<std::shared_ptr<std::vector<ncclComm_t>>, std::shared_ptr<std::vector<cudaStream_t>>>> NcclInitCommunicator(std::vector<int> devices_vec);
-
-Status NcclLocalAllGather(collectiveStorage, 
+Status NcclLocalAllGather(const collectiveStorage &storage, 
                           std::vector<PyBuffer::object> buffers, 
                           std::vector<uint> local_start_positions, 
                           uint global_start, 
                           uint n_elements);
 
-// Status NcclDestroyComms(std::vector<ncclComm_t> comms);
+Status NcclDestroyComms(collectiveStorage &storage);
 
-// Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
-//                                 std::vector<cudaStream_t> streams,
-//                                 std::vector<PyBuffer::object> buffers, 
-//                                 std::vector<uint> local_start_positions, 
-//                                 uint n_elements, 
-//                                 int root_rank);
+Status NcclBroadcastPartialGPUs(const collectiveStorage &storage, 
+                                std::vector<PyBuffer::object> buffers, 
+                                std::vector<uint> local_start_positions, 
+                                uint n_elements, 
+                                int root_rank);
 
-// Status NcclSend(std::vector<ncclComm_t> comms, 
-//                 std::vector<cudaStream_t> streams,
-//                 PyBuffer::object buffer, 
-//                 uint start, 
-//                 uint n_elements, 
-//                 int peer_p2p_rank);
+Status NcclSend(const collectiveStorage &storage,
+                PyBuffer::object buffer,
+                uint start,
+                uint n_elements, 
+                int peer_p2p_rank);
 
-// Status NcclRecv(std::vector<ncclComm_t> comms,
-//                 std::vector<cudaStream_t> streams,
-//                 PyBuffer::object buffer,
-//                 uint start,
-//                 uint n_elements,
-//                 int peer_p2p_rank);
+Status NcclRecv(const collectiveStorage &storage,
+                PyBuffer::object buffer,
+                uint start,
+                uint n_elements,
+                int peer_p2p_rank);
 
 std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid);
 
 ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_chars);
 
-StatusOr< std::vector<char> > NcclGetUniqueId();
+StatusOr<std::vector<char> > NcclGetUniqueId();
 
 StatusOr<int> NcclGetVersion();
 
-// StatusOr< std::tuple<std::shared_ptr<std::vector<ncclComm_t>>, std::shared_ptr<std::vector<cudaStream_t>>>> NcclCreateCommunicators(int world_size,
-//                                                                                                                                     std::vector<int> devices_global_rank,
-//                                                                                                                                     std::vector<int> devices_ids,
-//                                                                                                                                     std::vector<char> nccl_uid);
+StatusOr< std::shared_ptr<collectiveStorage> > NcclCreateCommunicators(int world_size,
+                                                                       std::vector<int> devices_global_rank,
+                                                                       std::vector<int> devices_ids,
+                                                                       std::vector<char> nccl_uid);
 
 StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
 

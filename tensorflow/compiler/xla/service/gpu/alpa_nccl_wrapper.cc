@@ -113,9 +113,7 @@ StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<in
     streams.resize(n_devices);
     for (int i = 0; i < n_devices; ++i) {
       cudaSetDevice(devices_vec[i]);
-      // cudaStreamCreateWithFlags(streams.data()+i, cudaStreamDefault);
       cudaStreamCreate(streams.data()+i);
-      std::cout<<streams[i]<<" initcomm"<<std::endl;
     }
     NcclCommStorage storage;
     storage.comms = comms;
@@ -145,17 +143,11 @@ Status NcclLocalAllGather(const NcclCommStorage &storage,
     sendbuff = sendbuff + local_start_positions[i]*dtype_size;
     std::uintptr_t recvbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
     recvbuff = recvbuff + global_start*dtype_size;
-    std::cout<<storage.streams[i]<<" allgather"<<std::endl;
     XLA_CUDA_RETURN_IF_ERROR(ncclAllGather((void*)sendbuff, (void*)recvbuff, n_elements, dtype, storage.comms[i], storage.streams[i]));
-    // XLA_CUDA_RETURN_IF_ERROR(ncclAllGather((void*)sendbuff, (void*)recvbuff, n_elements, dtype, storage.comms[i], cudaStreamLegacy));
   }
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
 
-  for (int i = 0; i < n_devices; ++i) {
-    // int device_id = GetBufferDeviceId(buffers[i]);
-    // cudaSetDevice(device_id);
-    cudaStreamSynchronize(storage.streams[i]);
-  }
+  for (int i = 0; i < n_devices; ++i) cudaStreamSynchronize(storage.streams[i]);
   return Status::OK();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
@@ -192,16 +184,10 @@ Status NcclBroadcastPartialGPUs(const NcclCommStorage &storage,
     std::uintptr_t recvbuff = buffers[i].buf()->UnsafeBufferPointer().ValueOrDie();
     recvbuff = recvbuff + local_start_positions[i]*dtype_size;
     XLA_CUDA_RETURN_IF_ERROR(ncclBroadcast((void*)sendbuff, (void*)recvbuff, n_elements, dtype, root_rank, storage.comms[i], storage.streams[i]));
-    // XLA_CUDA_RETURN_IF_ERROR(ncclBroadcast((void*)sendbuff, (void*)recvbuff, n_elements, dtype, root_rank, storage.comms[i], cudaStreamLegacy));
   }
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
 
-  for (int i = 0; i < n_devices; ++i) {
-    // int device_id = GetBufferDeviceId(buffers[i]);
-    // cudaSetDevice(device_id);
-    cudaStreamSynchronize(storage.streams[i]);
-  }
-
+  for (int i = 0; i < n_devices; ++i) cudaStreamSynchronize(storage.streams[i]);
   return Status::OK();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
@@ -218,9 +204,7 @@ Status NcclSend(const NcclCommStorage &storage,
   int dtype_size = SizeOfType(dtype);
   std::uintptr_t sendbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
   sendbuff = sendbuff + start*dtype_size;
-  std::cout<<storage.streams[0]<<" send"<<std::endl;
   XLA_CUDA_RETURN_IF_ERROR(ncclSend((void*)sendbuff, n_elements, dtype, peer_p2p_rank, storage.comms[0], storage.streams[0]));
-  // XLA_CUDA_RETURN_IF_ERROR(ncclSend((void*)sendbuff, n_elements, dtype, peer_p2p_rank, storage.comms[0], cudaStreamLegacy));
   cudaStreamSynchronize(storage.streams[0]);
   return Status::OK();
 #else   // XLA_ENABLE_XCCL
@@ -238,9 +222,7 @@ Status NcclRecv(const NcclCommStorage &storage,
   int dtype_size = SizeOfType(dtype);
   std::uintptr_t recvbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
   recvbuff = recvbuff + start*dtype_size;
-  std::cout<<storage.streams[0]<<" recv"<<std::endl;
   XLA_CUDA_RETURN_IF_ERROR(ncclRecv((void*)recvbuff, n_elements, dtype, peer_p2p_rank, storage.comms[0], storage.streams[0]));
-  // XLA_CUDA_RETURN_IF_ERROR(ncclRecv((void*)recvbuff, n_elements, dtype, peer_p2p_rank, storage.comms[0], cudaStreamLegacy));
   cudaStreamSynchronize(storage.streams[0]);
   return Status::OK();
 #else   // XLA_ENABLE_XCCL
@@ -304,9 +286,7 @@ StatusOr< std::shared_ptr<NcclCommStorage> > NcclCreateCommunicators(int world_s
   streams.resize(n_devices);
   for (int i=0; i<n_devices; i++) {
     cudaSetDevice(devices_ids[i]);
-    // cudaStreamCreateWithFlags(streams.data()+i, cudaStreamDefault);
     cudaStreamCreate(streams.data()+i);
-    std::cout<<streams[i]<<" NcclCreateCommunicators"<<std::endl;
   }
 
   NcclCommStorage storage;

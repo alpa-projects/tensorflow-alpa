@@ -75,7 +75,7 @@ class NcclCommStorage {
     std::vector<cudaStream_t> streams;
 };
 
-StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<int> devices_vec);
+StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<int> devices_vec, bool nccl_use_multistream);
 
 Status NcclLocalAllGather(const NcclCommStorage &storage, 
                           std::vector<PyBuffer::object> buffers, 
@@ -114,7 +114,8 @@ StatusOr<int> NcclGetVersion();
 StatusOr< std::shared_ptr<NcclCommStorage> > NcclCreateCommunicators(int world_size,
                                                                      std::vector<int> devices_global_rank,
                                                                      std::vector<int> devices_ids,
-                                                                     std::vector<char> nccl_uid);
+                                                                     std::vector<char> nccl_uid,
+                                                                     bool nccl_use_multistream);
 
 StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
 

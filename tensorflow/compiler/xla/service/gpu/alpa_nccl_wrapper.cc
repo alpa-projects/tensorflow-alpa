@@ -102,7 +102,7 @@ int SizeOfType(ncclDataType_t element_type) {
   }
 }
 
-StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<int> devices_vec) {
+StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<int> devices_vec, bool nccl_use_multistream) {
 #if XLA_ENABLE_XCCL
     int n_devices = devices_vec.size();
     std::vector<ncclComm_t> comms;
@@ -113,7 +113,11 @@ StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<in
     streams.resize(n_devices);
     for (int i = 0; i < n_devices; ++i) {
       cudaSetDevice(devices_vec[i]);
-      cudaStreamCreate(streams.data()+i);
+      if (nccl_use_multistream) 
+        cudaStreamCreate(streams.data()+i);
+      else 
+        streams[i] = (std::uintptr_t)0; 
+        //TODO(hexu): move to cudaStreamLegacy(0x01), it wasn't possible because of a bug in older version nccl(<=2.8.4).
     }
     NcclCommStorage storage;
     storage.comms = comms;
@@ -147,7 +151,6 @@ Status NcclLocalAllGather(const NcclCommStorage &storage,
   }
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
 
-  for (int i = 0; i < n_devices; ++i) cudaStreamSynchronize(storage.streams[i]);
   return Status::OK();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
@@ -187,7 +190,6 @@ Status NcclBroadcastPartialGPUs(const NcclCommStorage &storage,
   }
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
 
-  for (int i = 0; i < n_devices; ++i) cudaStreamSynchronize(storage.streams[i]);
   return Status::OK();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
@@ -205,7 +207,6 @@ Status NcclSend(const NcclCommStorage &storage,
   std::uintptr_t sendbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
   sendbuff = sendbuff + start*dtype_size;
   XLA_CUDA_RETURN_IF_ERROR(ncclSend((void*)sendbuff, n_elements, dtype, peer_p2p_rank, storage.comms[0], storage.streams[0]));
-  cudaStreamSynchronize(storage.streams[0]);
   return Status::OK();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
@@ -223,7 +224,6 @@ Status NcclRecv(const NcclCommStorage &storage,
   std::uintptr_t recvbuff = buffer.buf()->UnsafeBufferPointer().ValueOrDie();
   recvbuff = recvbuff + start*dtype_size;
   XLA_CUDA_RETURN_IF_ERROR(ncclRecv((void*)recvbuff, n_elements, dtype, peer_p2p_rank, storage.comms[0], storage.streams[0]));
-  cudaStreamSynchronize(storage.streams[0]);
   return Status::OK();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
@@ -267,7 +267,8 @@ StatusOr<int> NcclGetVersion() {
 StatusOr< std::shared_ptr<NcclCommStorage> > NcclCreateCommunicators(int world_size, 
                                                                      std::vector<int> devices_global_rank, 
                                                                      std::vector<int> devices_ids, 
-                                                                     std::vector<char> nccl_uid_vec) {
+                                                                     std::vector<char> nccl_uid_vec, 
+                                                                     bool nccl_use_multistream) {
 #if XLA_ENABLE_XCCL
   int n_devices = devices_global_rank.size();
   CHECK_EQ(n_devices, devices_ids.size());
@@ -286,7 +287,10 @@ StatusOr< std::shared_ptr<NcclCommStorage> > NcclCreateCommunicators(int world_s
   streams.resize(n_devices);
   for (int i=0; i<n_devices; i++) {
     cudaSetDevice(devices_ids[i]);
-    cudaStreamCreate(streams.data()+i);
+    if (nccl_use_multistream) 
+      cudaStreamCreate(streams.data()+i);
+    else 
+      streams[i] = (std::uintptr_t)0;
   }
 
   NcclCommStorage storage;

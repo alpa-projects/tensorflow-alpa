@@ -36,7 +36,6 @@ limitations under the License.
 #include "pybind11/cast.h"
 #include "pybind11/numpy.h"
 #include "pybind11/pytypes.h"
-#include "pybind11/stl_bind.h"
 
 #include "tensorflow/compiler/xla/python/py_buffer.h"
 #include "tensorflow/compiler/xla/python/py_client.h"
@@ -70,29 +69,35 @@ ncclDataType_t ToNcclDataType(PrimitiveType element_type);
 
 int SizeOfType(ncclDataType_t element_type);
 
-StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclInitCommunicator(std::vector<int> devices_vec);
+class NcclCommStorage {
+  public:
+    std::vector<ncclComm_t> comms;
+    std::vector<cudaStream_t> streams;
+};
 
-Status NcclLocalAllGather(std::vector<ncclComm_t> comms, 
+StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<int> devices_vec, bool nccl_use_multistream);
+
+Status NcclLocalAllGather(const NcclCommStorage &storage, 
                           std::vector<PyBuffer::object> buffers, 
                           std::vector<uint> local_start_positions, 
                           uint global_start, 
                           uint n_elements);
 
-Status NcclDestroyComms(std::vector<ncclComm_t> comms);
+Status NcclDestroyComms(NcclCommStorage &storage);
 
-Status NcclBroadcastPartialGPUs(std::vector<ncclComm_t> comms, 
+Status NcclBroadcastPartialGPUs(const NcclCommStorage &storage, 
                                 std::vector<PyBuffer::object> buffers, 
                                 std::vector<uint> local_start_positions, 
                                 uint n_elements, 
                                 int root_rank);
 
-Status NcclSend(std::vector<ncclComm_t> comms, 
-                PyBuffer::object buffer, 
-                uint start, 
+Status NcclSend(const NcclCommStorage &storage,
+                PyBuffer::object buffer,
+                uint start,
                 uint n_elements, 
                 int peer_p2p_rank);
 
-Status NcclRecv(std::vector<ncclComm_t> comms,
+Status NcclRecv(const NcclCommStorage &storage,
                 PyBuffer::object buffer,
                 uint start,
                 uint n_elements,
@@ -102,14 +107,15 @@ std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid);
 
 ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_chars);
 
-StatusOr< std::vector<char> > NcclGetUniqueId();
+StatusOr<std::vector<char> > NcclGetUniqueId();
 
 StatusOr<int> NcclGetVersion();
 
-StatusOr< std::shared_ptr< std::vector<ncclComm_t> > > NcclCreateCommunicators(int world_size,
-                                                                               std::vector<int> devices_global_rank,
-                                                                               std::vector<int> devices_ids,
-                                                                               std::vector<char> nccl_uid);
+StatusOr< std::shared_ptr<NcclCommStorage> > NcclCreateCommunicators(int world_size,
+                                                                     std::vector<int> devices_global_rank,
+                                                                     std::vector<int> devices_ids,
+                                                                     std::vector<char> nccl_uid,
+                                                                     bool nccl_use_multistream);
 
 StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
 

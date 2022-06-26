@@ -538,7 +538,9 @@ PYBIND11_MODULE(xla_extension, m) {
         "Decodes an uncompressed pprof Profile protocol buffer into a JSON "
         "representation");
 
-  py::class_<std::vector<ncclComm_t>, std::shared_ptr<std::vector<ncclComm_t>>> ncclComm_vec(m, "ncclComm_vec");
+  py::class_<gpu::NcclCommStorage,
+             std::shared_ptr<gpu::NcclCommStorage>>
+      nccl_comm_storage(m, "nccl_comm_storage");
   m.def("nccl_init_communicator", &gpu::NcclInitCommunicator,
         "Initialize single thread communicators");
   m.def("nccl_local_all_gather", &gpu::NcclLocalAllGather, "nccl local allgather");

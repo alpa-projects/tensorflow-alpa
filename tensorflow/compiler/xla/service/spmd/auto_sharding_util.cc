@@ -917,6 +917,36 @@ void RemoveDuplicatedStrategy(std::unique_ptr<StrategyVector>& strategies) {
   strategies->leaf_vector = std::move(new_vector);
 }
 
+// Remove strategies whose output tensor is not divisible by the tile factor
+// defined in the sharding spec.
+void RemoveIndivisibleStrategies(std::unique_ptr<StrategyVector>& strategies,
+                                 const Shape& shape) {
+  std::vector<ShardingStrategy> new_vector;
+
+  CHECK(!strategies->is_tuple);
+
+  for (size_t i = 0; i < strategies->leaf_vector.size(); ++i) {
+    bool divisible = true;
+    const HloSharding& output_spec = strategies->leaf_vector[i].output_sharding;
+
+    if (!output_spec.IsReplicated()) {
+      CHECK(output_spec.IsTiled());
+      const Array<int64_t>& tile_assignment = output_spec.tile_assignment();
+      for (size_t j = 0; j < shape.rank(); ++j) {
+        if (shape.dimensions(j) % tile_assignment.dim(j) != 0) {
+          divisible = false;
+        }
+      }
+    }
+
+    if (divisible) {
+      new_vector.push_back(std::move(strategies->leaf_vector[i]));
+    }
+  }
+
+  strategies->leaf_vector = std::move(new_vector);
+}
+
 // Filter strategies according to the solver_option.force_batch_dim_to_mesh_dim.
 // This can be used to forcibly generate data-parallel strategies.
 Status FilterStrategy(const HloInstruction* ins,

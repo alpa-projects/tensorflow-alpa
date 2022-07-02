@@ -1007,6 +1007,9 @@ std::unique_ptr<StrategyVector> CreateLeafStrategyVector(
 
 void RemoveDuplicatedStrategy(std::unique_ptr<StrategyVector>& strategies);
 
+void RemoveIndivisibleStrategies(std::unique_ptr<StrategyVector>& strategies,
+                                 const Shape& shape);
+
 Status FilterStrategy(const HloInstruction* ins,
                       std::unique_ptr<StrategyVector>& strategies,
                       const ClusterEnvironment& cluster_env,

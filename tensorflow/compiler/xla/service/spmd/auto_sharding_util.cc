@@ -917,8 +917,8 @@ void RemoveDuplicatedStrategy(std::unique_ptr<StrategyVector>& strategies) {
   strategies->leaf_vector = std::move(new_vector);
 }
 
-// Remove strategies whose output tensor is not divisible by the tile factor
-// defined in the sharding spec.
+// Remove strategies whose output tensor's shape is not divisible by the tile
+// factors defined in the sharding spec.
 void RemoveIndivisibleStrategies(std::unique_ptr<StrategyVector>& strategies,
                                  const Shape& shape) {
   std::vector<ShardingStrategy> new_vector;

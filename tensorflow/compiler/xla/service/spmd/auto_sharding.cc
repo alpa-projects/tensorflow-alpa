@@ -1396,6 +1396,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
           strategies->childs.push_back(FollowInsStrategyVector(
               src_strategies, operand->shape(), instruction_id,
               /* have_memory_cost= */ false, leaf_strategies));
+          RemoveIndivisibleStrategies(strategies->childs.back(),
+                                      operand->shape());
         }
         break;
       }

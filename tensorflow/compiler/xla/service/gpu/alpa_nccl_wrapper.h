@@ -34,7 +34,6 @@ limitations under the License.
 #include "pybind11/pybind11.h"
 #include "pybind11/attr.h"
 #include "pybind11/cast.h"
-#include "pybind11/numpy.h"
 #include "pybind11/pytypes.h"
 
 #include "tensorflow/compiler/xla/python/py_buffer.h"
@@ -75,7 +74,7 @@ class NcclCommStorage {
     std::vector<cudaStream_t> streams;
 };
 
-StatusOr< std::shared_ptr<NcclCommStorage> > NcclInitCommunicator(std::vector<int> devices_vec, bool nccl_use_multistream);
+StatusOr<std::shared_ptr<NcclCommStorage>> NcclInitCommunicator(std::vector<int> devices_vec, bool nccl_use_multistream);
 
 Status NcclLocalAllGather(const NcclCommStorage &storage, 
                           std::vector<PyBuffer::object> buffers, 
@@ -107,15 +106,15 @@ std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid);
 
 ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_chars);
 
-StatusOr<std::vector<char> > NcclGetUniqueId();
+StatusOr<std::vector<char>> NcclGetUniqueId();
 
 StatusOr<int> NcclGetVersion();
 
-StatusOr< std::shared_ptr<NcclCommStorage> > NcclCreateCommunicators(int world_size,
-                                                                     std::vector<int> devices_global_rank,
-                                                                     std::vector<int> devices_ids,
-                                                                     std::vector<char> nccl_uid,
-                                                                     bool nccl_use_multistream);
+StatusOr<std::shared_ptr<NcclCommStorage>> NcclCreateCommunicators(int world_size,
+                                                                   std::vector<int> devices_global_rank,
+                                                                   std::vector<int> devices_ids,
+                                                                   std::vector<char> nccl_uid,
+                                                                   bool nccl_use_multistream);
 
 StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
 

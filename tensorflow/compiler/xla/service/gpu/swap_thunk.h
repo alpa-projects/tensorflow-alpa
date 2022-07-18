@@ -30,7 +30,8 @@ class SwapThunk : public Thunk {
 
  protected:
   absl::Mutex mu_;
-  absl::flat_hash_map<int, std::unique_ptr<se::Event>> done_events_ ABSL_GUARDED_BY(mu_);
+  absl::flat_hash_map<int, std::unique_ptr<se::Event>> done_events_
+      ABSL_GUARDED_BY(mu_);
 };
 
 // Thunk to run a GPU swap out
@@ -45,7 +46,9 @@ class SwapOutThunk : public SwapThunk {
 
   Status ExecuteOnStream(const ExecuteParams& params) override;
 
-  const std::vector<void*>& AddressList() const { return address_list_; }
+  const std::vector<void*>& AddressList(int device_ordinal) const {
+    return address_lists_.at(device_ordinal);
+  }
 
   ~SwapOutThunk() override;
 
@@ -53,7 +56,7 @@ class SwapOutThunk : public SwapThunk {
   const std::vector<BufferAllocation::Slice> operands_;
   const std::vector<int64_t> byte_sizes_;
   se::StreamExecutor* executor_ = nullptr;
-  std::vector<void*> address_list_;
+  absl::flat_hash_map<int, std::vector<void*>> address_lists_;
 };
 
 // Thunk to run a GPU swap in

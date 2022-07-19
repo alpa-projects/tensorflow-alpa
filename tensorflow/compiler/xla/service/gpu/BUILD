@@ -733,7 +733,9 @@ cc_library(
     local_defines = select({
         ":is_xlir_enabled": ["XLA_ENABLE_XLIR=1"],
         "//conditions:default": [],
-    }),
+    }) + if_cuda_is_configured([
+        "GOOGLE_CUDA=1",
+    ]),
     deps = [
         ":backend_configs_cc",
         ":buffer_allocations",

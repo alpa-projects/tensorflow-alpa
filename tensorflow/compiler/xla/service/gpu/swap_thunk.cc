@@ -31,9 +31,11 @@ Status SwapOutThunk::Initialize(const GpuExecutable& executable,
 
 SwapOutThunk::~SwapOutThunk() {
   // deallocate memory for this thunk
-  if (!address_list_.empty()) {
-    for (auto iter : address_list_) {
-      executor_->HostMemoryDeallocate(iter);
+  if (!address_lists_.empty()) {
+    for (auto iter : address_lists_) {
+      for (auto mem_ref : iter.second) {
+        executor_->HostMemoryDeallocate(mem_ref);
+      }
     }
   }
 }
@@ -47,20 +49,20 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
   int PartitionId = logical_id.computation_id;
   int device_ordinal = params.async_comms_stream->parent()->device_ordinal();
 
-  if (address_list_.empty()) {
-    // alloc memory for the first time. todo: will this influence profile?
-    executor_ = params.async_comms_stream->parent();
-    for (int64_t byte_size : byte_sizes_) {
-      address_list_.push_back(executor_->HostMemoryAllocate(byte_size));
-    }
-    // todo: GpuExecutor's HostMemoryAllocate is simply a new char[]. It does
-    // not consider NUMA. Allocate it manually and then uses a
-    // HostMemoryRegister instead.
-  }
   params.async_comms_stream->ThenWaitFor(params.stream);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-  CHECK(operands_.size() == address_list_.size());
+  if (!address_lists_.count(device_ordinal)) {
+    // alloc memory for the first time.
+    std::vector<void*> address_list;
+    executor_ = params.async_comms_stream->parent();
+    for (int64_t byte_size : byte_sizes_) {
+      address_list.push_back(executor_->HostMemoryAllocate(byte_size));
+    }
+    address_lists_.emplace(device_ordinal, std::move(address_list));
+  }
+  auto& address_list = address_lists_.at(device_ordinal);
+  CHECK(operands_.size() == address_list.size()) << operands_.size() << " v.s. " << address_list.size();
   for (int32_t i = 0; i < operands_.size(); ++i) {
     const BufferAllocation::Slice& slice = operands_.at(i);
     if (!slice.allocation()) {
@@ -69,7 +71,7 @@ Status SwapOutThunk::ExecuteOnStream(const ExecuteParams& params) {
     se::DeviceMemoryBase src_data =
         params.buffer_allocations->GetDeviceAddress(slice);
 
-    void* source_address_ = address_list_.at(i);
+    void* source_address_ = address_list.at(i);
     params.async_comms_stream->ThenMemcpy(source_address_, src_data, byte_sizes_.at(i));
   }
 
@@ -120,8 +122,9 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
     params.async_comms_stream->ThenWaitFor(thunk->DoneEvent(device_ordinal));
   }
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-  CHECK(memory_ref_->AddressList().size() == results_.size())
-      << memory_ref_->AddressList().size() << " v.s. " << results_.size();
+  const auto& address_list = memory_ref_->AddressList(device_ordinal);
+  CHECK(address_list.size() == results_.size())
+      << address_list.size() << " v.s. " << results_.size() << ". device ordinal:" << device_ordinal;
   for (int32_t i = 0; i < results_.size(); ++i) {
     const BufferAllocation::Slice& slice = results_.at(i);
     if (!slice.allocation()) {
@@ -130,7 +133,7 @@ Status SwapInThunk::ExecuteOnStream(const ExecuteParams& params) {
     se::DeviceMemoryBase destination_data =
         params.buffer_allocations->GetDeviceAddress(slice);
 
-    void* source_address_ = memory_ref_->AddressList().at(i);
+    void* source_address_ = address_list.at(i);
     params.async_comms_stream->ThenMemcpy(&destination_data, source_address_,
                               byte_sizes_.at(i));
   }

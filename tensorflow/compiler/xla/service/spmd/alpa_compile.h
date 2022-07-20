@@ -17,6 +17,10 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module, const CompileOptions& optio
 Status SetHloModuleOutputShardings(HloModule* hlo_module,
                                    const std::vector<OpSharding>& op_shardings);
 
+// Set the shardings for input tensors.
+Status SetHloModuleInputShardings(HloModule* hlo_module,
+                                  const std::vector<OpSharding>& op_shardings);
+
 };  // namespace spmd
 };  // namespace xla
 

@@ -810,6 +810,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("clear_pass_context", &pass_context::ClearPassContext);
   m.def("estimate_hlo_module_cost", &gpu::EstimateHloModuleCost);
   m.def("set_hlo_module_output_shardings", &spmd::SetHloModuleOutputShardings);
+  m.def("set_hlo_module_input_shardings", &spmd::SetHloModuleInputShardings);
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds,
         py::arg("module"), py::arg("grad_idx") = absl::nullopt);
 

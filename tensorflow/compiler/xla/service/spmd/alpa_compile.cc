@@ -224,5 +224,26 @@ Status SetHloModuleOutputShardings(
   return Status::OK();
 }
 
+Status SetHloModuleInputShardings(HloModule* module,
+                                  const std::vector<OpSharding>& op_shardings) {
+  // Run TupleSimplifier pass to remove redundant tuples.
+  // Otherwise, these redundant tuples and other custom call markers together
+  // will make the propagation generate unexpected results.
+  TupleSimplifier tuple_simplifier;
+  tuple_simplifier.Run(module);
+
+  HloComputation* entry = module->entry_computation();
+  std::vector<HloInstruction*> input_insts = entry->parameter_instructions();
+  CHECK_EQ(input_insts.size(), op_shardings.size());
+
+  size_t i = 0;
+  for (auto& inst : input_insts) {
+    TF_ASSIGN_OR_RETURN(HloSharding hlo_sharding, HloSharding::FromProto(op_shardings[i++]));
+    inst->set_sharding(HloSharding::Single(inst->shape(), hlo_sharding));
+  }
+
+  return Status::OK();
+}
+
 };  // namespace spmd
 };  // namespace xla

@@ -42,8 +42,12 @@ namespace {
 
 bool IsSkipped(const int64_t op_id, const std::string& env_name) {
   // Return whether this op should be skipped.
+  if (getenv("XLA_GPU_SKIP_ALLREDUCE") != nullptr) {  // skip all all-reduce
+    return true;
+  }
+
   const char* env = getenv(env_name.c_str());
-  if (env == nullptr) {
+  if (env == nullptr) {  // skip specific all-reduce
     return false;
   }
   std::string key = absl::StrFormat(".%d.", op_id);

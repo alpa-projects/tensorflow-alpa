@@ -1435,7 +1435,11 @@ void UseAllReduceForGradAcc(
            add->users().front()->opcode() == HloOpcode::kAdd) {
       add = add->users().front();
     }
-    CHECK_EQ(add->users().size(), 1);
+    if (add->users().size() != 1) {
+      return;
+    }
+
+    CHECK_EQ(add->users().size(), 1) << add->ToString();
     // Skip the end marker of backward computation
     add = PassThroughCustomCallMarkerUser(add->users().front(), add);
 

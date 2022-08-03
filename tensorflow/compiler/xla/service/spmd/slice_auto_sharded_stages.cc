@@ -92,7 +92,7 @@ std::unique_ptr<HloModule> CreateStageModule(
   for (auto ins : stage_instructions) {
     CHECK_NE(ins->opcode(), HloOpcode::kParameter)
         << "All the inputs to a pipeline stage should be from the start "
-           "marker.";
+           "marker. " << ins->ToString();
     if (ins->opcode() == HloOpcode::kGetTupleElement &&
         ins->operand(0) == stage_start_instruction) {
       int64_t param_no = ins->tuple_index();

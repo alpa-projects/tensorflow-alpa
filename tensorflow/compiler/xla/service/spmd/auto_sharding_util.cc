@@ -1188,19 +1188,21 @@ bool AllUsersAreReduce(const HloInstruction* inst) {
 }
 
 // Set sharding, and apply transpose if necessary.
-void SetSharding(HloInstruction* to_split, const HloSharding& output_spec,
-                 const HloInstruction* ref_inst,
-                 const HloInstruction* shape_inst,
-                 absl::flat_hash_set<const HloInstruction*>& modified) {
+void SetShardingImpl(HloInstruction* to_split, const HloSharding& output_spec,
+                     const HloInstruction* ref_inst,
+                     const HloInstruction* shape_inst,
+                     const absl::flat_hash_set<const HloInstruction*>& transposed_set,
+                     absl::flat_hash_set<const HloInstruction*>& modified) {
   CHECK(!to_split->shape().IsTuple()) << to_split->ToString();
   modified.insert(to_split);
-  if (DimensionsEqual(to_split->shape(), ref_inst->shape())) {
-    to_split->set_sharding(output_spec);
-  } else {
+  if (transposed_set.count(to_split)) {
     CHECK(shape_inst != nullptr);
-    CHECK_EQ(shape_inst->opcode(), HloOpcode::kTranspose);
+    CHECK(DimensionsEqual(to_split->shape(), shape_inst->shape()));
     to_split->set_sharding(hlo_sharding_util::TransposeSharding(
         output_spec, shape_inst->dimensions()));
+  } else {
+    CHECK(DimensionsEqual(to_split->shape(), ref_inst->shape())) << to_split->ToString() << " VS. " << ref_inst->ToString();
+    to_split->set_sharding(output_spec);
   }
 }
 
@@ -1304,12 +1306,18 @@ void FindReplicateSet(
     HloInstruction* cur, const AliasMap& alias_map, const CostGraph& cost_graph,
     const std::vector<int64_t>& s_val, const StrategyMap& strategy_map,
     const ShardingStrategy& strategy, const HloInstruction* output,
-    bool do_all_gather_after_backward, HloInstruction*& transpose_inst,
+    bool do_all_gather_after_backward,
+    HloInstruction*& transpose_inst, bool in_transpose_region,
+    absl::flat_hash_set<const HloInstruction*>& transposed_set,
     absl::flat_hash_set<HloInstruction*>& replicated_set,
     absl::flat_hash_set<HloInstruction*>& boundary_set,
     absl::flat_hash_set<HloInstruction*>& consumer_set,
     absl::flat_hash_set<const HloInstruction*>& visited) {
   visited.insert(cur);
+
+  if (in_transpose_region) {
+    transposed_set.insert(cur);
+  }
 
   // Check whether the node is a boundary node.
   absl::flat_hash_set<HloInstruction*> users =
@@ -1321,9 +1329,11 @@ void FindReplicateSet(
     if (consumer->opcode() == HloOpcode::kTranspose &&
         (transpose_inst == nullptr ||
          DimensionsEqual(transpose_inst->shape(), consumer->shape()))) {
+      // FIXME(lmzheng): the second comparision about the shape is dangereous.
+      // It is not safe for square matrices.
       shape_inst = consumer;
       transpose_inst = consumer;
-      // TODO(lmzheng): fix output_sharding comparison.
+      // FIXME(lmzheng): fix output_sharding comparison.
     }
 
     if (consumer->opcode() == HloOpcode::kTuple ||
@@ -1341,9 +1351,16 @@ void FindReplicateSet(
   for (HloInstruction* consumer : users) {
     if (!visited.count(consumer)) {
       consumer_set.insert(consumer);
+
+      bool in_transpose_region_tmp = in_transpose_region;
+      if (consumer->opcode() == HloOpcode::kTranspose) {
+        in_transpose_region_tmp = !in_transpose_region;
+      }
+
       FindReplicateSet(consumer, alias_map, cost_graph, s_val, strategy_map,
                        strategy, output, do_all_gather_after_backward,
-                       transpose_inst, replicated_set, boundary_set,
+                       transpose_inst, in_transpose_region_tmp,
+                       transposed_set, replicated_set, boundary_set,
                        consumer_set, visited);
     }
   }
@@ -1358,7 +1375,8 @@ void FindReplicateSet(
         DimensionsEqual(operand->shape(), cur->shape())) {
       FindReplicateSet(operand, alias_map, cost_graph, s_val, strategy_map,
                        strategy, output, do_all_gather_after_backward,
-                       transpose_inst, replicated_set, boundary_set,
+                       transpose_inst, in_transpose_region,
+                       transposed_set, replicated_set, boundary_set,
                        consumer_set, visited);
     }
   }
@@ -1422,7 +1440,8 @@ void UseAllReduceForGradAcc(
   const HloInstruction* add =
       PassThroughCustomCallMarkerUser(inst->users().front(), inst);
   if (add->opcode() == HloOpcode::kGetTupleElement ||
-      add->opcode() == HloOpcode::kTranspose) {
+      add->opcode() == HloOpcode::kTranspose ||
+      add->opcode() == HloOpcode::kConvert) {
     if (add->users().size() != 1) {
       return;
     }
@@ -1480,20 +1499,27 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
 
   // A debug option: whether to do all-gather after backward pass.
   // This controls the location of all-gather.
-  // If true, all-gather happens after backward pass, which is desired for
-  // gradient accumulation. If false, all-gather happens before forward pass,
-  // which can partitions more tensors.
+  // If true, all-gather happens after backward pass, which is required for
+  // the all-gather being amortized by multiple microbatches during
+  // gradient accumulation.
+  // If false, all-gather happens before forward pass, which can partition
+  // more tensors.
   bool do_all_gather_after_backward = true;
 
   // If true, do not actually generate reduce-scatter + all-gather,
   // but generate all-reduce + all-gather instead.
-  // This saves less memory but is more friendly to gradient accumulation.
-  // This is a temporary workaround due to implementation difficulty.
-  // Ideally, we should be able to generate a gradient-accumulation-friendly
-  // reduce-scatter + all-gather, but for now it is not easy to implement this
-  // in our current system. So we generate a gradient-accumulation-friendly
-  // all-reduce + all-gather, which has the same memory consumption but with 50%
-  // communication overhead.
+  // When combined with gradient accumulation, if we want to amortize
+  // all the communication costs in accmulate_grad, we can only
+  // call all-reduce or reduce-scatter once. This means we cannot
+  // partition gradient buffers. We all this "gradient accumulation friendly
+  // reduce-scatter". Under this setting, we can either use all-reduce
+  // or reduce-scatter. We currently implement the amortization
+  // by simply skipping an all-reduce instruction. This cannot be done for
+  // reduce-scatter because the input and output shapes of reduce-scatter
+  // are different. Due to this implementation difficulty, we decided
+  // to generate all-reduce + all-gather instead of reduce-scatter + all-gather.
+  // This simplification uses the same memory but incurs 50% communication
+  // overhead.
   bool use_all_reduce_for_grad_acc =
       solver_option.reduce_scatter_grad_acc_friendly;
   int verbose = 0;
@@ -1511,6 +1537,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       continue;
     }
 
+    absl::flat_hash_set<const HloInstruction*> transposed_set;
     absl::flat_hash_set<HloInstruction*> replicated_set;
     absl::flat_hash_set<HloInstruction*> boundary_set;
     absl::flat_hash_set<HloInstruction*> consumer_set;
@@ -1523,7 +1550,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
     visited.insert(output);
     FindReplicateSet(inst, alias_map, cost_graph, s_val, strategy_map, strategy,
                      output, do_all_gather_after_backward, transpose_inst,
-                     replicated_set, boundary_set, consumer_set, visited);
+                     false, transposed_set, replicated_set, boundary_set,
+                     consumer_set, visited);
 
     // Try to reduce the boundary set to its common ancestor
     TryReduceWithCommonAncestor(replicated_set, boundary_set, consumer_set,
@@ -1553,7 +1581,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       HloInstruction* root = point;
       while (true) {
         path.push_back(root);
-        if (root->opcode() == HloOpcode::kGetTupleElement) {
+        if (root->opcode() == HloOpcode::kGetTupleElement ||
+            root->opcode() == HloOpcode::kConvert) {
           root = PassThroughCustomCallMarkerOperand(root->mutable_operand(0),
                                                     root);
         } else {
@@ -1633,14 +1662,22 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         UseAllReduceForGradAcc(replicated_set, inst);
       }
 
+      // A short alias
+      auto SetSharding = [&](HloInstruction* to_split,
+                             const HloSharding& output_spec,
+                             const HloInstruction* ref_inst) {
+        SetShardingImpl(to_split, output_spec, ref_inst,
+                        transpose_inst, transposed_set, modified);
+      };
+
       for (HloInstruction* to_split : replicated_set) {
-        SetSharding(to_split, output_spec, inst, transpose_inst, modified);
+        SetSharding(to_split, output_spec, inst);
       }
 
       if (!solver_option.reduce_scatter_aggressive_partition) {
         // The normal case
         for (HloInstruction* to_split : need_all_gather) {
-          SetSharding(to_split, output_spec, inst, transpose_inst, modified);
+          SetSharding(to_split, output_spec, inst);
 
           if (!do_all_gather_after_backward && to_split->users().size() == 1 &&
               to_split->users().front() == output &&
@@ -1649,8 +1686,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             // This partitions more tensors but introduces communication
             // in the forward pass, which is not desired in gradient
             // accumulation.
-            SetSharding(alias_map.at(to_split), output_spec, inst,
-                        transpose_inst, modified);
+            SetSharding(alias_map.at(to_split), output_spec, inst);
             insert_all_gather.push_back(alias_map.at(to_split));
           } else {
             insert_all_gather.push_back(to_split);
@@ -1670,7 +1706,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
         // NOTE: The combination of this branch with pipeline parallel is not
         // tested.
         for (HloInstruction* to_split : need_all_gather) {
-          SetSharding(to_split, output_spec, inst, transpose_inst, modified);
+          SetSharding(to_split, output_spec, inst);
 
           if (to_split->users().size() == 1 &&
               to_split->users().front() == output &&
@@ -1684,10 +1720,10 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
             while (cur->users().size() == 1) {
               // TODO(lmzheng): handle tuple.
               CHECK(cur->shape().IsArray());
-              SetSharding(cur, output_spec, inst, transpose_inst, modified);
+              SetSharding(cur, output_spec, inst);
               cur = cur->users().front();
             }
-            SetSharding(cur, output_spec, inst, transpose_inst, modified);
+            SetSharding(cur, output_spec, inst);
 
             CHECK(!cur->users().empty());
 
@@ -1715,8 +1751,7 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
               HloInstruction* identity = inst->parent()->AddInstruction(
                   HloInstruction::CreateCustomCall(cur->shape(), {cur},
                                                    kIdentityMarker));
-              SetSharding(identity, output_spec, inst, transpose_inst,
-                          modified);
+              SetSharding(identity, output_spec, inst);
               ReplaceOperand(first_user, cur, identity);
             }
           }

@@ -1,5 +1,6 @@
 #include "tensorflow/compiler/xla/service/spmd/alpa_compile.h"
 #include "tensorflow/compiler/xla/service/algebraic_simplifier.h"
+#include "tensorflow/compiler/xla/service/all_reduce_reassociate.h"
 #include "tensorflow/compiler/xla/service/call_inliner.h"
 #include "tensorflow/compiler/xla/service/conditional_canonicalizer.h"
 #include "tensorflow/compiler/xla/service/conditional_simplifier.h"
@@ -150,6 +151,7 @@ Status RunAutoShardingPass(HloModule* hlo_module,
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<RedundantSliceEliminator>();
+      spmd_pipeline.AddPass<AllReduceReassociate>();
       spmd_pipeline.AddPass<GradAccRewrite>();
     } else {
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
@@ -178,6 +180,7 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module,
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<RedundantSliceEliminator>();
+      spmd_pipeline.AddPass<AllReduceReassociate>();
       spmd_pipeline.AddPass<GradAccRewrite>();
     } else {
       // Remove redundant sharding ops when partition_count == 1.

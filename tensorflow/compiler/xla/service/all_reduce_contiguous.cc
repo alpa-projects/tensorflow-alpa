@@ -59,6 +59,7 @@ Status ReplaceWithContiguousAllReduce(HloAllReduceInstruction* all_reduce) {
           all_reduce->replica_groups(),
           /*constrain_layout=*/false, all_reduce->channel_id(),
           all_reduce->use_global_device_ids()));
+  new_all_reduce->set_metadata_op_name(all_reduce->metadata().op_name());
 
   // Slice from all-reduce result and bitcast back to the original shapes.
   std::vector<HloInstruction*> outputs;

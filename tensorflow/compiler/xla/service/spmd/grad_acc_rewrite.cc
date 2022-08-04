@@ -63,6 +63,7 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
 
     allreduce_ins->ReplaceOperandWith(0, add_ins);
     output_tuple->ReplaceOperandWith(i, allreduce_ins);
+    allreduce_ins->set_metadata_op_name(kSkippableAllReduce);
   }
 
   // std::cerr << "===== Exit GradAccRewrite =====" << std::endl;
@@ -72,98 +73,13 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
   return true;
 }
 
-bool IsCompatible(const HloComputation* computation) {
-  // Return whether the fused computation is compatible with
-  // gradient accumulation.
-  // Strictly checking this is non-trivial. Here, we only use
-  // a very simple while-list based method.
-  // FIXME(lmzheng): the condition is too loose and the result might
-  // be wrong.
-  for (const auto inst : computation->instructions()) {
-    switch (inst->opcode()) {
-      case HloOpcode::kParameter:
-      case HloOpcode::kConvert:
-      case HloOpcode::kReshape:
-      case HloOpcode::kBitcast:
-      case HloOpcode::kTranspose:
-      case HloOpcode::kConcatenate:
-      case HloOpcode::kSlice:
-      case HloOpcode::kAdd:
-      case HloOpcode::kGetTupleElement:
-      case HloOpcode::kTuple:
-        continue;
-      default:
-        return false;
-    }
-  }
-  return true;
-}
-
-void DfsSearch(const HloInstruction* cur,
-               absl::flat_hash_set<const HloInstruction*>& touch_set,
-               absl::flat_hash_set<const HloInstruction*>& allreduce_set) {
-  switch (cur->opcode()) {
-    case HloOpcode::kTuple:
-    case HloOpcode::kSlice:
-    case HloOpcode::kGetTupleElement:
-    case HloOpcode::kConvert:
-    case HloOpcode::kReshape:
-    case HloOpcode::kBitcast: {
-      touch_set.insert(cur);
-      for (size_t i = 0; i < cur->operand_count(); ++i) {
-        DfsSearch(cur->operand(i), touch_set, allreduce_set);
-      }
-      break;
-    }
-    case HloOpcode::kFusion: {
-      if (!IsCompatible(cur->fused_instructions_computation())) {
-        break;
-      }
-      touch_set.insert(cur);
-      for (size_t i = 0; i < cur->operand_count(); ++i) {
-        DfsSearch(cur->operand(i), touch_set, allreduce_set);
-      }
-      break;
-    }
-    case HloOpcode::kAllReduce: {
-      allreduce_set.insert(cur);
-      break;
-    }
-    default:
-      break;
-  }
-}
-
-std::string GetGradSyncChannelIds(const HloModule* module,
-                                  absl::optional<std::vector<int>> grad_idx) {
-  absl::flat_hash_set<const HloInstruction*> touch_set;
-  absl::flat_hash_set<const HloInstruction*> allreduce_set;
-
-  // std::cerr << "===== Enter GetGradSync =====" << std::endl;
-  // std::cerr << module->ToString();
-  // std::cerr << "=============================" << std::endl;
-
-  HloInstruction* root = module->entry_computation()->root_instruction();
-  touch_set.insert(root);
-  if (grad_idx) {
-    CHECK(root->opcode() == HloOpcode::kTuple ||
-          root->opcode() == HloOpcode::kAllReduce)
-        << "The root inst is not tuple";
-    for (int idx : grad_idx.value()) {
-      DfsSearch(root->operand(idx), touch_set, allreduce_set);
-    }
-  } else {
-    DfsSearch(root, touch_set, allreduce_set);
-  }
-
+std::string GetGradSyncChannelIds(const HloModule* module) {
   std::string ret = ".";
-  for (auto inst : allreduce_set) {
-    for (auto user : inst->users()) {
-      CHECK(touch_set.count(user))
-          << "Invalid users of all-reduce in gradient accumulation. "
-          << user->ToString();
+  for (auto inst : module->entry_computation()->instructions()) {
+    if (inst->opcode() == HloOpcode::kAllReduce &&
+        inst->metadata().op_name() == kSkippableAllReduce) {
+      ret += std::to_string(inst->channel_id().value()) + ".";
     }
-    ret += std::to_string(inst->channel_id().value()) + ".";
   }
 
   return ret;

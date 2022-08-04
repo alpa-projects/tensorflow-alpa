@@ -111,6 +111,10 @@ std::string GetGradSyncChannelIds(const HloModule* module,
   absl::flat_hash_set<const HloInstruction*> touch_set;
   absl::flat_hash_set<const HloInstruction*> allreduce_set;
 
+  // std::cerr << "===== Enter GetGradSync =====" << std::endl;
+  // std::cerr << module->ToString();
+  // std::cerr << "=============================" << std::endl;
+
   HloInstruction* root = module->entry_computation()->root_instruction();
   touch_set.insert(root);
   if (grad_idx) {
@@ -127,9 +131,9 @@ std::string GetGradSyncChannelIds(const HloModule* module,
   std::string ret = ".";
   for (auto inst : allreduce_set) {
     for (auto user : inst->users()) {
-      CHECK(touch_set.count(user))
-          << "Invalid users of all-reduce in gradient accumulation. "
-          << user->ToString();
+      //CHECK(touch_set.count(user))
+      //    << "Invalid users of all-reduce in gradient accumulation. "
+      //    << user->ToString();
     }
     ret += std::to_string(inst->channel_id().value()) + ".";
   }

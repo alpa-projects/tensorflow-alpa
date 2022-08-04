@@ -9,9 +9,16 @@ namespace xla {
 namespace spmd {
 
 HloInstruction* GetAllReduce(HloInstruction* src) {
-  if (src->opcode() == HloOpcode::kAllReduce) {
+  auto opcode = src->opcode();
+  if (opcode == HloOpcode::kAllReduce) {
     return src;
-  } else if (src->opcode() == HloOpcode::kMultiply) {
+  } else if (opcode == HloOpcode::kConvert ||
+             opcode == HloOpcode::kReshape ||
+             opcode == HloOpcode::kCopy ||
+             opcode == HloOpcode::kBitcast ||
+             opcode == HloOpcode::kTranspose) {
+    return GetAllReduce(src->mutable_operand(0));
+  } else if (opcode == HloOpcode::kMultiply) {
     HloInstruction* lhs = GetAllReduce(src->mutable_operand(0));
     HloInstruction* rhs = GetAllReduce(src->mutable_operand(1));
 
@@ -64,6 +71,7 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
     allreduce_ins->ReplaceOperandWith(0, add_ins);
     output_tuple->ReplaceOperandWith(i, allreduce_ins);
     allreduce_ins->set_metadata_op_name(kSkippableAllReduce);
+    allreduce_ins->mutable_shape()->set_element_type(add_ins->shape().element_type());
   }
 
   // std::cerr << "===== Exit GradAccRewrite =====" << std::endl;

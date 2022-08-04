@@ -1,9 +1,11 @@
 #include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
 
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/pass_context.h"
+#include "tensorflow/compiler/xla/service/spmd/spmd_partitioner_util.h"
 
 namespace xla {
 namespace spmd {
@@ -45,6 +47,8 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
   HloComputation* entry = module->entry_computation();
   HloInstruction* output_tuple = entry->root_instruction();
 
+  std::vector<HloInstruction*> to_remove;
+
   for (size_t i : indices) {
     HloInstruction* add_ins = output_tuple->mutable_operand(i);
     if (add_ins->opcode() != HloOpcode::kAdd) {
@@ -71,7 +75,23 @@ StatusOr<bool> GradAccRewrite::Run(HloModule* module) {
     allreduce_ins->ReplaceOperandWith(0, add_ins);
     output_tuple->ReplaceOperandWith(i, allreduce_ins);
     allreduce_ins->set_metadata_op_name(kSkippableAllReduce);
-    allreduce_ins->mutable_shape()->set_element_type(add_ins->shape().element_type());
+
+    if (allreduce_ins->shape().element_type() != add_ins->shape().element_type()) {
+      // Fix type mismatch
+      auto old_allreduce = Cast<HloAllReduceInstruction>(allreduce_ins);
+      auto new_allreduce = entry->AddInstruction(HloInstruction::CreateAllReduce(
+        add_ins->shape(), old_allreduce->operands(),
+        MakeBinaryAdd(add_ins->shape().element_type(), entry->parent()),
+        old_allreduce->replica_groups(), old_allreduce->constrain_layout(),
+        old_allreduce->channel_id(), old_allreduce->use_global_device_ids()));
+      new_allreduce->set_metadata(old_allreduce->metadata());
+      old_allreduce->ReplaceAllUsesWith(new_allreduce);
+      to_remove.push_back(old_allreduce);
+    }
+  }
+
+  for (auto ins : to_remove) {
+    entry->RemoveInstruction(ins);
   }
 
   // std::cerr << "===== Exit GradAccRewrite =====" << std::endl;

@@ -220,6 +220,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
         "//tensorflow/compiler/xla/service:pass_context",
+        "//tensorflow/compiler/xla/service/spmd:spmd_partitioner",
     ],
 )
 

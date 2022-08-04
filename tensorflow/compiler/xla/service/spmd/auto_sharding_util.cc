@@ -1188,11 +1188,11 @@ bool AllUsersAreReduce(const HloInstruction* inst) {
 }
 
 // Set sharding, and apply transpose if necessary.
-void SetShardingImpl(HloInstruction* to_split, const HloSharding& output_spec,
-                     const HloInstruction* ref_inst,
-                     const HloInstruction* shape_inst,
-                     const absl::flat_hash_set<const HloInstruction*>& transposed_set,
-                     absl::flat_hash_set<const HloInstruction*>& modified) {
+void SetShardingImpl(
+    HloInstruction* to_split, const HloSharding& output_spec,
+    const HloInstruction* ref_inst, const HloInstruction* shape_inst,
+    const absl::flat_hash_set<const HloInstruction*>& transposed_set,
+    absl::flat_hash_set<const HloInstruction*>& modified) {
   CHECK(!to_split->shape().IsTuple()) << to_split->ToString();
   modified.insert(to_split);
   if (transposed_set.count(to_split)) {
@@ -1201,7 +1201,8 @@ void SetShardingImpl(HloInstruction* to_split, const HloSharding& output_spec,
     to_split->set_sharding(hlo_sharding_util::TransposeSharding(
         output_spec, shape_inst->dimensions()));
   } else {
-    CHECK(DimensionsEqual(to_split->shape(), ref_inst->shape())) << to_split->ToString() << " VS. " << ref_inst->ToString();
+    CHECK(DimensionsEqual(to_split->shape(), ref_inst->shape()))
+        << to_split->ToString() << " VS. " << ref_inst->ToString();
     to_split->set_sharding(output_spec);
   }
 }
@@ -1306,8 +1307,8 @@ void FindReplicateSet(
     HloInstruction* cur, const AliasMap& alias_map, const CostGraph& cost_graph,
     const std::vector<int64_t>& s_val, const StrategyMap& strategy_map,
     const ShardingStrategy& strategy, const HloInstruction* output,
-    bool do_all_gather_after_backward,
-    HloInstruction*& transpose_inst, bool in_transpose_region,
+    bool do_all_gather_after_backward, HloInstruction*& transpose_inst,
+    bool in_transpose_region,
     absl::flat_hash_set<const HloInstruction*>& transposed_set,
     absl::flat_hash_set<HloInstruction*>& replicated_set,
     absl::flat_hash_set<HloInstruction*>& boundary_set,
@@ -1359,9 +1360,8 @@ void FindReplicateSet(
 
       FindReplicateSet(consumer, alias_map, cost_graph, s_val, strategy_map,
                        strategy, output, do_all_gather_after_backward,
-                       transpose_inst, in_transpose_region_tmp,
-                       transposed_set, replicated_set, boundary_set,
-                       consumer_set, visited);
+                       transpose_inst, in_transpose_region_tmp, transposed_set,
+                       replicated_set, boundary_set, consumer_set, visited);
     }
   }
 
@@ -1375,9 +1375,8 @@ void FindReplicateSet(
         DimensionsEqual(operand->shape(), cur->shape())) {
       FindReplicateSet(operand, alias_map, cost_graph, s_val, strategy_map,
                        strategy, output, do_all_gather_after_backward,
-                       transpose_inst, in_transpose_region,
-                       transposed_set, replicated_set, boundary_set,
-                       consumer_set, visited);
+                       transpose_inst, in_transpose_region, transposed_set,
+                       replicated_set, boundary_set, consumer_set, visited);
     }
   }
 }
@@ -1666,8 +1665,8 @@ void GenerateReduceScatter(const HloInstructionSequence& sequence,
       auto SetSharding = [&](HloInstruction* to_split,
                              const HloSharding& output_spec,
                              const HloInstruction* ref_inst) {
-        SetShardingImpl(to_split, output_spec, ref_inst,
-                        transpose_inst, transposed_set, modified);
+        SetShardingImpl(to_split, output_spec, ref_inst, transpose_inst,
+                        transposed_set, modified);
       };
 
       for (HloInstruction* to_split : replicated_set) {

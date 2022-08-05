@@ -812,6 +812,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("set_hlo_module_output_shardings", &spmd::SetHloModuleOutputShardings);
   m.def("set_hlo_module_input_shardings", &spmd::SetHloModuleInputShardings);
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds);
+  m.def("get_alpa_jaxlib_version", [] { return "0.1.0"; });
 
   m.def("run_auto_sharding", 
         [](HloModule* hlo_module, const CompileOptions& options) {

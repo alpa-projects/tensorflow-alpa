@@ -880,8 +880,11 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
 
             int operand_dim = dnums.offset_dims(i);
 
+            CHECK_LT(operand_dim, ins->operand(0)->shape().rank())
+                << "Does not support this kind of Gather.";
             CHECK_EQ(ins->shape().dimensions(operand_dim),
-                     ins->operand(0)->shape().dimensions(operand_dim));
+                     ins->operand(0)->shape().dimensions(operand_dim))
+                << "Does not support this kind of Gather.";
 
             std::vector<HloSharding> operand_specs{
                 Tile(ins->operand(0)->shape(), {operand_dim}, {j}, device_mesh),

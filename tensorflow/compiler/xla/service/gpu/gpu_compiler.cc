@@ -602,7 +602,7 @@ Status GpuCompiler::OptimizeHloModule(
         pass_context::GetInt("combiner::all_reduce_threshold", 30 * 1024 * 1024),
         /*combine_threshold_count=*/512);
 
-    if (debug_options.xla_gpu_all_reduce_contiguous()) {
+    if (true || debug_options.xla_gpu_all_reduce_contiguous()) {
       pipeline.AddPass<AllReduceContiguous>();
     }
 

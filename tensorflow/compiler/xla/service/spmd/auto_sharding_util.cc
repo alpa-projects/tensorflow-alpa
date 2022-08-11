@@ -962,7 +962,8 @@ Status FilterStrategy(const HloInstruction* ins,
   if (ins->shape().dimensions(batch_dim) % device_mesh.dim(mesh_dim) != 0) {
     return tensorflow::errors::InvalidArgument(
         "The length of batch dimension is "
-        "not divisible by the number of devices");
+        "not divisible by the number of devices. "
+        + ins->ToString());
   }
 
   std::vector<ShardingStrategy> new_leaf_vector;

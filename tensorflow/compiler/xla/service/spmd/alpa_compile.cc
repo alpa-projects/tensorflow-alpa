@@ -242,6 +242,9 @@ Status SetHloModuleInputShardings(HloModule* module,
   size_t i = 0;
   for (auto& inst : input_insts) {
     TF_ASSIGN_OR_RETURN(HloSharding hlo_sharding, HloSharding::FromProto(op_shardings[i++]));
+    if (IsUndefined(hlo_sharding)) {
+      continue;
+    }
     inst->set_sharding(HloSharding::Single(inst->shape(), hlo_sharding));
   }
 

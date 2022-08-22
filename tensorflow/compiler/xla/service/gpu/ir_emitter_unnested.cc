@@ -1472,6 +1472,25 @@ Status IrEmitterUnnested::EmitMemZeroThunk(mlir::Operation* op) {
   }
 }
 
+Status IrEmitterUnnested::EmitCrossMeshAllReduceTarget(mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+  std::vector<BufferAllocation::Slice> operands;
+  auto values_to_slices = [&](mlir::ValueRange values)
+      -> StatusOr<std::vector<BufferAllocation::Slice>> {
+    std::vector<BufferAllocation::Slice> slices;
+    for (mlir::Value value : values) {
+      TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
+                          GetAllocationSlice(value));
+      slices.push_back(slice);
+    }
+    return slices;
+  };
+
+  TF_ASSIGN_OR_RETURN(operands, values_to_slices(custom_call.args()));
+  std::vector<NcclCollectiveThunk::Buffer> buffers;
+  auto op_type = GetShape(operands[0]).element_type();
+  AddThunkToThunkSequence(absl::make_unique<CrossMeshNcclAllReduceThunk>(GetThunkInfo(op), buffers, reduction_kind, op_type));
+}
 
 Status IrEmitterUnnested::EmitCustomCallThunk(mlir::Operation* op) {
   auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
@@ -5737,6 +5756,9 @@ Status IrEmitterUnnested::EmitOp(mlir::Operation* op) {
     }
     if (call.call_target_name() == kBuiltinMemZeroTarget) {
       return EmitMemZeroThunk(op);
+    }
+    if (call.call_target_name() == kBuiltinCrossMeshAllReduceTarget) {
+      return EmitCrossMeshAllReduceTarget(op);
     }
     return EmitCustomCallThunk(op);
   }

@@ -1343,10 +1343,10 @@ Status IrEmitterUnnested::EmitCholeskyThunk(mlir::Operation* op) {
 }
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
-Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
+using Slices = std::vector<BufferAllocation::Slice>;
+StatusOr<std::pair<Slices, Slices>> IrEmitterUnnested::CustomCallParseBuffers(
+    mlir::Operation* op) {
   auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
-  const std::string call_target_name = custom_call.call_target_name().str();
-
   std::vector<BufferAllocation::Slice> operands;
   std::vector<BufferAllocation::Slice> results;
 
@@ -1393,6 +1393,16 @@ Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
     TF_ASSIGN_OR_RETURN(operands, values_to_slices(custom_call.args()));
     TF_ASSIGN_OR_RETURN(results, values_to_slices(custom_call.output()));
   }
+  return std::make_pair(operands, results);
+}
+
+Status IrEmitterUnnested::EmitSwapThunk(mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+  const std::string call_target_name = custom_call.call_target_name().str();
+
+  TF_ASSIGN_OR_RETURN(auto all_buffers, CustomCallParseBuffers(op));
+  std::vector<BufferAllocation::Slice>& operands = all_buffers.first;
+  std::vector<BufferAllocation::Slice>& results = all_buffers.second;
 
   std::vector<int64_t> byte_sizes;
   std::vector<std::string> keys =
@@ -1470,26 +1480,40 @@ Status IrEmitterUnnested::EmitMemZeroThunk(mlir::Operation* op) {
     AddThunkToThunkSequence(
         absl::make_unique<MemzeroThunk>(GetThunkInfo(op), operand));
   }
+  return Status::OK();
 }
 
 Status IrEmitterUnnested::EmitCrossMeshAllReduceTarget(mlir::Operation* op) {
   auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
-  std::vector<BufferAllocation::Slice> operands;
-  auto values_to_slices = [&](mlir::ValueRange values)
-      -> StatusOr<std::vector<BufferAllocation::Slice>> {
-    std::vector<BufferAllocation::Slice> slices;
-    for (mlir::Value value : values) {
-      TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
-                          GetAllocationSlice(value));
-      slices.push_back(slice);
-    }
-    return slices;
-  };
-
-  TF_ASSIGN_OR_RETURN(operands, values_to_slices(custom_call.args()));
+  TF_ASSIGN_OR_RETURN(auto all_buffers, CustomCallParseBuffers(op));
+  std::vector<BufferAllocation::Slice>& operands = all_buffers.first;
+  std::vector<BufferAllocation::Slice>& results = all_buffers.second;
   std::vector<NcclCollectiveThunk::Buffer> buffers;
-  auto op_type = GetShape(operands[0]).element_type();
-  AddThunkToThunkSequence(absl::make_unique<CrossMeshNcclAllReduceThunk>(GetThunkInfo(op), buffers, reduction_kind, op_type));
+  CHECK_EQ(operands.size(), results.size());
+  for (auto buf : llvm::zip(operands, results, custom_call.args())) {
+    BufferAllocation::Slice src = std::get<0>(buf);
+    BufferAllocation::Slice dst = std::get<1>(buf);
+    mlir::Value src_value = std::get<2>(buf);
+    buffers.push_back(NcclCollectiveThunk::Buffer{
+        ShapeUtil::ElementsIn(GetShape(src_value)), src, dst});
+  }
+  ReductionKind reduction_kind;
+  // TODO(yonghao): the opaque should also adds participant mesh group info.
+  const std::string op_str = custom_call.backend_config().str();
+  if (op_str == "SUM") {
+    reduction_kind = ReductionKind::SUM;
+  } else if (op_str == "AND" || op_str == "MIN") {
+    reduction_kind = ReductionKind::MIN;
+  } else if (op_str == "OR" || op_str == "MAX") {
+    reduction_kind = ReductionKind::MAX;
+  } else {
+    return InternalError("cross mesh allreduce op %s is unsupported",
+                         op_str.c_str());
+  }
+  auto op_type = GetShape(custom_call.args()[0]).element_type();
+  AddThunkToThunkSequence(absl::make_unique<CrossMeshNcclAllReduceThunk>(
+      GetThunkInfo(op), buffers, reduction_kind, op_type));
+  return Status::OK();
 }
 
 Status IrEmitterUnnested::EmitCustomCallThunk(mlir::Operation* op) {

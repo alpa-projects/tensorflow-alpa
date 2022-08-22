@@ -504,7 +504,7 @@ Status CrossMeshNcclAllReduceThunk::ExecuteOnStream(
   //     AcquireNcclComm(params.run_id, op_id, std::move(participants),
   //                     num_local_participants, *unique_id_callback, rank));
   // TODO(yonghao): support CrossMeshNcclAllReduce for different mesh groups as above
-  // using participants created at compile time
+  // using participants info created at compile time
   int device_ordinal = params.stream->parent()->device_ordinal();
   NcclComm::Lock comm = nccl_comms[device_ordinal]->Acquire();
 

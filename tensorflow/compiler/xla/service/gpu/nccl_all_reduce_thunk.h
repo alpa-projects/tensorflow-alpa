@@ -130,6 +130,26 @@ class NcclReduceScatterThunk : public NcclAllReduceThunkBase {
                            ncclComm_t comm) override;
 };
 
+class CrossMeshNcclAllReduceThunk : public Thunk {
+ public:
+  using Buffer = NcclCollectiveThunk::Buffer;
+
+  explicit CrossMeshNcclAllReduceThunk(ThunkInfo thunk_info,
+                                       std::vector<Buffer> buffers,
+                                       ReductionKind reduction_kind,
+                                       xla::PrimitiveType op_type);
+
+  Status ExecuteOnStream(const ExecuteParams& params) override;
+
+ private:
+  const NcclAllReduceConfig config_;
+  const std::vector<Buffer> buffers_;
+  bool first_call_to_execute_ = true;
+};
+
+void SetCrossMeshCommunicators(const std::vector<void*>& comms,
+                               const std::string& group_keys);
+
 }  // namespace gpu
 }  // namespace xla
 

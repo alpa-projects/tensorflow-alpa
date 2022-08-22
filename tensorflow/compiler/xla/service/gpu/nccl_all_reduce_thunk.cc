@@ -458,5 +458,74 @@ Status NcclReduceScatterThunk::RunNcclCollective(const ExecuteParams& params,
 #endif  // XLA_ENABLE_XCCL
 }
 
+std::vector<std::unique_ptr<NcclComm>> nccl_comms;
+
+// FIXME(yonghao): support multiple groups of cross mesh nccl comms with keys
+void SetCrossMeshCommunicators(const std::vector<void*>& comms,
+                               const std::string& group_keys) {
+  nccl_comms.clear();
+  nccl_comms.reserve(comms.size());
+  for (void* comm : comms) {
+    nccl_comms.emplace_back(
+        std::make_unique<NcclComm>(reinterpret_cast<ncclComm_t>(comm)));
+  }
+}
+
+NcclAllReduceConfig GetCrossMeshNcclAllReduceConfig(
+    ReductionKind reduction_kind, xla::PrimitiveType op_type) {
+  NcclAllReduceConfig config;
+  NcclCollectiveConfig& collective_config = config.config;
+  collective_config.operand_count = 1;
+  collective_config.operand_element_type.push_back(op_type);
+  // The replica_groups, collective_op_kind and group_mode are used to
+  // identify nccl comm in XLA's original collective thunks, so they are
+  // not used in this thunk.
+  config.reduction_kind = reduction_kind;
+  return config;
+}
+
+CrossMeshNcclAllReduceThunk::CrossMeshNcclAllReduceThunk(
+    ThunkInfo thunk_info, std::vector<Buffer> buffers,
+    ReductionKind reduction_kind, xla::PrimitiveType op_type)
+    : Thunk(Thunk::kNcclAllReduce, thunk_info),
+      buffers_(buffers),
+      config_(GetCrossMeshNcclAllReduceConfig(reduction_kind, op_type)) {}
+
+Status CrossMeshNcclAllReduceThunk::ExecuteOnStream(
+    const ExecuteParams& params) {
+#if XLA_ENABLE_XCCL
+  VLOG(1) << absl::StreamFormat("Starting %s.", Thunk::KindToString(kind()));
+
+  se::StreamExecutor* executor = params.stream->parent();
+  se::gpu::ScopedActivateExecutorContext scoped_context(executor);
+
+  // TF_ASSIGN_OR_RETURN(
+  //     NcclComm::Lock comm,
+  //     AcquireNcclComm(params.run_id, op_id, std::move(participants),
+  //                     num_local_participants, *unique_id_callback, rank));
+  // TODO(yonghao): support CrossMeshNcclAllReduce for different mesh groups as above
+  // using participants created at compile time
+  int device_ordinal = params.stream->parent()->device_ordinal();
+  NcclComm::Lock comm = nccl_comms[device_ordinal]->Acquire();
+
+  se::Stream& stream = *params.stream;
+  TF_RETURN_IF_ERROR(RunAllReduce(config_, buffers_, *params.buffer_allocations,
+                                  stream, *comm, ""));
+
+  // Block host on the first call to ensure that all devices have allocated the
+  // required buffers for their communicators before allowing any device to
+  // continue enqueuing operations. Otherwise, the allocations can cause
+  // deadlock in the CUDA driver (b/215649390).
+  if (first_call_to_execute_) {
+    TF_RETURN_IF_ERROR(params.stream->BlockHostUntilDone());
+    first_call_to_execute_ = false;
+  }
+  return Status::OK();
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented(
+      "NCCL support is not available: this binary was not built with a CUDA "
+      "compiler, which is necessary to build the NCCL source library.");
+#endif  // XLA_ENABLE_XCCL
+}
 }  // namespace gpu
 }  // namespace xla

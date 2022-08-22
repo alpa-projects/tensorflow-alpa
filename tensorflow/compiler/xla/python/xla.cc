@@ -62,6 +62,7 @@ limitations under the License.
 #include "tensorflow/python/lib/core/bfloat16.h"
 #include "third_party/nccl/nccl.h"
 #include "tensorflow/compiler/xla/service/gpu/alpa_nccl_wrapper.h"
+#include "tensorflow/compiler/xla/service/gpu/nccl_all_reduce_thunk.h"
 
 // TODO(phawkins): remove host_id properties after JAX is update to avoid them.
 
@@ -555,6 +556,8 @@ PYBIND11_MODULE(xla_extension, m) {
         "get the local device id for one pybuffer");
   m.def("nccl_recv", &gpu::NcclRecv, "nccl recv data");
   m.def("nccl_send", &gpu::NcclSend, "nccl send data");
+  m.def("set_cross_mesh_communicator", &gpu::SetCrossMeshCommunicators,
+        "set nccl communicators for cross mesh collective communication");
 
 }  // NOLINT(readability/fn_size)
 

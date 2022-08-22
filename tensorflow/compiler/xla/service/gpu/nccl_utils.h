@@ -108,6 +108,7 @@ TF_LIB_GTL_DEFINE_INT_TYPE(OpId, int64_t);
 
 struct NcclComm : public Lockable<ncclComm_t> {
   NcclComm() : Lockable(nullptr) {}
+  NcclComm(ncclComm_t comm) : Lockable(comm) {}
 };
 
 StatusOr<NcclComm::Lock> AcquireNcclComm(

@@ -552,6 +552,9 @@ PYBIND11_MODULE(xla_extension, m) {
         "nccl broadcast with only a subset of gpus in the host are involved");
   m.def("nccl_create_communicators", &gpu::NcclCreateCommunicators, 
         "nccl create communicators for multiple threads case");
+  m.def("nccl_create_communicators_no_stream",
+        &gpu::NcclCreateCommunicatorsNoStream,
+        "nccl create pure communicators");
   m.def("get_buffer_device_id", &gpu::GetBufferDeviceId, 
         "get the local device id for one pybuffer");
   m.def("nccl_recv", &gpu::NcclRecv, "nccl recv data");

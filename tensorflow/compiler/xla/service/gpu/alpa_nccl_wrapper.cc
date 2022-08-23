@@ -311,6 +311,31 @@ StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer) {
   return buffer.buf()->device()->local_hardware_id();
 }
 
+StatusOr<std::vector<std::uintptr_t>> NcclCreateCommunicatorsNoStream(
+    int world_size, std::vector<int> devices_global_rank,
+    std::vector<int> devices_ids, std::vector<int8_t> nccl_uid_vec) {
+#if XLA_ENABLE_XCCL
+  int n_devices = devices_global_rank.size();
+  CHECK_EQ(n_devices, devices_ids.size());
+  ncclUniqueId nccl_uid;
+  CHECK_EQ(sizeof(nccl_uid.internal), nccl_uid_vec.size());
+  memcpy(&nccl_uid.internal, nccl_uid_vec.data(), sizeof(nccl_uid.internal));
+
+  std::vector<std::uintptr_t> comms;
+  comms.resize(n_devices);
+  XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
+  for (int i = 0; i < n_devices; i++) {
+    cudaSetDevice(devices_ids[i]);
+    ncclComm_t* comm_ref = reinterpret_cast<ncclComm_t*>(comms.data() + i);
+    XLA_CUDA_RETURN_IF_ERROR(ncclCommInitRank(
+        comm_ref, world_size, nccl_uid, devices_global_rank[i]));
+  }
+  XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
+  return comms;
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented("NCCL support is not available.");
+#endif  // XLA_ENABLE_XCCL
+}
 }  // namespace gpu
 
 }  // namespace xla

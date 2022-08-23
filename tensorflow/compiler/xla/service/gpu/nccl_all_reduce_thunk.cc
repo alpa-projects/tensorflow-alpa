@@ -461,11 +461,11 @@ Status NcclReduceScatterThunk::RunNcclCollective(const ExecuteParams& params,
 std::vector<std::unique_ptr<NcclComm>> nccl_comms;
 
 // FIXME(yonghao): support multiple groups of cross mesh nccl comms with keys
-void SetCrossMeshCommunicators(const std::vector<void*>& comms,
+void SetCrossMeshCommunicators(const std::vector<std::uintptr_t>& comms,
                                const std::string& group_keys) {
   nccl_comms.clear();
   nccl_comms.reserve(comms.size());
-  for (void* comm : comms) {
+  for (std::uintptr_t comm : comms) {
     nccl_comms.emplace_back(
         std::make_unique<NcclComm>(reinterpret_cast<ncclComm_t>(comm)));
   }

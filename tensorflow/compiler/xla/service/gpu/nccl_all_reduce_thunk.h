@@ -147,7 +147,7 @@ class CrossMeshNcclAllReduceThunk : public Thunk {
   bool first_call_to_execute_ = true;
 };
 
-void SetCrossMeshCommunicators(const std::vector<void*>& comms,
+void SetCrossMeshCommunicators(const std::vector<std::uintptr_t>& comms,
                                const std::string& group_keys);
 
 }  // namespace gpu

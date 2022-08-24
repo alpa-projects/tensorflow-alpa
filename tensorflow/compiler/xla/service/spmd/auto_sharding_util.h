@@ -29,6 +29,7 @@ using ReshardingCache =
 
 extern const char* const kPipelineMarker;
 extern const char* const kIdentityMarker;
+extern const char* const kCrossMeshAllReduce;
 constexpr absl::string_view kPipelineMarkerStartType = "start";
 constexpr absl::string_view kPipelineMarkerEndType = "end";
 
@@ -244,7 +245,8 @@ inline void ReplaceOperand(HloInstruction* inst,
 // Return whether this instruction is a custom call marker introduced by us.
 inline bool IsCustomCallMarker(const HloInstruction* inst) {
   return inst->IsCustomCall(kPipelineMarker) ||
-         inst->IsCustomCall(kIdentityMarker);
+         inst->IsCustomCall(kIdentityMarker) ||
+         inst->IsCustomCall(kCrossMeshAllReduce);
 }
 
 // Return whether the reshape is a special reshape that switches the batch dim

@@ -1415,7 +1415,11 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       case HloOpcode::kCustomCall: {
-        if (IsCustomCallMarker(ins)) {
+        if (ins->IsCustomCall(kCrossMeshAllReduce)) {
+          strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+                                                leaf_strategies);
+          AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies, 0);
+        } else if (IsCustomCallMarker(ins)) {
           const HloInstruction* operand = ins->operand(0);
           const StrategyVector* src_strategies = strategy_map.at(operand).get();
           CHECK(src_strategies->is_tuple);

@@ -245,8 +245,7 @@ inline void ReplaceOperand(HloInstruction* inst,
 // Return whether this instruction is a custom call marker introduced by us.
 inline bool IsCustomCallMarker(const HloInstruction* inst) {
   return inst->IsCustomCall(kPipelineMarker) ||
-         inst->IsCustomCall(kIdentityMarker) ||
-         inst->IsCustomCall(kCrossMeshAllReduce);
+         inst->IsCustomCall(kIdentityMarker);
 }
 
 // Return whether the reshape is a special reshape that switches the batch dim

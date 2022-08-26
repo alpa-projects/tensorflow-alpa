@@ -79,7 +79,10 @@ bool StatefulRngSpmdPartitioner::CanSideEffectingHaveReplicatedSharding(
   // Alpa-specific changes for profling
   if (hlo->opcode() == HloOpcode::kAllReduce &&
       Cast<HloAllReduceInstruction>(hlo)->use_global_device_ids()) return true;
-  if (hlo->IsCustomCall(kPipelineMarker) || hlo->IsCustomCall(kIdentityMarker)) return true;
+  if (hlo->IsCustomCall(kPipelineMarker) ||
+      hlo->IsCustomCall(kIdentityMarker) ||
+      hlo->IsCustomCall(kCrossMeshAllReduce))
+    return true;
   return spmd::SpmdPartitioner::CanSideEffectingHaveReplicatedSharding(hlo);
 }
 

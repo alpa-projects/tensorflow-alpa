@@ -116,6 +116,10 @@ StatusOr<std::shared_ptr<NcclCommStorage>> NcclCreateCommunicators(int world_siz
                                                                    std::vector<char> nccl_uid,
                                                                    bool nccl_use_multistream);
 
+StatusOr<std::vector<std::uintptr_t>> NcclCreateCommunicatorsNoStream(
+    int world_size, std::vector<int> devices_global_rank,
+    std::vector<int> devices_ids, std::vector<int8_t> nccl_uid_vec);
+
 StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
 
 

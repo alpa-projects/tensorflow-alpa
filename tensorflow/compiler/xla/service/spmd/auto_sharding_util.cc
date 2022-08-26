@@ -21,6 +21,7 @@ NullStream& NullStream::Global() {
 
 const char* const kPipelineMarker = "pipeline_marker";
 const char* const kIdentityMarker = "identity";
+const char* const kCrossMeshAllReduce = "__builtin$CrossMeshAllReduce";
 
 // Return whether a reshape instruction is a special reshape that switches
 // the batch dim of a dot.

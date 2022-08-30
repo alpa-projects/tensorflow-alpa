@@ -2028,7 +2028,7 @@ std::vector<ReplicaGroup> SpmdPartitioningVisitor::CreateReplicaGroups(
 
 Status SpmdPartitioningVisitor::DefaultAction(HloInstruction* hlo) {
   // Added by Alpa
-  if (hlo->IsCustomCall("identity") || hlo->IsCustomCall("pipeline_marker") ||
+  if (hlo->IsCustomCall("pipeline_marker") ||
       hlo->IsCustomCall("__builtin$CrossMeshAllReduce")) {
     return HandleElementwise(hlo);
   }

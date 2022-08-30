@@ -15,6 +15,10 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/optimization_barrier_expander.h"
 
+// Added by alpa
+#include "tensorflow/compiler/xla/service/hlo_instructions.h"
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
+
 namespace xla {
 
 StatusOr<bool> OptimizationBarrierExpander::Run(
@@ -47,14 +51,38 @@ StatusOr<bool> OptimizationBarrierExpander::Run(
     }
   }
 
+  //for (HloInstruction* inst : barriers) {
+  //  HloInstruction* arg = inst->mutable_operand(0);
+  //  TF_RETURN_IF_ERROR(arg->CopyAllControlDepsFrom(inst));
+
+  //  TF_RETURN_IF_ERROR(inst->ReplaceAllUsesWith(arg));
+  //  TF_RETURN_IF_ERROR(inst->DropAllControlDeps());
+
+  //  TF_RETURN_IF_ERROR(inst->parent()->RemoveInstruction(inst));
+  //}
+
+  // Added by Alpa.
+  // We use identity markers to group these variables in a tuple.
+  // This greatly reduces the memory usage compared to the above
+  // default behavior.
   for (HloInstruction* inst : barriers) {
-    HloInstruction* arg = inst->mutable_operand(0);
-    TF_RETURN_IF_ERROR(arg->CopyAllControlDepsFrom(inst));
+    HloInstruction* identity = inst->parent()->AddInstruction(
+	    HloInstruction::CreateCustomCall(inst->shape(), {inst->mutable_operand(0)},
+									     "identity"));
+    inst->ReplaceAllUsesWith(identity);
+    inst->parent()->RemoveInstruction(inst);
 
-    TF_RETURN_IF_ERROR(inst->ReplaceAllUsesWith(arg));
-    TF_RETURN_IF_ERROR(inst->DropAllControlDeps());
+     // Set the input and output as alias
+     std::vector<std::pair<ShapeIndex, std::pair<int64_t, ShapeIndex>>>
+         aliasing;
 
-    TF_RETURN_IF_ERROR(inst->parent()->RemoveInstruction(inst));
+     ShapeUtil::VisitorFunction visitor = [&](const Shape& shape,
+                                              const ShapeIndex& idx) {
+       aliasing.push_back(std::make_pair(idx, std::make_pair(0, idx)));
+     };
+     ShapeUtil::ForEachSubshape(identity->shape(), visitor);
+     HloCustomCallInstruction* call = Cast<HloCustomCallInstruction>(identity);
+     call->set_output_to_operand_aliasing(aliasing);
   }
 
   return !barriers.empty();

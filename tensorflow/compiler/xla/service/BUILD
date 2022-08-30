@@ -2748,6 +2748,9 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
+		# Added by Alpa
+        ":pass_context",
+        "//tensorflow/compiler/xla/service/spmd:grad_acc_rewrite",
     ],
 )
 
@@ -6727,5 +6730,22 @@ tf_cc_test(
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "pass_context",
+    srcs = [
+        "pass_context.cc",
+    ],
+    hdrs = [
+        "pass_context.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla:types",
+        "//tensorflow/compiler/xla:util",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/types:any",
+        "@pybind11",
     ],
 )

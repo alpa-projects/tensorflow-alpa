@@ -69,6 +69,8 @@ class Thunk {
     kSequential,
     kTriangularSolve,
     kWhile,
+    // Added by Alpa
+    kRngGetAndUpdateState,
   };
 
   struct ThunkInfo {
@@ -111,6 +113,7 @@ class Thunk {
     const BufferAllocations* buffer_allocations;  // never null
     se::Stream* stream;
     se::Stream* async_comms_stream;
+    int rng_seed;  // Added by Alpa
     NcclExecuteParams nccl_params;
   };
 

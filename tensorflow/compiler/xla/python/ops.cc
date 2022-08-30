@@ -36,6 +36,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/python/types.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 
+// Added by Alpa for TorchIndexSelect
+#include "tensorflow/compiler/xla/client/lib/slicing.h"
+
 namespace xla {
 
 namespace py = pybind11;
@@ -80,12 +83,13 @@ void BuildOpsSubmodule(py::module* m) {
       "AllReduce",
       static_cast<XlaOp (*)(
           XlaOp, const XlaComputation&, absl::Span<const ReplicaGroup>,
-          const std::optional<ChannelHandle>&, const std::optional<Shape>&)>(
-          &AllReduce),
+          const std::optional<ChannelHandle>&, const std::optional<Shape>&,
+          const std::optional<bool>)>(&AllReduce),
       py::arg("operand"), py::arg("computation"),
       py::arg("replica_groups") = py::list(),
       py::arg("channel_id") = std::nullopt,
-      py::arg("shape_with_layout") = std::nullopt);
+      py::arg("shape_with_layout") = std::nullopt,
+      py::arg("use_global_device_ids") = std::nullopt);
   ops.def("ReduceScatter", &ReduceScatter, py::arg("operand"),
           py::arg("computation"), py::arg("scatter_dimension"),
           py::arg("shard_count"), py::arg("replica_groups") = py::list(),
@@ -95,7 +99,9 @@ void BuildOpsSubmodule(py::module* m) {
   ops.def("AllToAll", &AllToAll, py::arg("operand"), py::arg("split_dimension"),
           py::arg("concat_dimension"), py::arg("split_count"),
           py::arg("replica_groups") = py::list(),
-          py::arg("layout") = std::nullopt);
+          py::arg("channel_id") = std::nullopt,
+          py::arg("layout") = std::nullopt,
+          py::arg("use_global_device_ids") = std::nullopt);
   ops.def("ApproxTopK", &ApproxTopK, py::arg("builder"), py::arg("operands"),
           py::arg("init_values"), py::arg("top_k"), py::arg("reduction_dim"),
           py::arg("comparator"), py::arg("recall_target") = 0.9,
@@ -428,6 +434,10 @@ void BuildOpsSubmodule(py::module* m) {
   ops.def("RegularizedIncompleteBeta", &RegularizedIncompleteBeta, py::arg("a"),
           py::arg("b"), py::arg("x"));
   ops.def("Zeta", &Zeta, py::arg("x"), py::arg("q"));
+
+  // Added by Alpa
+  ops.def("IndexSelect", &TorchIndexSelect, py::arg("input"), py::arg("index"),
+          py::arg("dim"), py::arg("batch_dims") = 0);
 
 #define BINARY_OP(op)                                                  \
   ops.def(                                                             \

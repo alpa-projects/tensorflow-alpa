@@ -154,6 +154,10 @@ bool IsPassthroughCustomOps(const HloInstruction* hlo) {
   if (hlo->IsCustomCall("X64Combine")) {
     return true;
   }
+  // Added by Alpa
+  if (hlo->IsCustomCall("pipeline_marker") || hlo->IsCustomCall("identity")) {
+    return true;
+  }
   if (hlo->operand_count() != 1 || !hlo->shape().IsArray() ||
       !hlo->operand(0)->shape().IsArray() ||
       hlo->operand(0)->shape().rank() != hlo->shape().rank()) {

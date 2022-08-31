@@ -14,7 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 // This file implements nccl apis for alpa to use. 
-
+#ifdef XLA_ENABLE_XCCL
 #include "tensorflow/compiler/xla/service/gpu/alpa_nccl_wrapper.h"
 
 #include <memory>
@@ -339,3 +339,4 @@ StatusOr<std::vector<std::uintptr_t>> NcclCreateCommunicatorsNoStream(
 }  // namespace gpu
 
 }  // namespace xla
+#endif // XLA_ENABLE_XCCL

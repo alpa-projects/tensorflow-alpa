@@ -807,24 +807,6 @@ bool HloDataflowAnalysis::UpdateCopyValueSet(HloInstruction* copy) {
   return changed;
 }
 
-// Added by Alpa. To revert 8452c0c77f042e45303c26b0bad2710c6ce25217
-bool HloDataflowAnalysis::UpdateCustomCallValueSet(
-    HloInstruction* custom_call) {
-  CHECK_EQ(custom_call->opcode(), HloOpcode::kCustomCall);
-  bool changed = false;
-  for (const auto& aliasing : Cast<HloCustomCallInstruction>(custom_call)
-                                  ->output_to_operand_aliasing()) {
-    const HloValueSet& operand_value_set = GetValueSet(
-        custom_call->operand(aliasing.second.first), aliasing.second.second);
-    HloValueSet& value_set = GetValueSet(custom_call, aliasing.first);
-    if (value_set != operand_value_set) {
-      value_set = operand_value_set;
-      changed = true;
-    }
-  }
-  return changed;
-}
-
 bool HloDataflowAnalysis::UpdateOptimizationBarrierValueSet(
     HloInstruction* barrier) {
   // Optimization Barriers just forward their operand. Given that barriers can
@@ -1203,9 +1185,6 @@ bool HloDataflowAnalysis::UpdateInstructionValueSet(
       return UpdateCollectivePermuteDoneValueSet(instruction);
     case HloOpcode::kOptimizationBarrier:
       return UpdateOptimizationBarrierValueSet(instruction);
-    // Added by Alpa. To revert 8452c0c77f042e45303c26b0bad2710c6ce25217
-    case HloOpcode::kCustomCall:
-      return UpdateCustomCallValueSet(instruction);
     default:
       // Instruction does not forward HloValues (it defines all values in its
       // output). No update is necessary.
@@ -1390,23 +1369,6 @@ Status HloDataflowAnalysis::InitializeInstructionValueSets() {
           // These instructions define no values. The values in their output
           // flow from their operands or from cross computation dataflow.
           break;
-        // Added by Alpa. To revert 8452c0c77f042e45303c26b0bad2710c6ce25217
-        case HloOpcode::kCustomCall: {
-          absl::flat_hash_set<ShapeIndex> aliasing_indices;
-          for (const auto& aliasing :
-               Cast<HloCustomCallInstruction>(instruction)
-                   ->output_to_operand_aliasing()) {
-            aliasing_indices.insert(aliasing.first);
-          }
-          ShapeUtil::ForEachSubshape(
-              instruction->shape(),
-              [&](const Shape& /*subshape*/, const ShapeIndex& index) {
-                if (!aliasing_indices.contains(index)) {
-                  define_value_at(index);
-                }
-              });
-          break;
-        }
         case HloOpcode::kParameter:
           if (call_graph_node.context() == CallContext::kBoth) {
             // We do not support a subcomputation that is called from both a
@@ -1845,6 +1807,22 @@ HloDataflowAnalysis::GetInPlaceInputOutputPairs(
     } else {
       return {{HloOperandIndex{1, {}}, {1}}};
     }
+  } else if (instruction->opcode() == HloOpcode::kCustomCall) {
+    // Custom Calls previously assumed that aliased operands were
+    // forwarded, but now supports modifiction semantics.
+    const auto& aliasing_pairs = Cast<HloCustomCallInstruction>(instruction)
+                                     ->output_to_operand_aliasing();
+    std::vector<std::pair<HloOperandIndex, ShapeIndex>> in_place_pairs;
+    in_place_pairs.reserve(aliasing_pairs.size());
+    for (const auto& pair : aliasing_pairs) {
+      ShapeIndex output_shape_index = pair.first;
+      int64_t operand_index = pair.second.first;
+      ShapeIndex operand_shape_index = pair.second.second;
+      in_place_pairs.push_back(
+          {HloOperandIndex{operand_index, {operand_shape_index}},
+           output_shape_index});
+    }
+    return in_place_pairs;
   } else if (instruction->opcode() == HloOpcode::kAllReduceStart) {
     if (instruction->operands().size() == 1) {
       return {{HloOperandIndex{0, {}}, {}}};

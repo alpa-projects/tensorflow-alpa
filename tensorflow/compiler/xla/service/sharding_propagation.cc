@@ -155,7 +155,7 @@ bool IsPassthroughCustomOps(const HloInstruction* hlo) {
     return true;
   }
   // Added by Alpa
-  if (hlo->IsCustomCall("pipeline_marker") || hlo->IsCustomCall("identity")) {
+  if (hlo->IsCustomCall("pipeline_marker")) {
     return true;
   }
   if (hlo->operand_count() != 1 || !hlo->shape().IsArray() ||

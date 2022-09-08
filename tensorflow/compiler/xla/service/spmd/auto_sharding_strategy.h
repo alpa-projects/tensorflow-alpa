@@ -101,8 +101,8 @@ struct StrategyVector {
   bool is_tuple;
   // the index used in the solver. For non-leaf nodes, this is set to -1.
   int64_t id;
-  // the index of the HLO instruction that generates this strategy vector.
-  size_t instruction_id;
+  // the HLO instruction that generates this strategy vector.
+  const HloInstruction* ins;
   // the connected nodes used for resharding costs;
   std::vector<const StrategyVector*> in_nodes;
   // the followed strategy. Used for merging nodes.
@@ -113,11 +113,17 @@ struct StrategyVector {
   std::vector<std::unique_ptr<StrategyVector>> childs;
 };
 
+std::string PrintStrategyVector(const StrategyVector* strategies,
+                                size_t indention);
+
 // Type aliases.
 using LivenessSet = std::vector<std::vector<const HloValue*>>;
 // Map an instruction to its strategy vector.
 using StrategyMap =
     absl::flat_hash_map<const HloInstruction*, std::unique_ptr<StrategyVector>>;
+// Map an instruction to its logical time within a module.
+using HloInstructionSchedule =
+    absl::flat_hash_map<const HloInstruction*, int64_t>;
 // The list of all leaf strategies.
 using LeafStrategies = std::vector<StrategyVector*>;
 // The list of all dot instruction pairs that can be optimized by
@@ -328,7 +334,57 @@ class ClusterEnvironment {
         prof_result(prof_result),
         total_devices(device_mesh.num_elements()),
         device_mesh_1d(device_mesh),
-        solver_option(solver_option) {
+        solver_option(solver_option),
+        num_iter(1) {
+    // Build replica group for each dimension.
+    CHECK_EQ(device_mesh.num_dimensions(), 2);
+
+    // Replica groups when communicating across dim 0
+    std::vector<std::vector<int>> replica_groups;
+    for (size_t j = 0; j < device_mesh.dim(1); ++j) {
+      std::vector<int> group;
+      for (size_t i = 0; i < device_mesh.dim(0); ++i) {
+        group.push_back(device_mesh(i, j));
+      }
+      replica_groups.push_back(std::move(group));
+    }
+    cached_replica_groups.push_back(replica_groups);
+
+    // Replica groups when communicating across dim 1
+    replica_groups.clear();
+    for (size_t i = 0; i < device_mesh.dim(0); ++i) {
+      std::vector<int> group;
+      for (size_t j = 0; j < device_mesh.dim(1); ++j) {
+        group.push_back(device_mesh(i, j));
+      }
+      replica_groups.push_back(std::move(group));
+    }
+    cached_replica_groups.push_back(replica_groups);
+
+    if (device_mesh.dim(0) > 1) {
+      non_zero_mesh_dims.push_back(0);
+    }
+    if (device_mesh.dim(1) > 1) {
+      non_zero_mesh_dims.push_back(1);
+    }
+
+    device_mesh_1d.Reshape({device_mesh.num_elements(), 1});
+  }
+
+  ClusterEnvironment(const Array<int64_t>& device_mesh,
+                     const std::vector<double>& mesh_alpha,
+                     const std::vector<double>& mesh_beta,
+                     const ProfilingResult& prof_result,
+                     const AutoShardingSolverOption& solver_option,
+                     const int num_iter)
+      : device_mesh(device_mesh),
+        mesh_alpha(mesh_alpha),
+        mesh_beta(mesh_beta),
+        prof_result(prof_result),
+        total_devices(device_mesh.num_elements()),
+        device_mesh_1d(device_mesh),
+        solver_option(solver_option),
+        num_iter(num_iter) {
     // Build replica group for each dimension.
     CHECK_EQ(device_mesh.num_dimensions(), 2);
 
@@ -678,6 +734,9 @@ class ClusterEnvironment {
   std::vector<int> non_zero_mesh_dims;
   const int total_devices;
 
+  // The loop num carried by the device mesh
+  int num_iter;
+
   // Cache a flatten 1d version of the device mesh.
   // Used for mixed mesh shape strategies.
   Array<int64_t> device_mesh_1d;
@@ -716,7 +775,8 @@ class CostGraph {
       node_lens.push_back(strategies->leaf_vector.size());
       extra_node_costs.push_back(
           std::vector<double>(strategies->leaf_vector.size(), 0.0));
-
+    }
+    for (const auto& strategies : leaf_strategies) {
       for (size_t i = 0; i < strategies->in_nodes.size(); ++i) {
         size_t src_idx = strategies->in_nodes[i]->id;
         size_t dst_idx = strategies->id;
@@ -1002,7 +1062,7 @@ std::vector<double> ReshardingCostVector(const StrategyVector* strategies,
                                          const ClusterEnvironment& cluster_env);
 
 std::unique_ptr<StrategyVector> CreateLeafStrategyVector(
-    size_t instruction_id, const HloInstruction* ins,
+    const HloInstruction* ins,
     const StrategyMap& strategy_map, LeafStrategies& leaf_strategies);
 
 void RemoveDuplicatedStrategy(std::unique_ptr<StrategyVector>& strategies);
@@ -1018,14 +1078,14 @@ Status FilterStrategy(const HloInstruction* ins,
 
 Status HandleDot(std::unique_ptr<StrategyVector>& strategies,
                  LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
-                 const HloInstruction* ins, size_t instruction_id,
+                 const HloInstruction* ins, 
                  const ClusterEnvironment& cluster_env,
                  const InstructionBatchDimMap& batch_map,
                  const AutoShardingSolverOption& solver_option);
 
 Status HandleConv(std::unique_ptr<StrategyVector>& strategies,
                   LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
-                  const HloInstruction* ins, size_t instruction_id,
+                  const HloInstruction* ins, 
                   const ClusterEnvironment& cluster_env,
                   const InstructionBatchDimMap& batch_map,
                   const AutoShardingSolverOption& solver_option);

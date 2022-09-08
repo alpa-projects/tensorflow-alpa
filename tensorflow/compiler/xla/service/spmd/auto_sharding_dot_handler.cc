@@ -112,7 +112,7 @@ class DotHandler {
 
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost =
-          cluster_env.AllReduceCost(memory_cost, mesh_dim1);
+          cluster_env.AllReduceCost(memory_cost, mesh_dim1) * cluster_env.num_iter;
       AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
                         communication_cost, cluster_env, strategy_map,
                         strategies);
@@ -138,7 +138,7 @@ class DotHandler {
                {mesh_dim0, mesh_dim1}, device_mesh);
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost =
-          cluster_env.AllReduceCost(memory_cost, mesh_dim0);
+          cluster_env.AllReduceCost(memory_cost, mesh_dim0) * cluster_env.num_iter;
 
       AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
                         communication_cost, cluster_env, strategy_map,
@@ -239,7 +239,7 @@ class DotHandler {
                {mesh_dim0, mesh_dim1}, device_mesh);
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost =
-          cluster_env.AllReduceCost(memory_cost, mesh_dim1);
+          cluster_env.AllReduceCost(memory_cost, mesh_dim1) * cluster_env.num_iter;
 
       AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
                         communication_cost, cluster_env, strategy_map,
@@ -258,9 +258,9 @@ class DotHandler {
           Tile(rhs->shape(), {rhs_con_dims[0]}, {mesh_dim0}, device_mesh);
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double compute_cost =
-          cluster_env.DotCost(lhs->shape(), rhs->shape(), dot_dnums);
+          cluster_env.DotCost(lhs->shape(), rhs->shape(), dot_dnums) * cluster_env.num_iter;
       double communication_cost =
-          cluster_env.AllReduceCost(memory_cost, mesh_dim0);
+          cluster_env.AllReduceCost(memory_cost, mesh_dim0) * cluster_env.num_iter;
 
       AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec},
                         compute_cost, communication_cost, cluster_env,
@@ -296,8 +296,8 @@ class DotHandler {
         HloSharding rhs_spec =
             Tile(rhs->shape(), {rhs_con_dims[0]}, {mesh_dim}, device_mesh_1d);
         double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
-        double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
-                                    cluster_env.AllReduceCost(memory_cost, 1);
+        double communication_cost = (cluster_env.AllReduceCost(memory_cost, 0) +
+                                    cluster_env.AllReduceCost(memory_cost, 1)) * cluster_env.num_iter;
 
         AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
                           communication_cost, cluster_env, strategy_map,
@@ -432,11 +432,11 @@ class DotHandler {
 // Register strategies for dot instructions.
 Status HandleDot(std::unique_ptr<StrategyVector>& strategies,
                  LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
-                 const HloInstruction* ins, size_t instruction_id,
+                 const HloInstruction* ins, 
                  const ClusterEnvironment& cluster_env,
                  const InstructionBatchDimMap& batch_map,
                  const AutoShardingSolverOption& solver_option) {
-  strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+  strategies = CreateLeafStrategyVector(ins, strategy_map,
                                         leaf_strategies);
 
   DotHandler handler(strategies, strategy_map, ins, cluster_env, batch_map,
@@ -504,7 +504,7 @@ class ConvHandler {
 
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost =
-          cluster_env.AllReduceCost(memory_cost, mesh_dim1);
+          cluster_env.AllReduceCost(memory_cost, mesh_dim1) * cluster_env.num_iter;
 
       AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
                         communication_cost, cluster_env, strategy_map,
@@ -527,7 +527,7 @@ class ConvHandler {
 
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
       double communication_cost =
-          cluster_env.AllReduceCost(memory_cost, mesh_dim0);
+          cluster_env.AllReduceCost(memory_cost, mesh_dim0) * cluster_env.num_iter;
 
       AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
                         communication_cost, cluster_env, strategy_map,
@@ -564,8 +564,8 @@ class ConvHandler {
         HloSharding rhs_spec = Tile(rhs->shape(), {rhs_in_channel_dim},
                                     {mesh_dim}, device_mesh_1d);
         double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
-        double communication_cost = cluster_env.AllReduceCost(memory_cost, 0) +
-                                    cluster_env.AllReduceCost(memory_cost, 1);
+        double communication_cost = (cluster_env.AllReduceCost(memory_cost, 0) +
+                                    cluster_env.AllReduceCost(memory_cost, 1)) * cluster_env.num_iter;
 
         AppendNewStrategy(ins, name, output_spec, {lhs_spec, rhs_spec}, 0,
                           communication_cost, cluster_env, strategy_map,
@@ -667,11 +667,11 @@ class ConvHandler {
 // Register strategies for dot instructions.
 Status HandleConv(std::unique_ptr<StrategyVector>& strategies,
                   LeafStrategies& leaf_strategies, StrategyMap& strategy_map,
-                  const HloInstruction* ins, size_t instruction_id,
+                  const HloInstruction* ins, 
                   const ClusterEnvironment& cluster_env,
                   const InstructionBatchDimMap& batch_map,
                   const AutoShardingSolverOption& solver_option) {
-  strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+  strategies = CreateLeafStrategyVector(ins, strategy_map,
                                         leaf_strategies);
 
   ConvHandler handler(strategies, strategy_map, ins, cluster_env, batch_map,

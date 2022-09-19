@@ -3841,19 +3841,9 @@ Status SpmdPartitioningVisitor::HandleRng(HloInstruction* hlo) {
   }
 
   if (hlo->sharding().IsReplicated()) {
-    // We prefer replicated computation over communication, so we do not
-    // use this strategy.
-    //SetPartitionedHlo(hlo, [&] {
-    //  // Run on a single device (0) and distribute the data to all other cores.
-    //  auto clone = clone_from_original(HloSharding::AssignDevice(0));
-    //  return PartitionedHlo(clone, hlo->shape(), MakePartitioningState())
-    //      .Reshard(HloSharding::Replicate())
-    //      .hlo();
-    //});
-
     SetPartitionedHlo(hlo, [&] {
       // Run on a single device (0) and distribute the data to all other cores.
-      auto clone = clone_from_original(HloSharding::Replicate());
+      auto clone = clone_from_original(HloSharding::AssignDevice(0));
       return PartitionedHlo(clone, hlo->shape(), MakePartitioningState())
           .Reshard(HloSharding::Replicate())
           .hlo();

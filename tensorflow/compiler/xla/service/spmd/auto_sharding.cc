@@ -1297,9 +1297,11 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                   strategy_map, strategies, false, " 1d");
         }
 
-        // Replicate
-        AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
-                              replicated_penalty * 5);
+        if (strategies->leaf_vector.empty() || IsFollowedByBroadcast(ins)) {
+          // Replicate
+          AddReplicatedStrategy(ins, cluster_env, strategy_map, strategies,
+                                replicated_penalty * 5);
+        }
 
         RemoveDuplicatedStrategy(strategies);
         break;

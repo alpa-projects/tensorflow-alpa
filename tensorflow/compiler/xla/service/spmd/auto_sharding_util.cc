@@ -50,6 +50,24 @@ bool IsBatchDimSwitchReshape(const HloInstruction* inst) {
   return true;
 }
 
+// Return whether the instruction is followed by a broadcast.
+bool IsFollowedByBroadcast(const HloInstruction* ins) {
+  const int max_depth = 6;
+  for (int i = 0; i < max_depth; ++i) {
+    if (ins->users().empty()) {
+      return false;
+    }
+    ins = PassThroughCustomCallMarkerUser(ins->users().front(), ins);
+    if (ins->opcode() == HloOpcode::kBroadcast) {
+      return true;
+    } else if (ins->opcode() == HloOpcode::kReshape) {
+      i--;
+    }
+  }
+
+  return false;
+}
+
 // Return whether the instruction is an activation from another pipeline stage.
 bool IsActivationFromAnotherStage(const HloInstruction* ins,
                                   const InstructionBatchDimMap& batch_dim_map) {
@@ -1339,44 +1357,39 @@ void TryReduceWithCommonAncestor(
     absl::flat_hash_set<HloInstruction*>& boundary_set,
     absl::flat_hash_set<HloInstruction*>& consumer_set,
     const AliasMap& alias_map) {
-  if (boundary_set.size() != 2) {
-    return;
-  }
+  absl::flat_hash_map<const HloInstruction*, HloInstruction*> note_to_ancestor;
+  absl::flat_hash_map<const HloInstruction*, absl::flat_hash_set<HloInstruction*>> path;
+  absl::flat_hash_map<HloInstruction*, absl::flat_hash_set<HloInstruction*>> ancestor_to_node;
 
-  HloInstruction* ancestor = nullptr;
-  absl::flat_hash_set<HloInstruction*> path;
   for (HloInstruction* node : boundary_set) {
     HloInstruction* cur = node;
     while (cur->operand_count() == 1) {
       HloInstruction* operand =
           PassThroughCustomCallMarkerOperand(cur->mutable_operand(0), cur);
       if (replicated_set.count(operand)) {
-        path.insert(cur);
+        path[node].insert(cur);
       }
       cur = operand;
     }
+    note_to_ancestor[node] = cur;
+    ancestor_to_node[cur].insert(node);
+  }
 
-    if (ancestor == nullptr) {
-      ancestor = cur;
-    } else {
-      if (ancestor != cur) {
-        // The nodes in boundary set do not have a common ancestor.
-        // This reduction fails.
-        return;
+  for (const auto& iter : ancestor_to_node) {
+    if (iter.second.size() > 1) {
+       // Find a common ancestor, reduce the boundary set
+      for (auto x: iter.second) {
+        boundary_set.erase(x);
+        for (auto y : path[x]) {
+          replicated_set.erase(y);
+        }
       }
+      boundary_set.insert(iter.first);
+      consumer_set.insert(iter.first);
+      // Only allow one modification
+      return;
     }
   }
-  if (ancestor == nullptr) {
-    return;
-  }
-
-  // Find a common ancestor, reduce the boundary set
-  boundary_set.clear();
-  boundary_set.insert(ancestor);
-  for (auto x : path) {
-    replicated_set.erase(x);
-  }
-  consumer_set.insert(ancestor);
 }
 
 void UseAllReduceForGradAcc(

@@ -91,8 +91,8 @@ StatusOr<HloModuleConfig> CreateHloModuleConfig(const HloModule* hlo_module,
   return module_config;
 }
 
-Status RunAutoShardingPass(HloModule* hlo_module,
-                           const CompileOptions& options) {
+StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
+    HloModule* hlo_module, const CompileOptions& options) {
   TF_ASSIGN_OR_RETURN(auto module_config,
                       CreateHloModuleConfig(hlo_module, options));
   hlo_module->set_config(module_config);
@@ -100,6 +100,7 @@ Status RunAutoShardingPass(HloModule* hlo_module,
 
   // TODO(yonghao): TF Profiler Traceme
   const DebugOptions& debug_options = hlo_module->config().debug_options();
+  std::shared_ptr<xla::HloModule> post_spmd_module = hlo_module->Clone();
   if (hlo_module->config().use_spmd_partitioning()) {
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
@@ -148,15 +149,7 @@ Status RunAutoShardingPass(HloModule* hlo_module,
       spmd_simplify.AddPass<HloDCE>();
 
       spmd_pipeline.AddPass<AutoSharding>();
-      spmd_pipeline.AddPass<ShardingPropagation>(
-          /*is_spmd=*/true, /*propagate_metadata=*/false,
-          /*allow_spmd_sharding_propagation_to_output=*/true);
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
-      spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
-          num_partitions, hlo_module->config().replica_count());
-      spmd_pipeline.AddPass<RedundantSliceEliminator>();
-      spmd_pipeline.AddPass<AllReduceReassociate>();
-      spmd_pipeline.AddPass<GradAccRewrite>();
     } else {
       spmd_pipeline.AddPass<CallInliner>();
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
@@ -165,8 +158,22 @@ Status RunAutoShardingPass(HloModule* hlo_module,
       spmd_pipeline.AddPass<HloDCE>();
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
+    post_spmd_module = hlo_module->Clone();
+    HloPassPipeline post_auto_sharding_spmd("post-auto-sharding");
+    if (num_partitions > 1) {
+      post_auto_sharding_spmd.AddPass<ShardingPropagation>(
+          /*is_spmd=*/true, /*propagate_metadata=*/false,
+          /*allow_spmd_sharding_propagation_to_output=*/true);
+      post_auto_sharding_spmd.AddPass<StatefulRngSpmdPartitioner>(
+          num_partitions, hlo_module->config().replica_count());
+      post_auto_sharding_spmd.AddPass<RedundantSliceEliminator>();
+      spmd_pipeline.AddPass<AllReduceReassociate>();
+      post_auto_sharding_spmd.AddPass<GradAccRewrite>();
+    }
+    TF_RETURN_IF_ERROR(
+        post_auto_sharding_spmd.Run(post_spmd_module.get()).status());
   }
-  return Status::OK();
+  return post_spmd_module;
 }
 
 Status RunSpmdPartitionerPass(HloModule* hlo_module,

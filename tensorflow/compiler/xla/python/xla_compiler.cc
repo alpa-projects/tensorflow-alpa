@@ -821,12 +821,15 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds);
   m.def("get_alpa_jaxlib_version", [] { return "0.1.1"; });
 
-  m.def("run_auto_sharding", 
-        [](HloModule* hlo_module, const CompileOptions& options) {
+  m.def("run_auto_sharding",
+        [](HloModule* hlo_module, const CompileOptions& options)
+            -> StatusOr<std::shared_ptr<HloModule>> {
           py::gil_scoped_release gil_release;
-          TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module, options));
-          return Status::OK();
-        }, 
+          TF_ASSIGN_OR_RETURN(
+              auto post_spmd_module,
+              spmd::RunAutoShardingPass(hlo_module, options));
+          return post_spmd_module;
+        },
         py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 
   m.def("run_spmd_partitioner", 

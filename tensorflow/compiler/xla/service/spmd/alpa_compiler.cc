@@ -167,7 +167,7 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
       post_auto_sharding_spmd.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       post_auto_sharding_spmd.AddPass<RedundantSliceEliminator>();
-      spmd_pipeline.AddPass<AllReduceReassociate>();
+      post_auto_sharding_spmd.AddPass<AllReduceReassociate>();
       post_auto_sharding_spmd.AddPass<GradAccRewrite>();
     }
     TF_RETURN_IF_ERROR(

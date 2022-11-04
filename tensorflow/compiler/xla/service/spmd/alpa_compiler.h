@@ -8,8 +8,8 @@ namespace spmd {
 
 // Run the auto sharding pass to add sharding anotations
 // for each HLO instruction.
-Status RunAutoShardingPass(
-    HloModule* hlo_module, const CompileOptions& options);
+Status RunAutoShardingPass(HloModule* hlo_module,
+                           const CompileOptions& options);
 
 // Run the SPMD partitioner pass.
 Status RunSpmdPartitionerPass(HloModule* hlo_module,

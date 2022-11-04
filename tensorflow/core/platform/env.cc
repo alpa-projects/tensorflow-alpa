@@ -18,6 +18,7 @@ limitations under the License.
 #include <sys/stat.h>
 
 #include <deque>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -438,8 +439,8 @@ bool Env::CreateUniqueFileName(string* prefix, const string& suffix) {
   int32_t pid = GetProcessId();
   long long now_microsec = NowMicros();  // NOLINT
 
-  *prefix += strings::Printf("%s-%x-%d-%llx", port::Hostname().c_str(), tid,
-                             pid, now_microsec);
+  *prefix += strings::Printf("%s-%x-%d-%llx-%d", port::Hostname().c_str(), tid,
+                             pid, now_microsec, rand());
 
   if (!suffix.empty()) {
     *prefix += suffix;

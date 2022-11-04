@@ -166,6 +166,7 @@ def _get_default_cuda_paths(cuda_version):
   return ["/usr/local/cuda-%s" % cuda_version, "/usr/local/cuda", "/usr",
          "/usr/local/cudnn"] + _get_ld_config_paths()
 
+from pathlib import Path
 
 def _header_paths():
   """Returns hard-coded set of relative paths to look for header files."""
@@ -177,6 +178,7 @@ def _header_paths():
       "extras/CUPTI/include",
       "include/cuda/CUPTI",
       "local/cuda/extras/CUPTI/include",
+      str(Path.home()) + "/.cupy/cuda_lib/*/nccl/*/include/",
   ]
 
 
@@ -191,6 +193,7 @@ def _library_paths():
       "extras/CUPTI/*",
       "local/cuda/lib64",
       "local/cuda/extras/CUPTI/lib64",
+      str(Path.home()) + "/.cupy/cuda_lib/*/nccl/*/lib/",
   ]
 
 

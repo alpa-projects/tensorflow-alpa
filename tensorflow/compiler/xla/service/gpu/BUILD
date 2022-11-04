@@ -709,6 +709,8 @@ cc_library(
         "sequential_thunk.cc",
         "thunk_schedule.cc",
         "while_thunk.cc",
+        # Added by Alpa
+        "rng_thunk.cc",
     ],
     hdrs = [
         "bef_thunk.h",
@@ -727,11 +729,16 @@ cc_library(
         "sequential_thunk.h",
         "thunk_schedule.h",
         "while_thunk.h",
+        # Added by Alpa
+        "rng_thunk.h",
     ],
     local_defines = select({
         ":is_xlir_enabled": ["XLA_ENABLE_XLIR=1"],
         "//conditions:default": [],
-    }),
+        # Added by Alpa
+    }) + if_cuda_is_configured([
+        "GOOGLE_CUDA=1",
+    ]),
     deps = [
         ":backend_configs_cc",
         ":buffer_allocations",
@@ -1852,6 +1859,8 @@ cc_library(
         "//tensorflow/core/profiler/lib:traceme",
         "//tensorflow/stream_executor:stream_executor_headers",
         ":runtime_intrinsics",
+        # Added by Alpa
+         ":common_computation_elimination",
     ] + select({
         ":is_xlir_enabled": [
             "//tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu:pass_utils",
@@ -2997,5 +3006,81 @@ tf_cc_test(
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
         "//tensorflow/core:test",
+    ],
+)
+
+# Added by Alpa
+alias(
+    name = "alpa_nccl_wrapper",
+    actual = if_nccl(":_alpa_nccl_wrapper", ":empty"),
+)
+
+tf_cuda_library(
+    name = "_alpa_nccl_wrapper",
+    srcs = if_gpu_is_configured(["alpa_nccl_wrapper.cc"]),
+    hdrs = if_gpu_is_configured(["alpa_nccl_wrapper.h"]),
+    # Override tf_cuda_library()'s internal default value of ["//buildenv/target:gce"].
+    copts = [
+        "-fexceptions",
+        # "-fno-strict-aliasing",
+    ],
+    compatible_with = [],
+    defines = if_gpu_is_configured(["XLA_ENABLE_XCCL"]),
+    tags = ["manual"],  # Only builds with if_nccl().
+    deps = if_gpu_is_configured([
+        ":gpu_executable_run_options",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
+        "//tensorflow/compiler/xla:debug_options_flags",
+        "//tensorflow/compiler/xla:status",
+        "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla:statusor",
+        "//tensorflow/compiler/xla:xla_data_proto_cc",
+        "//tensorflow/compiler/xla/service:collective_ops_utils",
+        "//tensorflow/compiler/xla/service:global_device_id",
+        "//tensorflow/compiler/xla/pjrt/distributed:client",
+        "//tensorflow/compiler/xla/pjrt:pjrt_client",
+        "//tensorflow/compiler/xla/pjrt:tfrt_cpu_pjrt_client",
+        "//tensorflow/compiler/xla/python:py_client",
+        "//tensorflow/compiler/xla/tools:driver",
+        "//tensorflow/core:lib",
+        "@pybind11",
+    ]) + if_cuda_is_configured([
+        "@local_config_nccl//:nccl",
+    ]) + if_rocm_is_configured([
+        "@local_config_rocm//rocm:rccl",
+    ]),
+)
+
+cc_library(
+    name = "common_computation_elimination",
+    srcs = [
+        "common_computation_elimination.cc",
+    ],
+    hdrs = [
+        "common_computation_elimination.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+    ],
+)
+
+cc_library(
+    name = "gpu_cost_model",
+    srcs = [
+        "gpu_cost_model.cc",
+    ],
+    hdrs = [
+        "gpu_cost_model.h",
+    ],
+    deps = [
+        ":backend_configs_cc",
+        ":ir_emission_utils",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:pass_context",
+        "//tensorflow/compiler/xla/service/spmd:auto_sharding",
     ],
 )

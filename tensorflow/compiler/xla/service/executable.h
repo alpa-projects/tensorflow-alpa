@@ -366,6 +366,9 @@ class Executable {
   // Does not include the size of used libraries (e.g. cuDNN, Eigen, etc.).
   virtual int64_t SizeOfGeneratedCodeInBytes() const;
 
+  // Return the total size of allocated buffers in bytes. This is GPU only.
+  virtual int64_t TotalAllocationSize() const { return -1; }
+
   // Dumping helpers.
   void set_hlo_proto(std::unique_ptr<xla::HloProto> hlo_proto) {
     hlo_proto_ = std::move(hlo_proto);

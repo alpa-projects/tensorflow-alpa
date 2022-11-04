@@ -822,13 +822,10 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("get_alpa_jaxlib_version", [] { return "0.1.1"; });
 
   m.def("run_auto_sharding",
-        [](HloModule* hlo_module, const CompileOptions& options)
-            -> StatusOr<std::shared_ptr<HloModule>> {
+        [](HloModule* hlo_module, const CompileOptions& options) {
           py::gil_scoped_release gil_release;
-          TF_ASSIGN_OR_RETURN(
-              auto post_spmd_module,
-              spmd::RunAutoShardingPass(hlo_module, options));
-          return post_spmd_module;
+          TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module, options));
+          return Status::OK();
         },
         py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 

@@ -91,7 +91,7 @@ StatusOr<HloModuleConfig> CreateHloModuleConfig(const HloModule* hlo_module,
   return module_config;
 }
 
-StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
+Status RunAutoShardingPass(
     HloModule* hlo_module, const CompileOptions& options) {
   TF_ASSIGN_OR_RETURN(auto module_config,
                       CreateHloModuleConfig(hlo_module, options));
@@ -100,7 +100,6 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
 
   // TODO(yonghao): TF Profiler Traceme
   const DebugOptions& debug_options = hlo_module->config().debug_options();
-  std::shared_ptr<xla::HloModule> post_spmd_module = hlo_module->Clone();
   if (hlo_module->config().use_spmd_partitioning()) {
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
@@ -158,22 +157,8 @@ StatusOr<std::shared_ptr<xla::HloModule>> RunAutoShardingPass(
       spmd_pipeline.AddPass<HloDCE>();
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
-    post_spmd_module = hlo_module->Clone();
-    HloPassPipeline post_auto_sharding_spmd("post-auto-sharding");
-    if (num_partitions > 1) {
-      post_auto_sharding_spmd.AddPass<ShardingPropagation>(
-          /*is_spmd=*/true, /*propagate_metadata=*/false,
-          /*allow_spmd_sharding_propagation_to_output=*/true);
-      post_auto_sharding_spmd.AddPass<StatefulRngSpmdPartitioner>(
-          num_partitions, hlo_module->config().replica_count());
-      post_auto_sharding_spmd.AddPass<RedundantSliceEliminator>();
-      post_auto_sharding_spmd.AddPass<AllReduceReassociate>();
-      post_auto_sharding_spmd.AddPass<GradAccRewrite>();
-    }
-    TF_RETURN_IF_ERROR(
-        post_auto_sharding_spmd.Run(post_spmd_module.get()).status());
   }
-  return post_spmd_module;
+  return Status::OK();
 }
 
 Status RunSpmdPartitionerPass(HloModule* hlo_module,
@@ -189,6 +174,9 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module,
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
+      spmd_pipeline.AddPass<ShardingPropagation>(
+        /*is_spmd=*/true, /*propagate_metadata=*/false,
+        /*allow_spmd_sharding_propagation_to_output=*/true);
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<RedundantSliceEliminator>();

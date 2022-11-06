@@ -17,7 +17,7 @@ limitations under the License.
 
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_ALPA_NCCL_WRAPPER_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_ALPA_NCCL_WRAPPER_H_
-
+#ifdef XLA_ENABLE_XCCL
 #include <memory>
 
 #include "tensorflow/compiler/xla/status.h"
@@ -125,5 +125,5 @@ StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer);
 
 }  // namespace gpu
 }  // namespace xla
-
+#endif // XLA_ENABLE_XCCL
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_ALPA_NCCL_WRAPPER_H_

@@ -79,10 +79,12 @@ limitations under the License.
 #include "tensorflow/python/lib/core/bfloat16.h"
 
 // Added by Alpa
+#ifdef XLA_PYTHON_ENABLE_GPU
 #include "tensorflow/compiler/xla/service/gpu/alpa_nccl_wrapper.h"
 #include "tensorflow/compiler/xla/service/gpu/nccl_all_reduce_thunk.h"
 
 PYBIND11_MAKE_OPAQUE(std::vector<ncclComm_t>);
+#endif // XLA_PYTHON_ENABLE_GPU
 
 // TODO(phawkins): remove host_id properties after JAX is update to avoid them.
 
@@ -732,6 +734,7 @@ PYBIND11_MODULE(xla_extension, m) {
       py::arg("topology"), py::arg("computation"),
       py::arg("compile_options") = CompileOptions());
 
+#ifdef XLA_PYTHON_ENABLE_GPU
   py::class_<gpu::NcclCommStorage,
              std::shared_ptr<gpu::NcclCommStorage>>
       nccl_comm_storage(m, "nccl_comm_storage");
@@ -754,6 +757,7 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("nccl_send", &gpu::NcclSend, "nccl send data");
   m.def("set_cross_mesh_communicator", &gpu::SetCrossMeshCommunicators,
         "set nccl communicators for cross mesh collective communication");
+#endif // XLA_PYTHON_ENABLE_GPU
 }  // NOLINT(readability/fn_size)
 
 }  // namespace xla

@@ -821,21 +821,23 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds);
   m.def("get_alpa_jaxlib_version", [] { return "0.1.1"; });
 
-  m.def("run_auto_sharding", 
-        [](HloModule* hlo_module, const CompileOptions& options) {
-          py::gil_scoped_release gil_release;
-          TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module, options));
-          return Status::OK();
-        }, 
-        py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
+  m.def(
+      "run_auto_sharding",
+      [](HloModule* hlo_module, const CompileOptions& options) {
+        py::gil_scoped_release gil_release;
+        TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module, options));
+        return Status::OK();
+      },
+      py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 
-  m.def("run_spmd_partitioner", 
-        [](HloModule* hlo_module, const CompileOptions& options) {
-          py::gil_scoped_release gil_release;
-          TF_RETURN_IF_ERROR(spmd::RunSpmdPartitionerPass(hlo_module, options));
-          return Status::OK();
-        }, 
-        py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
+  m.def(
+      "run_spmd_partitioner",
+      [](HloModule* hlo_module, const CompileOptions& options) {
+        py::gil_scoped_release gil_release;
+        TF_RETURN_IF_ERROR(spmd::RunSpmdPartitionerPass(hlo_module, options));
+        return Status::OK();
+      },
+      py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 
   m.def(
       "hlo_module_count_flop_dot_conv_only",

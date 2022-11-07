@@ -2107,6 +2107,12 @@ std::vector<ReplicaGroup> SpmdPartitioningVisitor::CreateReplicaGroups(
 }
 
 Status SpmdPartitioningVisitor::DefaultAction(HloInstruction* hlo) {
+  // Added by Alpa
+  if (hlo->IsCustomCall("pipeline_marker") ||
+      hlo->IsCustomCall("__builtin$CrossMeshAllReduce")) {
+    return HandleElementwise(hlo);
+  }
+
   if (hlo->HasSideEffect() && !hlo->sharding().HasUniqueDevice()) {
     return Unimplemented("Side-effect ops cannot be replicated: %s",
                          hlo->ToString());
@@ -2944,6 +2950,12 @@ Status SpmdPartitioningVisitor::HandleAllReduce(HloInstruction* hlo) {
   if (hlo->IsCrossReplicaAllReduce() && hlo->operand_count() == 1) {
     return HandleElementwise(hlo);
   }
+
+  // Added by Alpa for profiling
+  if (Cast<HloAllReduceInstruction>(hlo)->use_global_device_ids()) {
+    return HandleElementwise(hlo);
+  }
+
   if (hlo->channel_id()) {
     TF_RET_CHECK(hlo->operand_count() == 1)
         << "SPMD partitioner supports only single-operand allreduce in manual "
@@ -4368,39 +4380,42 @@ HloInstruction* SpmdPartitioner::AllGatherShardsInternal(
     return operand;
   }
   CHECK(!sharding.IsTileMaximal());
-  if (per_dim_ag || selected_dims.size() == 1) {
-    HloInstruction* result = operand;
-    Shape result_shape = operand->shape();
+  // Added by Alpa
+  // Revert commit 96b8219db55dc491adf06fbf91dc0696c80795b6
+  // Add one leading dimension to gather all partitions.
+  std::vector<int64_t> shape;
+  shape.push_back(1);
+  for (int64_t dim : operand->shape().dimensions()) {
+    shape.push_back(dim);
+  }
+  auto reshape = b->AddInstruction(HloInstruction::CreateReshape(
+      ShapeUtil::MakeShape(operand->shape().element_type(), shape), operand));
+  HloInstruction* result = reshape;
+  if (per_dim_ag) {
     for (auto it = selected_dims.rbegin(); it != selected_dims.rend(); ++it) {
       if (sharding.tile_assignment().dim(*it) == 1) {
         continue;
       }
       auto partition_subgroups =
           GetPartitionGroupsForReplication(sharding, {*it});
-      result_shape.set_dimensions(
-          *it, result_shape.dimensions(*it) * partition_subgroups[0].size());
+      shape[0] *= partition_subgroups[0].size();
       result = collectives_creator.create_cross_partition_all_gather(
-          b, result, result_shape, partition_subgroups, (*next_channel_id)++,
-          /*all_gather_dimension=*/*it);
+          b, result,
+          ShapeUtil::MakeShape(operand->shape().element_type(), shape),
+          partition_subgroups, (*next_channel_id)++,
+          /*all_gather_dimension=*/0);
     }
-    return result;
+  } else {
+    auto partition_subgroups =
+        GetPartitionGroupsForReplication(sharding, selected_dims);
+    shape[0] *= partition_subgroups[0].size();
+    result = collectives_creator.create_cross_partition_all_gather(
+        b, result, ShapeUtil::MakeShape(operand->shape().element_type(), shape),
+        partition_subgroups, (*next_channel_id)++,
+        /*all_gather_dimension=*/0);
   }
-  std::vector<int64_t> shape;
-  shape.push_back(1);
-  for (int64_t dim : operand->shape().dimensions()) {
-    shape.push_back(dim);
-  }
-  // Add one leading dimension to gather all partitions.
-  auto reshape = b->AddInstruction(HloInstruction::CreateReshape(
-      ShapeUtil::MakeShape(operand->shape().element_type(), shape), operand));
-  HloInstruction* result = reshape;
-  auto partition_subgroups =
-      GetPartitionGroupsForReplication(sharding, selected_dims);
-  shape[0] *= partition_subgroups[0].size();
-  result = collectives_creator.create_cross_partition_all_gather(
-      b, result, ShapeUtil::MakeShape(operand->shape().element_type(), shape),
-      partition_subgroups, (*next_channel_id)++,
-      /*all_gather_dimension=*/0);
+  // Revert commit 96b8219db55dc491adf06fbf91dc0696c80795b6
+
   // If n > 1 dimensions are partitioned, split the leading dimension to n.
   std::vector<int64_t> tiled_dims;
   for (int64_t i = 0; i < sharding.tile_assignment().num_dimensions(); ++i) {
@@ -4509,6 +4524,10 @@ StatusOr<bool> SpmdPartitioner::Run(
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
   TF_RETURN_IF_ERROR(PreprocessSharding(module, execution_threads));
   TF_RETURN_IF_ERROR(PreprocessHlos(module, execution_threads));
+
+  //std::cerr << "===== Enter SPMD Partitioner =====" << std::endl;
+  //std::cerr << module->ToString();
+  //std::cerr << "=====================================" << std::endl;
 
   XLA_VLOG_LINES(1, SpmdLogger::ReportBeforePartition(
                         *module, options_.report_instruction_count));
@@ -4912,6 +4931,11 @@ Status SpmdPartitioner::PreprocessHlos(
       }
     }
   }
+
+  //std::cerr << "===== Exit SPMD Partitioner =====" << std::endl;
+  //std::cerr << module->ToString();
+  //std::cerr << "=====================================" << std::endl;
+
   return OkStatus();
 }
 

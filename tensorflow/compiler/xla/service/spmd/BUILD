@@ -162,6 +162,7 @@ cc_library(
     srcs = ["stateful_rng_spmd_partitioner.cc"],
     hdrs = ["stateful_rng_spmd_partitioner.h"],
     deps = [
+        ":auto_sharding",
         ":spmd_partitioner",
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
@@ -188,4 +189,103 @@ tf_cc_test(
         "//tensorflow/tsl/lib/core:status_test_util",
         "//tensorflow/tsl/platform:test",
     ],
+)
+
+cc_library(
+    name = "auto_sharding",
+    srcs = ["auto_sharding.cc", "auto_sharding_util.cc", "auto_sharding_dot_handler.cc"],
+    hdrs = ["auto_sharding.h", "auto_sharding_strategy.h", "auto_sharding_util.h"],
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:dump",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_creation_utils",
+        "//tensorflow/compiler/xla/service:hlo_live_range",
+        "//tensorflow/compiler/xla/service:hlo_memory_scheduler",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "//tensorflow/compiler/xla/service:hlo_sharding_util",
+        "//tensorflow/compiler/xla/service:pass_context",
+        "@pybind11",
+    ],
+)
+
+cc_library(
+    name = "redundant_slice_eliminator",
+    srcs = ["redundant_slice_eliminator.cc"],
+    hdrs = ["redundant_slice_eliminator.h"],
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_dce",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+    ],
+)
+
+cc_library(
+    name = "grad_acc_rewrite",
+    srcs = ["grad_acc_rewrite.cc"],
+    hdrs = ["grad_acc_rewrite.h"],
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "//tensorflow/compiler/xla/service:pass_context",
+        "//tensorflow/compiler/xla/service/spmd:spmd_partitioner",
+    ],
+)
+
+cc_library(
+    name = "slice_auto_sharded_stages",
+    srcs = ["slice_auto_sharded_stages.cc"],
+    hdrs = ["slice_auto_sharded_stages.h"],
+    deps = [
+        ":auto_sharding",
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "@pybind11",
+    ],
+)
+
+cc_library(
+    name = "alpa_compiler",
+    srcs = ["alpa_compiler.cc"],
+    hdrs = ["alpa_compiler.h"],
+    deps = [
+        ":auto_sharding",
+        ":redundant_slice_eliminator",
+        ":grad_acc_rewrite",
+        ":slice_auto_sharded_stages",
+        ":stateful_rng_spmd_partitioner",
+        # Copied from gpu_compiler
+        "//tensorflow/compiler/xla/pjrt:pjrt_client",
+        "//tensorflow/compiler/xla/service:algebraic_simplifier",
+        "//tensorflow/compiler/xla/service:all_reduce_reassociate",
+        "//tensorflow/compiler/xla/service:call_inliner",
+        "//tensorflow/compiler/xla/service:conditional_canonicalizer",
+        "//tensorflow/compiler/xla/service:conditional_simplifier",
+        "//tensorflow/compiler/xla/service:dot_decomposer",
+        "//tensorflow/compiler/xla/service:dot_merger",
+        "//tensorflow/compiler/xla/service:dump",
+        "//tensorflow/compiler/xla/service:gather_expander",
+        "//tensorflow/compiler/xla/service:gather_simplifier",
+        "//tensorflow/compiler/xla/service:hlo_constant_folding",
+        "//tensorflow/compiler/xla/service:hlo_cse",
+        "//tensorflow/compiler/xla/service:hlo_dce",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "//tensorflow/compiler/xla/service:hlo_pass_pipeline",
+        "//tensorflow/compiler/xla/service:hlo_verifier",
+        "//tensorflow/compiler/xla/service:reshape_mover",
+        "//tensorflow/compiler/xla/service:scatter_expander",
+        "//tensorflow/compiler/xla/service:scatter_simplifier",
+        "//tensorflow/compiler/xla/service:sharding_propagation",
+        "//tensorflow/compiler/xla/service:sharding_remover",
+        "//tensorflow/compiler/xla/service:sort_simplifier",
+        "//tensorflow/compiler/xla/service:transpose_folding",
+        "//tensorflow/compiler/xla/service:tuple_simplifier",
+        "//tensorflow/compiler/xla/service:while_loop_constant_sinking",
+        "//tensorflow/compiler/xla/service:while_loop_simplifier",
+        "//tensorflow/compiler/xla/service:zero_sized_hlo_elimination",
+        "//tensorflow/compiler/xla/service/gpu:matmul_utils",
+    ]
 )

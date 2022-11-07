@@ -21,6 +21,11 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 
+// Added by alpa
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
+#include "tensorflow/compiler/xla/service/hlo_instructions.h"
+#include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
+
 namespace xla {
 namespace spmd {
 
@@ -76,6 +81,14 @@ Status StatefulRngSpmdPartitioner::PreprocessSharding(
 bool StatefulRngSpmdPartitioner::CanSideEffectingHaveReplicatedSharding(
     const HloInstruction* hlo) {
   if (hlo->opcode() == HloOpcode::kRngGetAndUpdateState) return true;
+
+  // Alpa-specific changes for profling
+  if (hlo->opcode() == HloOpcode::kAllReduce &&
+      Cast<HloAllReduceInstruction>(hlo)->use_global_device_ids()) return true;
+  if (hlo->IsCustomCall(kPipelineMarker) ||
+      hlo->IsCustomCall(kCrossMeshAllReduce))
+    return true;
+
   return spmd::SpmdPartitioner::CanSideEffectingHaveReplicatedSharding(hlo);
 }
 

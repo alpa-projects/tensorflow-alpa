@@ -173,6 +173,9 @@ Status RunAutoShardingPass(HloModule* hlo_module,
       spmd_pipeline.AddPass<HloConstantSplitter>();
 
       spmd_pipeline.AddPass<AutoSharding>();
+      spmd_pipeline.AddPass<ShardingPropagation>(
+          /*is_spmd=*/true, /*propagate_metadata=*/false,
+          /*allow_spmd_sharding_propagation_to_output=*/true);
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
     } else {
       spmd_pipeline.AddPass<CallInliner>();

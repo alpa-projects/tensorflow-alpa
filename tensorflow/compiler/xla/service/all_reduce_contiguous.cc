@@ -30,7 +30,8 @@ namespace {
 
 Status ReplaceWithContiguousAllReduce(HloAllReduceInstruction* all_reduce) {
   TF_RET_CHECK(all_reduce);
-  TF_RET_CHECK(!all_reduce->has_sharding());
+  // Added by Alpa. We need to disable this check after a recent rebase.
+  //TF_RET_CHECK(!all_reduce->has_sharding());
 
   HloComputation& computation = *all_reduce->parent();  // never null
   PrimitiveType element_type = all_reduce->operand(0)->shape().element_type();
@@ -59,6 +60,7 @@ Status ReplaceWithContiguousAllReduce(HloAllReduceInstruction* all_reduce) {
           all_reduce->replica_groups(),
           /*constrain_layout=*/false, all_reduce->channel_id(),
           all_reduce->use_global_device_ids()));
+  new_all_reduce->set_metadata_op_name(all_reduce->metadata().op_name());
 
   // Slice from all-reduce result and bitcast back to the original shapes.
   std::vector<HloInstruction*> outputs;

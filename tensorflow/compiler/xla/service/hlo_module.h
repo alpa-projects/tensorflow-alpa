@@ -429,6 +429,20 @@ class HloModule {
 
   Status CheckUniqueNamesAndIdsForComputationsAndInstructions() const;
 
+  // Added by Alpa
+  void infer_spmd_shardings() {
+    std::vector<HloSharding> entry_params_shardings;
+    for (int64_t i = 0; i < entry_computation()->num_parameters(); ++i) {
+      auto param = entry_computation()->parameter_instruction(i);
+      CHECK(param->has_sharding()) << "Missing sharding in entry parameter " << i;
+      entry_params_shardings.push_back(param->sharding());
+    }
+    set_spmd_parameters_shardings(entry_params_shardings);
+    auto entry_root = entry_computation()->root_instruction();
+    CHECK(entry_root->has_sharding()) << "Missing sharding in entry root.";
+    set_spmd_output_sharding(entry_root->sharding());
+  }
+
   // Checks if this config has a list of entry parameters' HLO shardings for
   // SPMD.
   bool has_spmd_parameters_shardings() const {

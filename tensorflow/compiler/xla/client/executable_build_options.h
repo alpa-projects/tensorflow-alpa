@@ -77,6 +77,10 @@ class ExecutableBuildOptions {
   // debugging.
   std::string ToString() const;
 
+  // The random seed for compilation.
+  int seed() const { return seed_; };
+  void set_seed(int seed) { seed_ = seed; }
+
   // The number of replicas of this computation that are to be executed.
   // Defaults to 1.
   int num_replicas() const { return num_replicas_; }
@@ -191,6 +195,9 @@ class ExecutableBuildOptions {
   bool run_backend_only_ = false;
   bool allow_spmd_sharding_propagation_to_output_ = false;
   tsl::thread::ThreadPool* compile_thread_pool_ = nullptr;
+
+  // Added by Alpa
+  int seed_ = 42;
 };
 
 StatusOr<ExecutableBuildOptions> ExecutableBuildOptionsFromProto(

@@ -270,6 +270,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:gather_expander",
         "//tensorflow/compiler/xla/service:gather_simplifier",
         "//tensorflow/compiler/xla/service:hlo_constant_folding",
+        "//tensorflow/compiler/xla/service:hlo_constant_splitter",
         "//tensorflow/compiler/xla/service:hlo_cse",
         "//tensorflow/compiler/xla/service:hlo_dce",
         "//tensorflow/compiler/xla/service:hlo_pass",
@@ -286,6 +287,8 @@ cc_library(
         "//tensorflow/compiler/xla/service:while_loop_constant_sinking",
         "//tensorflow/compiler/xla/service:while_loop_simplifier",
         "//tensorflow/compiler/xla/service:zero_sized_hlo_elimination",
+        "//tensorflow/compiler/xla/service/gpu:gpu_conv_rewriter",
+        "//tensorflow/compiler/xla/service/gpu:gpu_shape_verifier",
         "//tensorflow/compiler/xla/service/gpu:matmul_utils",
     ]
 )

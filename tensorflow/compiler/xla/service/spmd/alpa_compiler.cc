@@ -19,7 +19,10 @@
 #include "tensorflow/compiler/xla/service/gather_expander.h"
 #include "tensorflow/compiler/xla/service/gather_simplifier.h"
 #include "tensorflow/compiler/xla/service/gpu/matmul_utils.h"
+#include "tensorflow/compiler/xla/service/gpu/gpu_conv_rewriter.h"
+#include "tensorflow/compiler/xla/service/gpu/gpu_shape_verifier.h"
 #include "tensorflow/compiler/xla/service/hlo_constant_folding.h"
+#include "tensorflow/compiler/xla/service/hlo_constant_splitter.h"
 #include "tensorflow/compiler/xla/service/hlo_cse.h"
 #include "tensorflow/compiler/xla/service/hlo_dce.h"
 #include "tensorflow/compiler/xla/service/hlo_pass_fix.h"
@@ -39,6 +42,27 @@
 #include "tensorflow/compiler/xla/service/zero_sized_hlo_elimination.h"
 
 namespace xla {
+
+namespace {
+// Adds the HloVerifier for GPU to the given pipeline.
+void AddHloVerifier(HloPassPipeline* pipeline, HloVerifierOpts&& opts = {},
+                    bool debug_only = false) {
+  std::unique_ptr<TargetVerifierMetadata> verifier_metadata =
+      std::make_unique<GpuVerifierMetadata>(std::move(opts));
+  if (debug_only) {
+    pipeline->AddInvariantCheckerDebug<HloVerifier>(
+        std::move(verifier_metadata), "hlo verifier (debug)");
+  } else {
+    pipeline->AddInvariantChecker<HloVerifier>(std::move(verifier_metadata),
+                                               "hlo verifier");
+  }
+}
+
+bool ConvIsLowerable(HloInstruction* conv) {
+  return gpu::GpuConvRewriter::ConvIsLowerable(conv);
+}
+}  // namespace
+
 namespace spmd {
 
 const char kBeforeAutoShardingDumpName[] = "before_run_auto_sharding";
@@ -70,7 +94,7 @@ Status PreCompileCheck(const CompileOptions& options) {
     }
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 StatusOr<HloModuleConfig> CreateHloModuleConfig(const HloModule* hlo_module,
@@ -100,13 +124,21 @@ Status RunAutoShardingPass(HloModule* hlo_module,
 
   // TODO(yonghao): TF Profiler Traceme
   const DebugOptions& debug_options = hlo_module->config().debug_options();
+
+  AlgebraicSimplifierOptions layout_insensitive_algsimp_opts({},
+                                                             ConvIsLowerable);
+  // "slow" minmax means we propagate nan.
+  layout_insensitive_algsimp_opts.set_minmax_propagate_nan(
+      !debug_options.xla_gpu_enable_fast_min_max());
+  layout_insensitive_algsimp_opts.set_enable_dot_strength_reduction(false);  // Added by Alpa
+
   if (hlo_module->config().use_spmd_partitioning()) {
     HloPassPipeline spmd_pipeline("spmd-partitioner");
+    AddHloVerifier(&spmd_pipeline);
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
       // Run some IR cleanup passes before running the SPMD partitioning
       // passes.
-      spmd_pipeline.AddInvariantChecker<HloVerifier>(HloVerifierOpts{});
       spmd_pipeline.AddPass<CallInliner>();
       spmd_pipeline.AddPass<DotDecomposer>();  // Added by Alpa
       spmd_pipeline.AddPass<ZeroSizedHloElimination>();
@@ -115,24 +147,15 @@ Status RunAutoShardingPass(HloModule* hlo_module,
       HloPassPipeline& spmd_simplify =
           spmd_pipeline.AddPass<HloPassFix<HloPassPipeline>>("spmd-simplify");
 
-      AlgebraicSimplifierOptions options;
-      options.set_enable_conv_operand_swap(false);
-      // "slow" minmax means we propagate nan.
-      options.set_minmax_propagate_nan(
-          !debug_options.xla_gpu_enable_fast_min_max());
-      options.set_enable_dot_strength_reduction(false);  // Added by Alpa
-      spmd_simplify.AddPass<AlgebraicSimplifier>(options);
+      spmd_simplify.AddPass<AlgebraicSimplifier>(
+          layout_insensitive_algsimp_opts);
 
       spmd_simplify.AddPass<SortSimplifier>();
       spmd_simplify.AddPass<TupleSimplifier>();
-      if (debug_options.xla_gpu_simplify_scatters()) {
-        spmd_simplify.AddPass<ScatterSimplifier>();
-      }
+      spmd_simplify.AddPass<ScatterSimplifier>();
       spmd_simplify.AddPass<ScatterExpander>(
           ScatterExpander::kEliminateSimpleScatters);
-      if (debug_options.xla_gpu_simplify_gathers()) {
-        spmd_simplify.AddPass<GatherSimplifier>();
-      }
+      spmd_simplify.AddPass<GatherSimplifier>();
       spmd_simplify.AddPass<GatherExpander>(
           GatherExpander::kEliminateSimpleGathers);
       spmd_simplify.AddPass<WhileLoopConstantSinking>();
@@ -146,6 +169,8 @@ Status RunAutoShardingPass(HloModule* hlo_module,
       spmd_simplify.AddPass<HloCSE>(
           /*is_layout_sensitive=*/false);  // Added by Alpa
       spmd_simplify.AddPass<HloDCE>();
+
+      spmd_pipeline.AddPass<HloConstantSplitter>();
 
       spmd_pipeline.AddPass<AutoSharding>();
       spmd_pipeline.AddPass<ShardingPropagation>(
@@ -166,7 +191,7 @@ Status RunAutoShardingPass(HloModule* hlo_module,
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status RunSpmdPartitionerPass(HloModule* hlo_module,
@@ -194,7 +219,7 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module,
     }
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SetHloModuleOutputShardings(
@@ -230,7 +255,7 @@ Status SetHloModuleOutputShardings(
         HloSharding::Tuple(tuple_sharding));
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SetHloModuleInputShardings(HloModule* module,
@@ -257,7 +282,7 @@ Status SetHloModuleInputShardings(HloModule* module,
     inst->set_sharding(HloSharding::Single(inst->shape(), hlo_sharding));
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 };  // namespace spmd

@@ -203,6 +203,12 @@ StatusOr<std::vector<int64_t>> StridesToLayout(
     if (strides[a] > strides[b]) {
       return false;
     }
+
+    // FIXME(yonghao): This is only a walk-around.
+    // Should support isConsistent([1,1]{1,0}, [1,1]{0,1}) in type check
+    if (dims[a] == dims[b]) {
+      return a > b;
+    }
     return dims[a] == 1 && dims[b] != 1;
   });
   int64_t stride = 1;

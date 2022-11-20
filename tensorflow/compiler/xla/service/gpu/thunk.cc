@@ -25,6 +25,7 @@ Thunk::ExecuteParams::ExecuteParams(
     : buffer_allocations(&buffer_allocations),
       stream(stream),
       async_comms_stream(async_comms_stream),
+      rng_seed(run_options.run_options().rng_seed()),
       nccl_params(run_options, stream) {}
 
 /*static*/ absl::string_view Thunk::KindToString(Thunk::Kind kind) {
@@ -81,6 +82,11 @@ Thunk::ExecuteParams::ExecuteParams(
       return "kTriangularSolve";
     case Thunk::kWhile:
       return "kWhile";
+    // Added by Alpa
+    case Thunk::kRngGetAndUpdateState:
+      return "kRngGetAndUpdateState";
+    default:
+      LOG(FATAL) << "Invalid thunk kind: " << kind;
   }
 }
 

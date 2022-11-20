@@ -787,6 +787,14 @@ class IrEmitterUnnested : public IrEmitter {
   // Returns the buffer allocation Slice for the given operands.
   StatusOr<std::vector<BufferAllocation::Slice>> GetSlices(
       mlir::Operation::operand_range operands);
+
+  // Added by Alpa
+  Status EmitMemZeroThunk(mlir::Operation* op);
+  Status EmitCrossMeshAllReduceTarget(mlir::Operation* op);
+  Status EmitRngGetAndUpdateStateThunk(mlir::Operation* op);
+  using Slices = std::vector<CustomCallThunk::OptionalSlice>;
+  StatusOr<std::pair<Slices, Slices>> CustomCallParseBuffers(
+      mlir::Operation* op);
 };
 
 }  // namespace gpu

@@ -141,6 +141,11 @@ Vector3 GetReductionTiling(const ReductionDimensions& reduction_dimensions,
 
 const char* const kCusolverCholeskyCallTarget = "__cusolver$cholesky";
 
+// Added by Alpa
+const char* const kBuiltinMemZeroTarget = "__builtin$MemZero";
+const char* const kBuiltinCrossMeshAllReduceTarget =
+    "__builtin$CrossMeshAllReduce";
+
 bool IsCustomCallToCusolver(const HloInstruction& hlo) {
   if (hlo.opcode() != HloOpcode::kCustomCall) {
     return false;

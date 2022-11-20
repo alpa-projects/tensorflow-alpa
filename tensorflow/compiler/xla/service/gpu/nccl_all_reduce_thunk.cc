@@ -34,21 +34,68 @@ limitations under the License.
 
 #if XLA_ENABLE_XCCL
 #include "tensorflow/compiler/xla/stream_executor/gpu/gpu_stream.h"
+#include "tensorflow/compiler/xla/stream_executor/gpu/gpu_activation.h"
 #endif
 
 namespace xla {
 namespace gpu {
 
-Status RunAllReduce(ReductionKind reduction_kind,
+// Added by Alpa
+bool IsSkipped(const int64_t op_id, const std::string& env_name) {
+  // Return whether this op should be skipped.
+  if (getenv("XLA_GPU_SKIP_ALLREDUCE") != nullptr) {  // skip all all-reduce
+    return true;
+  }
+
+  const char* env = getenv(env_name.c_str());
+  if (env == nullptr) {  // skip specific all-reduce
+    return false;
+  }
+  std::string key = absl::StrFormat(".%d.", op_id);
+  return strstr(env, key.c_str()) != nullptr;
+}
+
+Status RunAllReduce(const NcclAllReduceConfig& config,
                     std::vector<DeviceBufferPair>& buffers, se::Stream& stream,
-                    ncclComm_t comm) {
+                    ncclComm_t comm,
+                    const std::string& env_name) {
 #if XLA_ENABLE_XCCL
   int device_ordinal = stream.parent()->device_ordinal();
   VLOG(3) << "Performing all-reduce from device ordinal: " << device_ordinal;
 
-  ncclRedOp_t reduce_op = ToNcclReduction(reduction_kind);
+  ncclRedOp_t reduce_op = ToNcclReduction(config.reduction_kind);
 
   se::gpu::GpuStreamHandle gpu_stream = se::gpu::AsGpuStreamValue(&stream);
+
+  bool skip = IsSkipped(config.config.op_id, env_name);
+
+  if (skip) {
+    for (size_t i = 0; i < buffers.size(); ++i) {
+      DeviceBufferPair& buffer = buffers[i];
+      const void* send_buffer = buffer.source_buffer.opaque();
+      void* recv_buffer = buffer.destination_buffer.opaque();
+
+      if (send_buffer == recv_buffer) {
+        // if (device_ordinal == 0) {
+        //  std::cerr << "skip all-reduce " << config.config.op_id << std::endl;
+        //}
+      } else {
+        PrimitiveType element_type = config.config.operand_element_type[i];
+        int64_t size = buffer.element_count *
+                   ShapeUtil::ByteSizeOfPrimitiveType(element_type);
+
+        // if (device_ordinal == 0) {
+        //  std::cerr << "skip-copy all-reduce " << config.config.op_id << ",
+        //  size: " << size <<  std::endl;
+        //}
+        auto ret = cudaMemcpyAsync(recv_buffer, send_buffer, size,
+                                   cudaMemcpyDeviceToDevice,
+                                   gpu_stream);
+        CHECK_EQ(ret, 0);
+      }
+    }
+    return OkStatus();
+  }
 
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
   for (size_t i = 0; i < buffers.size(); ++i) {
@@ -252,7 +299,7 @@ Status NcclAllReduceThunk::RunNcclCollective(const ExecuteParams& params,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
   TF_RETURN_IF_ERROR(
-      RunAllReduce(config_.reduction_kind, device_buffers, stream, comm));
+      RunAllReduce(config_, device_buffers, stream, comm, skip_env_name_));
 
   int device_ordinal = stream.parent()->device_ordinal();
   VLOG(3) << "Done performing all-reduce for ordinal: " << device_ordinal;
@@ -291,8 +338,9 @@ Status NcclAllReduceStartThunk::RunNcclCollective(const ExecuteParams& params,
       std::vector<DeviceBufferPair> device_buffers,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
-  TF_RETURN_IF_ERROR(RunAllReduce(config_.reduction_kind, device_buffers,
-                                  async_comms_stream, comm));
+  LOG(FATAL) << "Not Implemented Error";
+  //TF_RETURN_IF_ERROR(RunAllReduce(config_, device_buffers,
+  //                                async_comms_stream, comm, skip_env_name_));
 
   // Create an event on the async stream for the completion of the all-reduce.
   se::Event done_event(async_comms_stream.parent());
@@ -390,7 +438,7 @@ Status RunReduceScatter(ReductionKind reduction_kind,
     TF_ASSIGN_OR_RETURN(auto dtype_and_multiplier,
                         ToNcclDataTypeAndCountMultiplier(buffer.element_type));
     ncclDataType_t dtype = dtype_and_multiplier.first;
-    int element_count = buffer.element_count * dtype_and_multiplier.second;
+    int64_t element_count = buffer.element_count * dtype_and_multiplier.second;
 
     // buffer.element_count is the source buffers element count. For
     // ncclReduceScatter, we need the destination buffers element count.
@@ -413,6 +461,81 @@ Status RunReduceScatter(ReductionKind reduction_kind,
 
   VLOG(3) << "Done performing reduce-scatter for ordinal: " << device_ordinal;
   return OkStatus();
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented(
+      "NCCL support is not available: this binary was not built with a CUDA "
+      "compiler, which is necessary to build the NCCL source library.");
+#endif  // XLA_ENABLE_XCCL
+}
+
+// Added by Alpa
+std::vector<std::unique_ptr<NcclComm>> nccl_comms;
+
+// FIXME(yonghao): support multiple groups of cross mesh nccl comms with keys
+void SetCrossMeshCommunicators(const std::vector<std::uintptr_t>& comms,
+                               const std::string& group_keys) {
+  nccl_comms.clear();
+  nccl_comms.reserve(comms.size());
+  for (std::uintptr_t comm : comms) {
+    nccl_comms.emplace_back(
+        std::make_unique<NcclComm>(reinterpret_cast<ncclComm_t>(comm)));
+  }
+}
+
+NcclAllReduceConfig GetCrossMeshNcclAllReduceConfig(
+    ReductionKind reduction_kind, xla::PrimitiveType op_type) {
+  NcclAllReduceConfig config;
+  NcclCollectiveConfig& collective_config = config.config;
+  collective_config.operand_count = 1;
+  collective_config.operand_element_type.push_back(op_type);
+  // The replica_groups, collective_op_kind and group_mode are used to
+  // identify nccl comm in XLA's original collective thunks, so they are
+  // not used in this thunk.
+  config.reduction_kind = reduction_kind;
+  return config;
+}
+
+CrossMeshNcclAllReduceThunk::CrossMeshNcclAllReduceThunk(
+    ThunkInfo thunk_info, std::vector<Buffer> buffers,
+    ReductionKind reduction_kind, xla::PrimitiveType op_type)
+    : Thunk(Thunk::kNcclAllReduce, thunk_info),
+      buffers_(buffers),
+      config_(GetCrossMeshNcclAllReduceConfig(reduction_kind, op_type)) {}
+
+Status CrossMeshNcclAllReduceThunk::ExecuteOnStream(
+    const ExecuteParams& params) {
+#if XLA_ENABLE_XCCL
+  VLOG(1) << absl::StreamFormat("Starting %s.", Thunk::KindToString(kind()));
+
+  se::StreamExecutor* executor = params.stream->parent();
+  se::gpu::ScopedActivateExecutorContext scoped_context(executor);
+
+  // TF_ASSIGN_OR_RETURN(
+  //     NcclComm::Lock comm,
+  //     AcquireNcclComm(params.run_id, op_id, std::move(participants),
+  //                     num_local_participants, *unique_id_callback, rank));
+  // TODO(yonghao): support CrossMeshNcclAllReduce for different mesh groups as above
+  // using participants info created at compile time
+  int device_ordinal = params.stream->parent()->device_ordinal();
+  NcclComm::Lock comm = nccl_comms[device_ordinal]->Acquire();
+
+  se::Stream& stream = *params.stream;
+  TF_ASSIGN_OR_RETURN(
+      std::vector<DeviceBufferPair> device_buffers,
+      ConvertToDeviceBuffers(params, buffers_,
+                             config_.config.operand_element_type));
+  TF_RETURN_IF_ERROR(
+      RunAllReduce(config_, device_buffers, stream, *comm, ""));
+
+  // Block host on the first call to ensure that all devices have allocated the
+  // required buffers for their communicators before allowing any device to
+  // continue enqueuing operations. Otherwise, the allocations can cause
+  // deadlock in the CUDA driver (b/215649390).
+  if (first_call_to_execute_) {
+    TF_RETURN_IF_ERROR(params.stream->BlockHostUntilDone());
+    first_call_to_execute_ = false;
+  }
+  return Status::OK();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented(
       "NCCL support is not available: this binary was not built with a CUDA "

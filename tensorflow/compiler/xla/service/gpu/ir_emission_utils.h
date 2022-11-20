@@ -69,6 +69,10 @@ bool IsCustomCallToCusolver(const HloInstruction& hlo);
 // is a success/failure code per batch element.
 extern const char* const kCusolverCholeskyCallTarget;
 
+// Added by Alpa
+extern const char* const kBuiltinMemZeroTarget;
+extern const char* const kBuiltinCrossMeshAllReduceTarget;
+
 // Returns true if either the dimensions being reduced or the dimensions being
 // kept are contiguous in the input of the reduce instruction.
 bool IsReductionFromOrToContiguousDimensions(const HloInstruction& reduce);

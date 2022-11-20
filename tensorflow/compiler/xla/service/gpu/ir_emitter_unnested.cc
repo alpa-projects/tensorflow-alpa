@@ -126,6 +126,9 @@ limitations under the License.
 #include "tensorflow/tsl/platform/human_readable_json.h"
 #include "tensorflow/tsl/platform/logging.h"
 
+// Added by Alpa
+ #include "tensorflow/compiler/xla/service/gpu/rng_thunk.h"
+
 #if GOOGLE_CUDA
 #include "tensorflow/compiler/xla/service/gpu/cublas_lt_matmul_thunk.h"
 #endif  // GOOGLE_CUDA
@@ -2815,6 +2818,15 @@ Status IrEmitterUnnested::EmitNcclThunk(mlir::Operation* untyped_op) {
     auto thunk =
         std::make_unique<NcclThunkType>(GetThunkInfo(op), op,
                                         /*buffers=*/std::move(buffers));
+
+    // Added by Alpa
+    if (mlir::isa<mlir::lmhlo::AllReduceOp>(op) ||
+        mlir::isa<mlir::lmhlo_gpu::AllReduceStartOp>(op)) {
+      // add the name of a module to help with skip all-reduce
+      std::string module_name = ir_emitter_context_->hlo_module().name();
+      dynamic_cast<NcclAllReduceThunkBase*>(thunk.get())->set_module_name(module_name);
+    }
+
     // Record thunks for all-reduce-start ops as the done ops need them.
     TF_RETURN_IF_ERROR(MaybeAddAllReduceStartThunkToMap(
         all_reduce_start_thunks_, op, thunk.get()));
@@ -5308,6 +5320,14 @@ Status IrEmitterUnnested::EmitOp(mlir::Operation* op) {
     }
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
+    // Added by Alpa
+    if (call.getCallTargetName() == kBuiltinMemZeroTarget) {
+      return EmitMemZeroThunk(op);
+    }
+    if (call.getCallTargetName() == kBuiltinCrossMeshAllReduceTarget) {
+      return EmitCrossMeshAllReduceTarget(op);
+    }
+
     return EmitCustomCallThunk(op);
   }
 
@@ -5354,7 +5374,9 @@ Status IrEmitterUnnested::EmitOp(mlir::Operation* op) {
   }
 
   if (mlir::isa<mlir::lmhlo::RngGetAndUpdateStateOp>(op)) {
-    return EmitRngGetAndUpdateState(op);
+    //return EmitRngGetAndUpdateState(op);
+    // Added by Alpa
+    return EmitRngGetAndUpdateStateThunk(op);
   }
 
   if (mlir::isa<mlir::lmhlo::ScatterOp>(op)) {
@@ -5468,6 +5490,130 @@ Thunk::ThunkInfo IrEmitterUnnested::GetThunkInfo(mlir::Operation* op) {
       mlir::mhlo::GetDebugNameFromLocation(op->getLoc()),
       mlir::mhlo::GetDebugNameFromLocation(module->getLoc()), unique_id_str);
   return thunk_info;
+}
+
+
+// Added by Alpa
+using Slices = std::vector<CustomCallThunk::OptionalSlice>;
+StatusOr<std::pair<Slices, Slices>> IrEmitterUnnested::CustomCallParseBuffers(
+    mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+
+  std::vector<CustomCallThunk::OptionalSlice> operands;
+  std::vector<CustomCallThunk::OptionalSlice> results;
+  if (custom_call.getTargetArgMapping()) {
+    auto values_to_slices_with_token_holes =
+        [&](mlir::ValueRange operands,
+            mlir::ArrayRef<int64_t> op_to_target_mapping, int64_t num_target)
+        -> StatusOr<std::vector<CustomCallThunk::OptionalSlice>> {
+      std::vector<CustomCallThunk::OptionalSlice> slices(num_target);
+      for (auto index_and_value_it :
+           llvm::zip(op_to_target_mapping, operands)) {
+        int64_t index = std::get<0>(index_and_value_it);
+        mlir::Value value = std::get<1>(index_and_value_it);
+        TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
+                            GetAllocationSlice(value));
+        slices[index] = slice;
+      }
+      return slices;
+    };
+
+    mlir::lmhlo::CustomCallTargetArgMappingAttr target_mapping =
+        *custom_call.getTargetArgMapping();
+    TF_ASSIGN_OR_RETURN(operands, values_to_slices_with_token_holes(
+                                      custom_call.getArgs(),
+                                      target_mapping.getArgsToTargetArgs(),
+                                      target_mapping.getNumArgs()));
+    TF_ASSIGN_OR_RETURN(results, values_to_slices_with_token_holes(
+                                     custom_call.getOutput(),
+                                     target_mapping.getResultsToTargetResults(),
+                                     target_mapping.getNumResults()));
+  } else {
+    auto values_to_slices = [&](mlir::ValueRange values)
+        -> StatusOr<std::vector<CustomCallThunk::OptionalSlice>> {
+      std::vector<CustomCallThunk::OptionalSlice> slices;
+      for (mlir::Value value : values) {
+        TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
+                            GetAllocationSlice(value));
+        slices.push_back(slice);
+      }
+      return slices;
+    };
+
+    TF_ASSIGN_OR_RETURN(operands, values_to_slices(custom_call.getArgs()));
+    TF_ASSIGN_OR_RETURN(results, values_to_slices(custom_call.getOutput()));
+  }
+
+  return std::make_pair(operands, results);
+}
+
+Status IrEmitterUnnested::EmitMemZeroThunk(mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+  Slices operands;
+  auto values_to_slices = [&](mlir::ValueRange values)
+      -> StatusOr<std::vector<CustomCallThunk::OptionalSlice>> {
+    std::vector<CustomCallThunk::OptionalSlice> slices;
+    for (mlir::Value value : values) {
+      TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
+                          GetAllocationSlice(value));
+      slices.push_back(slice);
+    }
+    return slices;
+  };
+
+  TF_ASSIGN_OR_RETURN(operands, values_to_slices(custom_call.getArgs()));
+  for (auto operand : operands) {
+    AddThunkToThunkSequence(
+        std::make_unique<MemzeroThunk>(GetThunkInfo(op), *operand,
+			                           custom_call.getOutput()[0]));
+  }
+  return OkStatus();
+}
+
+Status IrEmitterUnnested::EmitCrossMeshAllReduceTarget(mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+  TF_ASSIGN_OR_RETURN(auto all_buffers, CustomCallParseBuffers(op));
+  Slices& operands = all_buffers.first;
+  Slices& results = all_buffers.second;
+  std::vector<NcclCollectiveThunk::Buffer> buffers;
+  CHECK_EQ(operands.size(), results.size());
+  for (auto buf : llvm::zip(operands, results, custom_call.getArgs())) {
+    CustomCallThunk::OptionalSlice src = std::get<0>(buf);
+    CustomCallThunk::OptionalSlice dst = std::get<1>(buf);
+    mlir::Value src_value = std::get<2>(buf);
+    buffers.push_back(NcclCollectiveThunk::Buffer{
+        ShapeUtil::ElementsIn(GetShape(src_value)), *src, *dst});
+  }
+  ReductionKind reduction_kind;
+  // TODO(yonghao): the opaque should also add participant mesh group info.
+  const std::string op_str = custom_call.getBackendConfig().str();
+  if (op_str == "SUM") {
+    reduction_kind = ReductionKind::SUM;
+  } else if (op_str == "AND" || op_str == "MIN") {
+    reduction_kind = ReductionKind::MIN;
+  } else if (op_str == "OR" || op_str == "MAX") {
+    reduction_kind = ReductionKind::MAX;
+  } else {
+    return InternalError("cross mesh allreduce op %s is unsupported",
+                         op_str.c_str());
+  }
+  auto op_type = GetShape(custom_call.getArgs()[0]).element_type();
+  AddThunkToThunkSequence(std::make_unique<CrossMeshNcclAllReduceThunk>(
+      GetThunkInfo(op), buffers, reduction_kind, op_type));
+  return OkStatus();
+}
+
+Status IrEmitterUnnested::EmitRngGetAndUpdateStateThunk(mlir::Operation* op) {
+  // Replace the RngGetAndUpdateState with a custom thunk.
+  // So we can flexibly adjust the random seed at runtime.
+  auto casted = mlir::dyn_cast<mlir::lmhlo::RngGetAndUpdateStateOp>(op);
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice result_slice,
+                      GetAllocationSlice(casted.getState()));
+  std::unique_ptr<Thunk> thunk;
+  thunk = std::make_unique<RngGetAndUpdateStateThunk>(
+      GetThunkInfo(op), result_slice, casted.getDelta());
+  AddThunkToThunkSequence(std::move(thunk));
+  return OkStatus();
 }
 
 }  // namespace gpu

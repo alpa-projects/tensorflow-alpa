@@ -200,6 +200,9 @@ class GpuExecutable : public Executable {
       const ServiceExecutableRunOptions* run_options,
       VariantArguments arguments);
 
+  // Added by Alpa
+  int64_t TotalAllocationSize() const override;
+
   absl::Span<const BufferAllocation> GetAllocations() const {
     return allocations_;
   }

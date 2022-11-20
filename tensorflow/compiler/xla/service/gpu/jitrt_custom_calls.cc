@@ -1528,9 +1528,10 @@ absl::Status AllReduce::operator()(
   if (failed(device_buffers))
     return absl::InternalError("Failed to get device buffers");
 
-  auto executed = RunAllReduce(static_cast<ReductionKind>(reduction_kind),
-                               *device_buffers, *stream, **comm);
-  if (!executed.ok()) return ToAbslStatus(executed);
+  LOG(FATAL) << "Not Implemented Error";
+  //auto executed = RunAllReduce(static_cast<ReductionKind>(reduction_kind),
+  //                             *device_buffers, *stream, **comm);
+  //if (!executed.ok()) return ToAbslStatus(executed);
 
   int32_t device_ordinal = stream->parent()->device_ordinal();
   auto st = collectives->MaybeBlockAfterFirstRun(uid, device_ordinal, stream);
@@ -1600,10 +1601,11 @@ absl::Status AllReduceStart::operator()(
   // Wait until compute inputs are ready.
   async_collectives->async_comm_stream()->ThenWaitFor(params.stream);
 
-  auto executed =
-      RunAllReduce(static_cast<ReductionKind>(reduction_kind), *device_buffers,
-                   *async_collectives->async_comm_stream(), **comm);
-  if (!executed.ok()) return ToAbslStatus(executed);
+  LOG(FATAL) << "Not Implemented Error";
+  //auto executed =
+  //    RunAllReduce(static_cast<ReductionKind>(reduction_kind), *device_buffers,
+  //                 *async_collectives->async_comm_stream(), **comm);
+  //if (!executed.ok()) return ToAbslStatus(executed);
 
   // Create an event on the async stream for the completion of the all-reduce.
   se::Event done_event(async_collectives->async_comm_stream()->parent());

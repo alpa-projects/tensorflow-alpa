@@ -480,18 +480,6 @@ void BuildXlaCompilerSubmodule(py::module& m) {
                     &HloPrintOptions::is_in_nested_computation,
                     &HloPrintOptions::set_is_in_nested_computation);
 
-  // Added by Alpa
-  py::class_<HloSharding> hlo_sharding_class(m, "HloSharding");
-  hlo_sharding_class
-      .def(py::init([](const py::bytes& serialized_hlo_sharding_proto) {
-        OpSharding proto;
-        proto.ParseFromString(std::string(serialized_hlo_sharding_proto));
-        return ValueOrThrow(HloSharding::FromProto(proto));
-      }))
-      .def("proto_tuple", [](const HloSharding& hlo_sharding) {
-        return hlo_sharding.ToProto();
-      });
-
   py::class_<HloModule, std::shared_ptr<HloModule>> hlo_module_class(
       m, "HloModule");
   hlo_module_class.def_property_readonly("name", &HloModule::name)
@@ -812,6 +800,11 @@ void BuildXlaCompilerSubmodule(py::module& m) {
 
   py::class_<HloSharding> hlo_sharding(m, "HloSharding");
   hlo_sharding.def_static("from_proto", &xla::HloSharding::FromProto)
+      .def(py::init([](const py::bytes& serialized_hlo_sharding_proto) {
+        OpSharding proto;
+        proto.ParseFromString(std::string(serialized_hlo_sharding_proto));
+        return ValueOrThrow(HloSharding::FromProto(proto));
+      }))
       .def("__eq__", [](const xla::HloSharding& a,
                         const xla::HloSharding& b) { return a == b; })
       .def("__hash__",
@@ -864,7 +857,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
   m.def("set_hlo_module_output_shardings", &spmd::SetHloModuleOutputShardings);
   m.def("set_hlo_module_input_shardings", &spmd::SetHloModuleInputShardings);
   m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds);
-  m.def("get_alpa_jaxlib_version", [] { return "0.1.1"; });
+  m.def("get_alpa_jaxlib_version", [] { return "0.2.2"; });
 
   m.def(
       "run_auto_sharding",

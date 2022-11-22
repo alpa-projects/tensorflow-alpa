@@ -133,7 +133,7 @@ Status RunAutoShardingPass(HloModule* hlo_module,
   layout_insensitive_algsimp_opts.set_enable_dot_strength_reduction(false);  // Added by Alpa
 
   if (hlo_module->config().use_spmd_partitioning()) {
-    HloPassPipeline spmd_pipeline("spmd-partitioner");
+    HloPassPipeline spmd_pipeline("run-auto-sharding");
     AddHloVerifier(&spmd_pipeline);
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
@@ -199,7 +199,7 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module,
 
   // TODO(yonghao): TF Profiler Traceme
   if (hlo_module->config().use_spmd_partitioning()) {
-    HloPassPipeline spmd_pipeline("spmd-partitioner");
+    HloPassPipeline spmd_pipeline("run-spmd-partitioner");
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
       spmd_pipeline.AddPass<ShardingPropagation>(

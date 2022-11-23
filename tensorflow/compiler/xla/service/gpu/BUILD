@@ -579,6 +579,7 @@ cc_library(
         "sequential_thunk.cc",
         "while_thunk.cc",
         # Added by Alpa
+        "done_event_thunk.cc",
         "rng_thunk.cc",
     ],
     hdrs = [
@@ -597,9 +598,11 @@ cc_library(
         "sequential_thunk.h",
         "while_thunk.h",
         # Added by Alpa
+        "done_event_thunk.h",
         "rng_thunk.h",
     ],
     deps = [
+        ":alpa_event_manager",
         ":backend_configs_cc",
         ":buffer_allocations",
         ":cusolver_context",
@@ -1788,6 +1791,8 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Transforms",
+        # Added by Alpa
+        ":done_event_insertion",
     ],
 )
 
@@ -2986,32 +2991,33 @@ tf_cuda_library(
     ],
     compatible_with = [],
     defines = if_gpu_is_configured(["XLA_ENABLE_XCCL"]),
-    tags = ["manual"],  # Only builds with if_nccl().
-    deps = if_gpu_is_configured([
-        ":gpu_executable_run_options",
-        "@com_google_absl//absl/time",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/synchronization",
-        "//tensorflow/compiler/xla:debug_options_flags",
-        "//tensorflow/compiler/xla:status",
-        "//tensorflow/compiler/xla:status_macros",
-        "//tensorflow/compiler/xla:statusor",
-        "//tensorflow/compiler/xla:xla_data_proto_cc",
-        "//tensorflow/compiler/xla/service:collective_ops_utils",
-        "//tensorflow/compiler/xla/service:global_device_id",
-        "//tensorflow/compiler/xla/pjrt/distributed:client",
-        "//tensorflow/compiler/xla/pjrt:pjrt_client",
-        "//tensorflow/compiler/xla/pjrt:tfrt_cpu_pjrt_client",
+    deps = [
+        ":alpa_event_manager",
         "//tensorflow/compiler/xla/python:py_client",
-        "//tensorflow/compiler/xla/tools:driver",
-        "//tensorflow/core:lib",
-        "@pybind11",
+    ] + if_gpu_is_configured([
+        ":gpu_executable_run_options",
+        ":nccl_utils",
+        "//tensorflow/compiler/xla/stream_executor/gpu:gpu_stream",
     ]) + if_cuda_is_configured([
         "@local_config_nccl//:nccl",
     ]) + if_rocm_is_configured([
         "@local_config_rocm//rocm:rccl",
     ]),
+)
+
+cc_library(
+    name = "alpa_event_manager",
+    srcs = [
+        "alpa_events.cc",
+    ],
+    hdrs = [
+        "alpa_events.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/stream_executor:event",
+        "@com_google_absl//absl/container:flat_hash_map",
+    ],
 )
 
 cc_library(
@@ -3043,4 +3049,15 @@ cc_library(
         "//tensorflow/compiler/xla/service:pass_context",
         "//tensorflow/compiler/xla/service/spmd:auto_sharding",
     ],
+)
+
+cc_library(
+    name = "done_event_insertion", 
+    srcs = ["done_event_insertion.cc"], 
+    hdrs = ["done_event_insertion.h"], 
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+    ]
 )

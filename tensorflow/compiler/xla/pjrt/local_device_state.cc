@@ -186,4 +186,12 @@ int LocalDeviceState::GetNewPrngSeed() {
   return x;
 }
 
+// Added by Alpa
+se::Stream* LocalDeviceState::GetLastDeviceToDeviceStream() {
+  absl::MutexLock lock(&mu_);
+  int i = next_device_to_device_stream_;
+  i = (i - 1) % device_to_device_streams_.size();
+  return device_to_device_streams_.at(i).get();
+}
+
 }  // namespace xla

@@ -145,6 +145,8 @@ const char* const kCusolverCholeskyCallTarget = "__cusolver$cholesky";
 const char* const kBuiltinMemZeroTarget = "__builtin$MemZero";
 const char* const kBuiltinCrossMeshAllReduceTarget =
     "__builtin$CrossMeshAllReduce";
+const char* const kBuiltinDoneEventTarget = "__builtin$DoneEvent";
+
 
 bool IsCustomCallToCusolver(const HloInstruction& hlo) {
   if (hlo.opcode() != HloOpcode::kCustomCall) {

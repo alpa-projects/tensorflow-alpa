@@ -127,7 +127,8 @@ limitations under the License.
 #include "tensorflow/tsl/platform/logging.h"
 
 // Added by Alpa
- #include "tensorflow/compiler/xla/service/gpu/rng_thunk.h"
+#include "tensorflow/compiler/xla/service/gpu/rng_thunk.h"
+#include "tensorflow/compiler/xla/service/gpu/done_event_thunk.h"
 
 #if GOOGLE_CUDA
 #include "tensorflow/compiler/xla/service/gpu/cublas_lt_matmul_thunk.h"
@@ -5327,6 +5328,9 @@ Status IrEmitterUnnested::EmitOp(mlir::Operation* op) {
     if (call.getCallTargetName() == kBuiltinCrossMeshAllReduceTarget) {
       return EmitCrossMeshAllReduceTarget(op);
     }
+    if (call.getCallTargetName() == kBuiltinDoneEventTarget) {
+      return EmitDoneEventThunk(op);
+    }
 
     return EmitCustomCallThunk(op);
   }
@@ -5601,6 +5605,14 @@ Status IrEmitterUnnested::EmitCrossMeshAllReduceTarget(mlir::Operation* op) {
   AddThunkToThunkSequence(std::make_unique<CrossMeshNcclAllReduceThunk>(
       GetThunkInfo(op), buffers, reduction_kind, op_type));
   return OkStatus();
+}
+
+Status IrEmitterUnnested::EmitDoneEventThunk(mlir::Operation* op) {
+  auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
+  int64_t output_index = std::stoll(custom_call.getBackendConfig().str());
+  AddThunkToThunkSequence(
+      absl::make_unique<DoneEventThunk>(GetThunkInfo(op), output_index));
+  return Status::OK();
 }
 
 Status IrEmitterUnnested::EmitRngGetAndUpdateStateThunk(mlir::Operation* op) {

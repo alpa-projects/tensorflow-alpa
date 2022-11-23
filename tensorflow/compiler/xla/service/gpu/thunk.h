@@ -72,6 +72,7 @@ class Thunk {
     kTriangularSolve,
     kWhile,
     // Added by Alpa
+    kDoneEvent,
     kRngGetAndUpdateState,
   };
 

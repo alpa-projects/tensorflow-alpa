@@ -80,6 +80,7 @@ limitations under the License.
 
 // Added by Alpa
 #ifdef XLA_PYTHON_ENABLE_GPU
+#include "tensorflow/compiler/xla/service/gpu/alpa_events.h"
 #include "tensorflow/compiler/xla/service/gpu/alpa_nccl_wrapper.h"
 #include "tensorflow/compiler/xla/service/gpu/nccl_all_reduce_thunk.h"
 
@@ -512,11 +513,15 @@ PYBIND11_MODULE(xla_extension, m) {
       .def("hlo_modules", &PyLoadedExecutable::HloModules)
       .def("keep_alive", &PyLoadedExecutable::KeepAlive)
       // Added by Alpa
-      .def("total_allocation_size", [](PyLoadedExecutable* exec){
-             const PjRtLoadedExecutable* pjrt_executable = &exec->pjrt_executable();
-             const PjRtStreamExecutorExecutable* stream_executable = dynamic_cast<const PjRtStreamExecutorExecutable*>(pjrt_executable);
-             absl::Span<const std::shared_ptr<LocalExecutable>> local_executables =\
-                 stream_executable->executables();
+      .def("total_allocation_size",
+           [](PyLoadedExecutable* exec) {
+             const PjRtLoadedExecutable* pjrt_executable =
+                 &exec->pjrt_executable();
+             const PjRtStreamExecutorExecutable* stream_executable =
+                 dynamic_cast<const PjRtStreamExecutorExecutable*>(
+                     pjrt_executable);
+             absl::Span<const std::shared_ptr<LocalExecutable>>
+                 local_executables = stream_executable->executables();
              Executable* executable = local_executables[0]->executable();
              return executable->TotalAllocationSize();
            })
@@ -735,28 +740,39 @@ PYBIND11_MODULE(xla_extension, m) {
       py::arg("compile_options") = CompileOptions());
 
 #ifdef XLA_PYTHON_ENABLE_GPU
-  py::class_<gpu::NcclCommStorage,
-             std::shared_ptr<gpu::NcclCommStorage>>
-      nccl_comm_storage(m, "nccl_comm_storage");
-  m.def("nccl_init_communicator", &gpu::NcclInitCommunicator,
-        "Initialize single thread communicators");
-  m.def("nccl_local_all_gather", &gpu::NcclLocalAllGather, "nccl local allgather");
-  m.def("nccl_destroy_comms", &gpu::NcclDestroyComms, "destroy comms");
-  m.def("nccl_get_unique_id", &gpu::NcclGetUniqueId, "get unique nccl id");
-  m.def("nccl_get_version", &gpu::NcclGetVersion, "get nccl version");
-  m.def("nccl_broadcast_partial_gpus", &gpu::NcclBroadcastPartialGPUs,
-        "nccl broadcast with only a subset of gpus in the host are involved");
-  m.def("nccl_create_communicators", &gpu::NcclCreateCommunicators, 
-        "nccl create communicators for multiple threads case");
-  m.def("nccl_create_communicators_no_stream",
-        &gpu::NcclCreateCommunicatorsNoStream,
-        "nccl create pure communicators");
-  m.def("get_buffer_device_id", &gpu::GetBufferDeviceId, 
+  py::class_<gpu::alpa::CommGroup, std::shared_ptr<gpu::alpa::CommGroup>>
+      alpa_comm_group(m, "CommGroup");
+  alpa_comm_group
+      .def(py::init([](std::shared_ptr<PyClient> backend) {
+        return std::make_shared<gpu::alpa::CommGroup>(backend);
+      }))
+      .def("record_events", &gpu::alpa::CommGroup::CommunicatorRecordEvents)
+      .def("wait_events", &gpu::alpa::CommGroup::CommunicatorWaitEvents)
+      .def("comm_wait_compute", &gpu::alpa::CommGroup::CommWaitCompute)
+      .def("compute_wait_comm", &gpu::alpa::CommGroup::ComputeWaitComm)
+      .def("nccl_create_communicators",
+           &gpu::alpa::CommGroup::NcclCreateCommunicators,
+           "create nccl communicators for cross-mesh communication")
+      .def("nccl_destroy_comms", &gpu::alpa::CommGroup::NcclDestroyComms,
+           "destroy comms")
+      .def("nccl_local_all_gather", &gpu::alpa::CommGroup::NcclLocalAllGather,
+           "nccl local allgather")
+      .def("nccl_broadcast_partial_gpus",
+           &gpu::alpa::CommGroup::NcclBroadcastPartialGPUs,
+           "nccl broadcast with only a subset of gpus in the host are involved")
+      .def("nccl_recv", &gpu::alpa::CommGroup::NcclRecv, "nccl recv data")
+      .def("nccl_send", &gpu::alpa::CommGroup::NcclSend, "nccl send data");
+  m.def("set_num_device_on_host", &gpu::SetNumDeviceOnHost);
+  m.def("set_idx_to_uuid", &gpu::XlaSetIdxToUuid);
+  m.def("computation_wait_events", &gpu::alpa::ComputationWaitEvents);
+  m.def("create_cross_mesh_communicator", &gpu::CreateCrossMeshCommunicator,
+        "create nccl communicators for cross mesh collective communication");
+  m.def("reset_event_context", &gpu::alpa::ResetEventContext);
+  m.def("get_buffer_device_id", &gpu::alpa::GetBufferDeviceId,
         "get the local device id for one pybuffer");
-  m.def("nccl_recv", &gpu::NcclRecv, "nccl recv data");
-  m.def("nccl_send", &gpu::NcclSend, "nccl send data");
-  m.def("set_cross_mesh_communicator", &gpu::SetCrossMeshCommunicators,
-        "set nccl communicators for cross mesh collective communication");
+  m.def("nccl_get_unique_id", &gpu::alpa::NcclGetUniqueId,
+        "get unique nccl id");
+  m.def("nccl_get_version", &gpu::alpa::NcclGetVersion, "get nccl version");
 #endif // XLA_PYTHON_ENABLE_GPU
 }  // NOLINT(readability/fn_size)
 

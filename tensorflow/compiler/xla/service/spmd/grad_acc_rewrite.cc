@@ -33,6 +33,14 @@ HloInstruction* GetAllReduce(HloInstruction* src) {
   return nullptr;
 }
 
+HloInstruction* MaybeReshape(HloInstruction* src, const Shape& dst_shape) {
+  if (ShapeUtil::CompatibleIgnoringFpPrecision(src->shape(), dst_shape)) {
+    return src;
+  }
+  return src->parent()->AddInstruction(
+      HloInstruction::CreateReshape(dst_shape, src));
+}
+
 StatusOr<bool> GradAccRewrite::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
@@ -74,8 +82,11 @@ StatusOr<bool> GradAccRewrite::Run(
       }
     }
 
-    allreduce_ins->ReplaceOperandWith(0, add_ins);
-    output_tuple->ReplaceOperandWith(i, allreduce_ins);
+    // allreduce_ins->ReplaceOperandWith(0, add_ins);
+    allreduce_ins->ReplaceOperandWith(
+        0, MaybeReshape(add_ins, allreduce_ins->shape()));
+    output_tuple->ReplaceOperandWith(
+        i, MaybeReshape(allreduce_ins, add_ins->shape()));
     allreduce_ins->set_metadata_op_name(kSkippableAllReduce);
 
     if (allreduce_ins->shape().element_type() != add_ins->shape().element_type()) {

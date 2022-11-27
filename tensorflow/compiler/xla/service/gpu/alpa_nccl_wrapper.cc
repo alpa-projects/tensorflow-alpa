@@ -360,9 +360,6 @@ Status ComputationWaitEvents(const AlpaUuids &uuids,
 
 // Event context management
 void ResetEventContext(std::shared_ptr<PyClient> client) {
-  // PjRtStreamExecutorClient *pjrt_client =
-  //     tensorflow::down_cast<PjRtStreamExecutorClient *>(client->pjrt_client());
-  // HoldAlpaEventsUntilStreamDone(pjrt_client->device_state(0).compute_stream());
   ResetAlpaEvents();
 }
 // Other functions

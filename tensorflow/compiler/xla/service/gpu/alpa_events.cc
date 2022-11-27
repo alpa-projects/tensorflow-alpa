@@ -94,12 +94,5 @@ Status WaitEventOnStreams(int uuid,
 void ResetAlpaEvents() {
   uuid_to_events = std::make_shared<UuidToEvent_t>();
 }
-
-void HoldAlpaEventsUntilStreamDone(se::Stream* stream) {
-  std::shared_ptr<UuidToEvent_t> events_ref = uuid_to_events;
-  stream->ThenDoHostCallback([events_ref] () {
-    // Hold events until done
-  });
-}
 };  // namespace gpu
 };  // namespace xla

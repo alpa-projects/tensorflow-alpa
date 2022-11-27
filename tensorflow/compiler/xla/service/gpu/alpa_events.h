@@ -53,9 +53,6 @@ Status WaitEventOnStreams(int uuid,
 // inside a PipeShardExecutable, we can reset it at the beginning of a
 // PipeShardExecutable.
 void ResetAlpaEvents();
-
-// release events after all computation finishes by a callback.
-void HoldAlpaEventsUntilStreamDone(se::Stream* stream);
 };      // namespace gpu
 };      // namespace xla
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_ALPA_EVENTS_H_

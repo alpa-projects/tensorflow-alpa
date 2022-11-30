@@ -39,8 +39,8 @@ Status AddDoneEvent(HloInstruction* inst, size_t index, HloInstruction* root) {
 };  // namespace
 
 StatusOr<bool> HloDoneInsertion::Run(
-      HloModule* module,
-      const absl::flat_hash_set<absl::string_view>& execution_threads) {
+    HloModule* module,
+    const absl::flat_hash_set<absl::string_view>& execution_threads) {
   bool changed = false;
 
   HloComputation* entry = module->entry_computation();

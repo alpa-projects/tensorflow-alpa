@@ -69,7 +69,7 @@ class CommGroup {
 
   // Sync functions:
   Status CommunicatorRecordEvents(const AlpaUuids &uuids, int num_devices,
-                                 bool is_send);
+                                  bool is_send);
 
   Status CommunicatorWaitEvents(const AlpaUuids &uuids, int num_devices,
                                 bool is_send);

@@ -18,11 +18,11 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/python/py_executable.h"
 
-# ifdef XLA_ENABLE_XCCL
+#ifdef XLA_ENABLE_XCCL
 #include "tensorflow/compiler/xla/service/gpu/alpa_events.h"
 #include "tensorflow/compiler/xla/stream_executor/gpu/gpu_stream.h"
 #include "third_party/gpus/cuda/include/cuda.h"
-# endif
+#endif
 
 namespace stream_executor {};
 namespace se = ::stream_executor;
@@ -32,7 +32,7 @@ namespace gpu {
 
 namespace alpa {
 namespace {
-void AddCallBackReleasingBuffer(se::Stream* stream, PyBuffer::object &buf_obj) {
+void AddCallBackReleasingBuffer(se::Stream *stream, PyBuffer::object &buf_obj) {
   // Holding the shared ptr of the buffer because we use it in an unsafe way.
   // This prevents XLA from freeing the buffer.
   std::shared_ptr<PjRtBuffer> pjrt_ref = buf_obj.buf()->shared_ptr_buffer();
@@ -178,8 +178,10 @@ Status CommGroup::NcclLocalAllGather(const AlpaNcclUid &key,
   CHECK_EQ(n_devices, buffers.size());
   CHECK_EQ(n_devices, local_start_positions.size());
 
-  TF_ASSIGN_OR_RETURN(ncclDataType_t dtype, ToNcclDataType(
-      buffers[0].buf()->buffer()->on_device_shape().element_type()));
+  TF_ASSIGN_OR_RETURN(
+      ncclDataType_t dtype,
+      ToNcclDataType(
+          buffers[0].buf()->buffer()->on_device_shape().element_type()));
   int dtype_size = SizeOfType(dtype);
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
   for (int i = 0; i < n_devices; ++i) {
@@ -213,8 +215,10 @@ Status CommGroup::NcclBroadcastPartialGPUs(
   CHECK_EQ(n_devices, buffers.size());
   CHECK_EQ(n_devices, local_start_positions.size());
 
-  TF_ASSIGN_OR_RETURN(ncclDataType_t dtype, ToNcclDataType(
-      buffers[0].buf()->buffer()->on_device_shape().element_type()));
+  TF_ASSIGN_OR_RETURN(
+      ncclDataType_t dtype,
+      ToNcclDataType(
+          buffers[0].buf()->buffer()->on_device_shape().element_type()));
   int dtype_size = SizeOfType(dtype);
 
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
@@ -253,8 +257,9 @@ Status CommGroup::NcclSend(const AlpaNcclUid &key, PyBuffer::object buffer,
                            bool use_default_stream) {
 #if XLA_ENABLE_XCCL
   const int device_id = local_ids[key][0];
-  TF_ASSIGN_OR_RETURN(ncclDataType_t dtype, ToNcclDataType(
-      buffer.buf()->buffer()->on_device_shape().element_type()));
+  TF_ASSIGN_OR_RETURN(
+      ncclDataType_t dtype,
+      ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type()));
   int dtype_size = SizeOfType(dtype);
   TF_ASSIGN_OR_RETURN(std::uintptr_t sendbuff,
                       buffer.buf()->UnsafeBufferPointer());
@@ -280,8 +285,9 @@ Status CommGroup::NcclRecv(const AlpaNcclUid &key, PyBuffer::object buffer,
                            bool use_default_stream) {
 #if XLA_ENABLE_XCCL
   const int device_id = local_ids[key][0];
-  TF_ASSIGN_OR_RETURN(ncclDataType_t dtype, ToNcclDataType(
-      buffer.buf()->buffer()->on_device_shape().element_type()));
+  TF_ASSIGN_OR_RETURN(
+      ncclDataType_t dtype,
+      ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type()));
   int dtype_size = SizeOfType(dtype);
   TF_ASSIGN_OR_RETURN(std::uintptr_t recvbuff,
                       buffer.buf()->UnsafeBufferPointer());
@@ -359,9 +365,7 @@ Status ComputationWaitEvents(const AlpaUuids &uuids,
 }
 
 // Event context management
-void ResetEventContext(std::shared_ptr<PyClient> client) {
-  ResetAlpaEvents();
-}
+void ResetEventContext(std::shared_ptr<PyClient> client) { ResetAlpaEvents(); }
 // Other functions
 std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid) {
   std::vector<char> nccl_uid_vec(sizeof(nccl_uid.internal), 0);

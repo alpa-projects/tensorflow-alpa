@@ -91,8 +91,6 @@ Status WaitEventOnStreams(int uuid,
   return OkStatus();
 }
 
-void ResetAlpaEvents() {
-  uuid_to_events = std::make_shared<UuidToEvent_t>();
-}
+void ResetAlpaEvents() { uuid_to_events = std::make_shared<UuidToEvent_t>(); }
 };  // namespace gpu
 };  // namespace xla

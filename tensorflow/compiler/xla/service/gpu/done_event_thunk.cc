@@ -24,7 +24,9 @@ Status DoneEventThunk::ExecuteOnStream(const ExecuteParams& params) {
     cur_run_id = params.nccl_params.run_id;
   } else {
     absl::MutexLock lock(&mu_);
-    auto run_id_match = [&]() {return params.nccl_params.run_id == cur_run_id;};
+    auto run_id_match = [&]() {
+      return params.nccl_params.run_id == cur_run_id;
+    };
     mu_.Await(absl::Condition(&run_id_match));
   }
   se::Event* done_event =

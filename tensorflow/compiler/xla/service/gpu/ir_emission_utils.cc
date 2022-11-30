@@ -147,7 +147,6 @@ const char* const kBuiltinCrossMeshAllReduceTarget =
     "__builtin$CrossMeshAllReduce";
 const char* const kBuiltinDoneEventTarget = "__builtin$DoneEvent";
 
-
 bool IsCustomCallToCusolver(const HloInstruction& hlo) {
   if (hlo.opcode() != HloOpcode::kCustomCall) {
     return false;

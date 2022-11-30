@@ -602,7 +602,6 @@ cc_library(
         "rng_thunk.h",
     ],
     deps = [
-        ":alpa_event_manager",
         ":backend_configs_cc",
         ":buffer_allocations",
         ":cusolver_context",
@@ -683,6 +682,8 @@ cc_library(
         "//tensorflow/tsl/platform:logging",
         "//tensorflow/tsl/platform:status",
         "//tensorflow/tsl/lib/gtl:map_util",
+        # Added by Alpa
+        ":alpa_event_manager",
     ] + if_gpu_is_configured([
         ":cholesky_thunk",
         ":precompiled_kernels",

@@ -11,11 +11,9 @@ namespace gpu {
 namespace se = ::stream_executor;
 
 class DoneEventStats {
-
  public:
   void WaitForAllEventRecorded();
-  se::Event* RecordEvent(int device_ordinal,
-                         se::StreamExecutor* executor);
+  se::Event* RecordEvent(int device_ordinal, se::StreamExecutor* executor);
   Status WaitOnStreams(std::vector<se::Stream*>& streams);
   Status WaitOnStreams(std::vector<std::unique_ptr<se::Stream>>& streams);
 

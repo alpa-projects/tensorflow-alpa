@@ -367,24 +367,24 @@ Status ComputationWaitEvents(const AlpaUuids &uuids,
 // Event context management
 void ResetEventContext(std::shared_ptr<PyClient> client) { ResetAlpaEvents(); }
 // Other functions
-std::vector<char> NcclUidSerialize(ncclUniqueId nccl_uid) {
-  std::vector<char> nccl_uid_vec(sizeof(nccl_uid.internal), 0);
+AlpaNcclUid NcclUidSerialize(ncclUniqueId nccl_uid) {
+  AlpaNcclUid nccl_uid_vec(sizeof(nccl_uid.internal), 0);
   memcpy(nccl_uid_vec.data(), &nccl_uid.internal, sizeof(nccl_uid.internal));
   return nccl_uid_vec;
 }
 
-ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_vec) {
+ncclUniqueId NcclUidDeserialize(const AlpaNcclUid& nccl_uid_vec) {
   ncclUniqueId nccl_uid;
   CHECK_EQ(sizeof(nccl_uid.internal), nccl_uid_vec.size());
   memcpy(&nccl_uid.internal, nccl_uid_vec.data(), sizeof(nccl_uid.internal));
   return nccl_uid;
 }
 
-StatusOr<std::vector<char>> NcclGetUniqueId() {
+StatusOr<AlpaNcclUid> NcclGetUniqueId() {
 #if XLA_ENABLE_XCCL
   ncclUniqueId id;
   XLA_CUDA_RETURN_IF_ERROR(ncclGetUniqueId(&id));
-  std::vector<char> nccl_uid_vec = NcclUidSerialize(id);
+  AlpaNcclUid nccl_uid_vec = NcclUidSerialize(id);
   return nccl_uid_vec;
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");

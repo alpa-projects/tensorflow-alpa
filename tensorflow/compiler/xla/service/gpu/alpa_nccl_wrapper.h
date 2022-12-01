@@ -33,7 +33,7 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 namespace alpa {
-using AlpaNcclUid = std::vector<char>;
+using AlpaNcclUid = std::vector<int8_t>;
 using AlpaUuids = std::vector<int>;
 
 class CommGroup {
@@ -96,9 +96,9 @@ Status ComputationWaitEvents(const AlpaUuids &uuids,
 // Event context management
 void ResetEventContext(std::shared_ptr<PyClient> client);
 // Other functions:
-ncclUniqueId NcclUidDeserialize(std::vector<char> nccl_uid_chars);
+ncclUniqueId NcclUidDeserialize(const AlpaNcclUid& nccl_uid_chars);
 
-StatusOr<std::vector<char>> NcclGetUniqueId();
+StatusOr<AlpaNcclUid> NcclGetUniqueId();
 
 StatusOr<int> NcclGetVersion();
 

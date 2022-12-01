@@ -202,6 +202,7 @@ limitations under the License.
 #include "tensorflow/tsl/util/env_var.h"
 
 // Added by Alpa
+#include "tensorflow/compiler/xla/service/gpu/done_event_insertion.h"
 #include "tensorflow/compiler/xla/service/pass_context.h"
 
 namespace xla {
@@ -703,6 +704,11 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
 
+  if (pass_context::GetBool("done-event::enable", false)) {
+    HloPassPipeline pipeline("done event insertion");
+    pipeline.AddPass<HloDoneInsertion>();
+    TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+  }
   return OkStatus();
 }
 

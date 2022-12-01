@@ -164,6 +164,9 @@ class LocalDeviceState {
 
   Status SynchronizeAllActivity();
 
+  // Added by Alpa
+  se::Stream* GetLastDeviceToDeviceStream();
+
  private:
   AllocationModel allocation_model_;
 

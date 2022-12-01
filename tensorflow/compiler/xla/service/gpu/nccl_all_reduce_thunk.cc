@@ -472,14 +472,34 @@ Status RunReduceScatter(ReductionKind reduction_kind,
 std::vector<std::unique_ptr<NcclComm>> nccl_comms;
 
 // FIXME(yonghao): support multiple groups of cross mesh nccl comms with keys
-void SetCrossMeshCommunicators(const std::vector<std::uintptr_t>& comms,
-                               const std::string& group_keys) {
+// by recording the uuid vec into the thunk and directly refer to the CommGroup
+// from the thunk
+Status CreateCrossMeshCommunicator(int world_size,
+                                   const std::vector<int>& device_global_ranks,
+                                   int num_device,
+                                   const std::vector<int8_t>& nccl_uid_vec) {
+#if XLA_ENABLE_XCCL
+  CHECK_EQ(num_device, device_global_ranks.size());
+  ncclUniqueId nccl_uid;
+  CHECK_EQ(sizeof(nccl_uid.internal), nccl_uid_vec.size());
+  memcpy(&nccl_uid.internal, nccl_uid_vec.data(), sizeof(nccl_uid.internal));
   nccl_comms.clear();
-  nccl_comms.reserve(comms.size());
-  for (std::uintptr_t comm : comms) {
-    nccl_comms.emplace_back(
-        std::make_unique<NcclComm>(reinterpret_cast<ncclComm_t>(comm)));
+
+  // Create Communicators
+  XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
+  for (int device_id = 0; device_id < num_device; ++device_id) {
+    cudaSetDevice(device_id);
+    int rank = device_global_ranks[device_id];
+    nccl_comms.emplace_back(std::make_unique<NcclComm>());
+    NcclComm::Lock comm = nccl_comms[device_id]->Acquire();
+    XLA_CUDA_RETURN_IF_ERROR(
+        ncclCommInitRank(comm.get(), world_size, nccl_uid, rank));
   }
+  XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
+  return OkStatus();
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented("NCCL support is not available.");
+#endif  // XLA_ENABLE_XCCL
 }
 
 NcclAllReduceConfig GetCrossMeshNcclAllReduceConfig(

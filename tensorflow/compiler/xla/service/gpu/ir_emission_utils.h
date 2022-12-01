@@ -72,6 +72,7 @@ extern const char* const kCusolverCholeskyCallTarget;
 // Added by Alpa
 extern const char* const kBuiltinMemZeroTarget;
 extern const char* const kBuiltinCrossMeshAllReduceTarget;
+extern const char* const kBuiltinDoneEventTarget;
 
 // Returns true if either the dimensions being reduced or the dimensions being
 // kept are contiguous in the input of the reduce instruction.

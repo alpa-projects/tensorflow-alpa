@@ -790,6 +790,7 @@ class IrEmitterUnnested : public IrEmitter {
 
   // Added by Alpa
   Status EmitMemZeroThunk(mlir::Operation* op);
+  Status EmitDoneEventThunk(mlir::Operation* op);
   Status EmitCrossMeshAllReduceTarget(mlir::Operation* op);
   Status EmitRngGetAndUpdateStateThunk(mlir::Operation* op);
   using Slices = std::vector<CustomCallThunk::OptionalSlice>;

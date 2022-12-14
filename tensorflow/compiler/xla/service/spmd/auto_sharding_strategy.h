@@ -709,6 +709,17 @@ class ClusterEnvironment {
     return ret;
   }
 
+  double ComputationCost(const HloOpcode opcode, const Shape& shape) {
+    CHECK(shape.IsArray())  << "Not an array shape: opcode=" 
+                            << HloOpcodeString(opcode) 
+                            << ", shape=" << shape.ToString();
+                            
+    double op_size = 1.0;
+    for (int i = 0; i < shape.dimensions_size(); ++i) op_size *= shape.dimensions(i);
+    // TODO(yxsong): ajdust computation cost calculation.
+    return op_c_cost.at(opcode) * op_size;
+  }
+
   // Print the information of this device mesh.
   std::string ToString() {
     std::ostringstream os;
@@ -737,6 +748,9 @@ class ClusterEnvironment {
   // The loop num carried by the device mesh
   int num_iter;
 
+  // Cost model
+  absl::flat_hash_map<HloOpcode, double> op_c_cost;
+
   // Cache a flatten 1d version of the device mesh.
   // Used for mixed mesh shape strategies.
   Array<int64_t> device_mesh_1d;
@@ -757,6 +771,11 @@ class ClusterEnvironment {
         }
       }
     }
+  }
+
+  // TODO(yxsong): Complete operator computation cost.
+  void InitOpCCost() {
+    op_c_cost[HloOpcode::kParameter]  = 0;
   }
 };
 
@@ -966,9 +985,9 @@ class CostGraph {
       int src = pair.first;
       int dst = pair.second;
       dst = QueryDestination(dst);
-      if (enable) {
-        MergeNode(src, dst);
-      }
+      // if (enable) {
+      //   MergeNode(src, dst);
+      // }
     }
 
     // Build follow map

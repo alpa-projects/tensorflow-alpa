@@ -615,6 +615,7 @@ InstructionBatchDimMap BuildInstructionBatchDimMap(
       case HloOpcode::kOptimizationBarrier:
         break;
       case HloOpcode::kWhile:
+      case HloOpcode::kConditional:
         break;
       default:
         LOG(FATAL) << "Unhandled instruction: " + ins->ToString();

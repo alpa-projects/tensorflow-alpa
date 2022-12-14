@@ -914,6 +914,7 @@ Status BuildStrategyAndCostForInstruction(
   switch (opcode) {
     case HloOpcode::kParameter: {
       if (control_flow_predecessor) {
+        if (control_flow_predecessor->opcode()==HloOpcode::kConditional) entry_idx++;
         const HloInstruction* source = control_flow_predecessor->operand(entry_idx);
         const StrategyVector* src_strategies = strategy_map.at(source).get();
         strategies = FollowInsStrategyVector(
@@ -1724,7 +1725,7 @@ Status BuildStrategyAndCostForInstruction(
 
         bool need_all_gather = false;
         for (int64_t dim : ins->dimensions()) {
-          if (output_spec.tile_assignment().dim(dim) > 1) {
+          if (output_spec.tile_assignment().num_dimensions()>dim && output_spec.tile_assignment().dim(dim) > 1) {
             need_all_gather = true;
             break;
           }
@@ -2875,7 +2876,11 @@ StatusOr<bool> AutoSharding::Run(
                            cluster_env, solver_option));
   AliasSet alias_set =
       BuildAliasSet(module, alias_analysis->dataflow_analysis(), strategy_map);
-  std::cerr << PrintStrategyMap(strategy_map, sequence);
+  // std::cerr << PrintStrategyMap(strategy_map, sequence);
+  // size_t NLeaf = leaf_strategies.size();
+  // for (size_t i = 0; i < NLeaf; ++i) {
+  //   std::cerr << i << " " << leaf_strategies[i]->ins->ToString() << std::endl << PrintStrategyVector(leaf_strategies[i]);
+  // }
 
   // ----- Build cost graph and merge unimporant nodes -----
   CostGraph cost_graph(leaf_strategies, associative_dot_pairs);

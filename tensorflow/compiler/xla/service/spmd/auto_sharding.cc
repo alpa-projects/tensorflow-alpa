@@ -1023,12 +1023,13 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         std::tie(follow_idx, tie) = ChooseOperandToFollow(
             strategy_map, depth_map, alias_map, undefined_set, max_depth, ins);
 
-        if (!tie || AllowTieFollowing(ins)) {
-          strategies->following =
-              strategy_map.at(ins->operand(follow_idx)).get();
-        } else {
+        if ((tie && !AllowTieFollowing(ins)) ||
+            AllOperandsAreBroadcast(ins)) {
           strategies->following = nullptr;
           disallowed_follow++;
+        } else {
+          strategies->following =
+              strategy_map.at(ins->operand(follow_idx)).get();
         }
 
         // Get all possible sharding specs from operands

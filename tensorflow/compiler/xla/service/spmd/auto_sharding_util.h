@@ -255,6 +255,9 @@ bool IsBatchDimSwitchReshape(const HloInstruction* inst);
 // Return whether the instruction is followed by a broadcast.
 bool IsFollowedByBroadcast(const HloInstruction* inst);
 
+// Return whether all operands are broadcast.
+bool AllOperandsAreBroadcast(const HloInstruction* inst);
+
 // Return whether the instruction is an activation from another pipeline stage.
 bool IsActivationFromAnotherStage(const HloInstruction* inst,
                                   const InstructionBatchDimMap& batch_dim_map);

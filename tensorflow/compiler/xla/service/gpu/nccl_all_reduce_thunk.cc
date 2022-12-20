@@ -338,9 +338,8 @@ Status NcclAllReduceStartThunk::RunNcclCollective(const ExecuteParams& params,
       std::vector<DeviceBufferPair> device_buffers,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
-  LOG(FATAL) << "Not Implemented Error";
-  //TF_RETURN_IF_ERROR(RunAllReduce(config_, device_buffers,
-  //                                async_comms_stream, comm, skip_env_name_));
+  TF_RETURN_IF_ERROR(RunAllReduce(config_, device_buffers,
+                                  async_comms_stream, comm, skip_env_name_));
 
   // Create an event on the async stream for the completion of the all-reduce.
   se::Event done_event(async_comms_stream.parent());

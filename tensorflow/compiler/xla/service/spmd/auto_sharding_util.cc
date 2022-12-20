@@ -68,6 +68,16 @@ bool IsFollowedByBroadcast(const HloInstruction* ins) {
   return false;
 }
 
+// Return whether all operands are broadcast.
+bool AllOperandsAreBroadcast(const HloInstruction* ins) {
+  for (const HloInstruction* operand: ins->operands()) {
+    if (operand->opcode() != HloOpcode::kBroadcast) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Return whether the instruction is an activation from another pipeline stage.
 bool IsActivationFromAnotherStage(const HloInstruction* ins,
                                   const InstructionBatchDimMap& batch_dim_map) {

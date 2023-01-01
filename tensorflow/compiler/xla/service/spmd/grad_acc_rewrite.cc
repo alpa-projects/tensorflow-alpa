@@ -14,10 +14,8 @@ HloInstruction* GetAllReduce(HloInstruction* src) {
   auto opcode = src->opcode();
   if (opcode == HloOpcode::kAllReduce) {
     return src;
-  } else if (opcode == HloOpcode::kConvert ||
-             opcode == HloOpcode::kReshape ||
-             opcode == HloOpcode::kCopy ||
-             opcode == HloOpcode::kBitcast ||
+  } else if (opcode == HloOpcode::kConvert || opcode == HloOpcode::kReshape ||
+             opcode == HloOpcode::kCopy || opcode == HloOpcode::kBitcast ||
              opcode == HloOpcode::kTranspose) {
     return GetAllReduce(src->mutable_operand(0));
   } else if (opcode == HloOpcode::kMultiply) {
@@ -33,12 +31,38 @@ HloInstruction* GetAllReduce(HloInstruction* src) {
   return nullptr;
 }
 
-HloInstruction* MaybeReshape(HloInstruction* src, const Shape& dst_shape) {
-  if (ShapeUtil::CompatibleIgnoringFpPrecision(src->shape(), dst_shape)) {
+HloInstruction* MaybeConvert(HloInstruction* src, const Shape& dst_shape) {
+  if (ShapeUtil::SameElementType(src->shape(), dst_shape)) {
+    return src;
+  }
+  const Shape new_shape =
+      ShapeUtil::ChangeElementType(src->shape(), dst_shape.element_type());
+  return src->parent()->AddInstruction(
+      HloInstruction::CreateConvert(new_shape, src));
+}
+
+HloInstruction* MaybeReshapeConvert(HloInstruction* src,
+                                    const Shape& dst_shape) {
+  if (ShapeUtil::Compatible(src->shape(), dst_shape)) {
     return src;
   }
   return src->parent()->AddInstruction(
-      HloInstruction::CreateReshape(dst_shape, src));
+      HloInstruction::CreateReshape(dst_shape, MaybeConvert(src, dst_shape)));
+}
+
+HloInstruction::InstructionVector MaybeReshapeConvertTuple(
+    const HloInstruction::InstructionVector& src, const Shape& dst_shape) {
+  HloInstruction::InstructionVector ret;
+  if (dst_shape.IsTuple()) {
+    CHECK(dst_shape.tuple_shapes_size() == src.size());
+    for (int i = 0; i < src.size(); ++i) {
+      ret.push_back(MaybeReshapeConvert(src[i], dst_shape.tuple_shapes(i)));
+    }
+  } else {
+    CHECK(dst_shape.IsArray() && src.size() == 1);
+    ret.push_back(MaybeReshapeConvert(src[0], dst_shape));
+  }
+  return ret;
 }
 
 StatusOr<bool> GradAccRewrite::Run(
@@ -77,28 +101,34 @@ StatusOr<bool> GradAccRewrite::Run(
 
     for (size_t i = 0; i < allreduce_user->operand_count(); ++i) {
       if (allreduce_user->operand(i) == allreduce_ins) {
-        allreduce_user->ReplaceOperandWith(i,
-                                           allreduce_ins->mutable_operand(0));
+        allreduce_user->ReplaceOperandWith(
+            i, MaybeReshapeConvert(allreduce_ins->mutable_operand(0),
+                                   allreduce_user->operand(i)->shape()));
       }
     }
 
     // allreduce_ins->ReplaceOperandWith(0, add_ins);
     allreduce_ins->ReplaceOperandWith(
-        0, MaybeReshape(add_ins, allreduce_ins->shape()));
+        0, MaybeReshapeConvert(add_ins, allreduce_ins->shape()));
     output_tuple->ReplaceOperandWith(
-        i, MaybeReshape(allreduce_ins, add_ins->shape()));
+        i, MaybeReshapeConvert(allreduce_ins, add_ins->shape()));
     allreduce_ins->set_metadata_op_name(kSkippableAllReduce);
 
-    if (allreduce_ins->shape().element_type() != add_ins->shape().element_type()) {
+    if (!ShapeUtil::SameElementType(allreduce_ins->shape(), add_ins->shape())) {
       // Fix type mismatch
       auto old_allreduce = Cast<HloAllReduceInstruction>(allreduce_ins);
-      auto new_allreduce = entry->AddInstruction(HloInstruction::CreateAllReduce(
-        add_ins->shape(), old_allreduce->operands(),
-        MakeBinaryAdd(add_ins->shape().element_type(), entry->parent()),
-        old_allreduce->replica_groups(), old_allreduce->constrain_layout(),
-        old_allreduce->channel_id(), old_allreduce->use_global_device_ids()));
+      const Shape& new_shape = add_ins->shape();
+      auto new_allreduce =
+          entry->AddInstruction(HloInstruction::CreateAllReduce(
+              new_shape,
+              MaybeReshapeConvertTuple(old_allreduce->operands(), new_shape),
+              MakeBinaryAdd(new_shape.element_type(), entry->parent()),
+              old_allreduce->replica_groups(),
+              old_allreduce->constrain_layout(), old_allreduce->channel_id(),
+              old_allreduce->use_global_device_ids()));
       new_allreduce->set_metadata(old_allreduce->metadata());
-      old_allreduce->ReplaceAllUsesWith(new_allreduce);
+      old_allreduce->ReplaceAllUsesWith(
+          MaybeReshapeConvert(new_allreduce, old_allreduce->shape()));
       to_remove.push_back(old_allreduce);
     }
   }

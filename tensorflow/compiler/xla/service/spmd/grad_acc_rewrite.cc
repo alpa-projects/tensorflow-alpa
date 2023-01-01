@@ -33,12 +33,22 @@ HloInstruction* GetAllReduce(HloInstruction* src) {
   return nullptr;
 }
 
+HloInstruction* MaybeBitCast(HloInstruction* src, const Shape& dst_shape) {
+  if (ShapeUtil::SameElementType(src->shape(), dst_shape)) {
+    return src;
+  }
+  const Shape new_shape =
+      ShapeUtil::ChangeElementType(src->shape(), dst_shape.element_type());
+  return src->parent()->AddInstruction(
+      HloInstruction::CreateBitcast(new_shape, src));
+}
+
 HloInstruction* MaybeReshape(HloInstruction* src, const Shape& dst_shape) {
-  if (ShapeUtil::CompatibleIgnoringFpPrecision(src->shape(), dst_shape)) {
+  if (ShapeUtil::Compatible(src->shape(), dst_shape)) {
     return src;
   }
   return src->parent()->AddInstruction(
-      HloInstruction::CreateReshape(dst_shape, src));
+      HloInstruction::CreateReshape(dst_shape, MaybeBitCast(src, dst_shape)));
 }
 
 StatusOr<bool> GradAccRewrite::Run(
@@ -89,7 +99,7 @@ StatusOr<bool> GradAccRewrite::Run(
         i, MaybeReshape(allreduce_ins, add_ins->shape()));
     allreduce_ins->set_metadata_op_name(kSkippableAllReduce);
 
-    if (allreduce_ins->shape().element_type() != add_ins->shape().element_type()) {
+    if (!ShapeUtil::SameElementType(allreduce_ins->shape(), add_ins->shape())) {
       // Fix type mismatch
       auto old_allreduce = Cast<HloAllReduceInstruction>(allreduce_ins);
       auto new_allreduce = entry->AddInstruction(HloInstruction::CreateAllReduce(
@@ -98,7 +108,8 @@ StatusOr<bool> GradAccRewrite::Run(
         old_allreduce->replica_groups(), old_allreduce->constrain_layout(),
         old_allreduce->channel_id(), old_allreduce->use_global_device_ids()));
       new_allreduce->set_metadata(old_allreduce->metadata());
-      old_allreduce->ReplaceAllUsesWith(new_allreduce);
+      old_allreduce->ReplaceAllUsesWith(
+          MaybeReshape(new_allreduce, old_allreduce->shape()));
       to_remove.push_back(old_allreduce);
     }
   }

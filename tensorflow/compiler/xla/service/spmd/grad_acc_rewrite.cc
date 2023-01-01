@@ -14,10 +14,8 @@ HloInstruction* GetAllReduce(HloInstruction* src) {
   auto opcode = src->opcode();
   if (opcode == HloOpcode::kAllReduce) {
     return src;
-  } else if (opcode == HloOpcode::kConvert ||
-             opcode == HloOpcode::kReshape ||
-             opcode == HloOpcode::kCopy ||
-             opcode == HloOpcode::kBitcast ||
+  } else if (opcode == HloOpcode::kConvert || opcode == HloOpcode::kReshape ||
+             opcode == HloOpcode::kCopy || opcode == HloOpcode::kBitcast ||
              opcode == HloOpcode::kTranspose) {
     return GetAllReduce(src->mutable_operand(0));
   } else if (opcode == HloOpcode::kMultiply) {
@@ -40,7 +38,7 @@ HloInstruction* MaybeBitCast(HloInstruction* src, const Shape& dst_shape) {
   const Shape new_shape =
       ShapeUtil::ChangeElementType(src->shape(), dst_shape.element_type());
   return src->parent()->AddInstruction(
-      HloInstruction::CreateBitcast(new_shape, src));
+      HloInstruction::CreateConvert(new_shape, src));
 }
 
 HloInstruction* MaybeReshape(HloInstruction* src, const Shape& dst_shape) {
@@ -49,6 +47,21 @@ HloInstruction* MaybeReshape(HloInstruction* src, const Shape& dst_shape) {
   }
   return src->parent()->AddInstruction(
       HloInstruction::CreateReshape(dst_shape, MaybeBitCast(src, dst_shape)));
+}
+
+HloInstruction::InstructionVector MaybeReplaceTuple(
+    const HloInstruction::InstructionVector& src, const Shape& dst_shape) {
+  HloInstruction::InstructionVector ret;
+  if (dst_shape.IsTuple()) {
+    CHECK(dst_shape.tuple_shapes_size() == src.size());
+    for (int i = 0; i < src.size(); ++i) {
+      ret.push_back(MaybeReshape(src[i], dst_shape.tuple_shapes(i)));
+    }
+  } else {
+    CHECK(dst_shape.IsArray() && src.size() == 1);
+    ret.push_back(MaybeReshape(src[0], dst_shape));
+  }
+  return ret;
 }
 
 StatusOr<bool> GradAccRewrite::Run(
@@ -87,8 +100,9 @@ StatusOr<bool> GradAccRewrite::Run(
 
     for (size_t i = 0; i < allreduce_user->operand_count(); ++i) {
       if (allreduce_user->operand(i) == allreduce_ins) {
-        allreduce_user->ReplaceOperandWith(i,
-                                           allreduce_ins->mutable_operand(0));
+        allreduce_user->ReplaceOperandWith(
+            i, MaybeReshape(allreduce_ins->mutable_operand(0),
+                            allreduce_user->operand(i)->shape()));
       }
     }
 
@@ -102,11 +116,15 @@ StatusOr<bool> GradAccRewrite::Run(
     if (!ShapeUtil::SameElementType(allreduce_ins->shape(), add_ins->shape())) {
       // Fix type mismatch
       auto old_allreduce = Cast<HloAllReduceInstruction>(allreduce_ins);
-      auto new_allreduce = entry->AddInstruction(HloInstruction::CreateAllReduce(
-        add_ins->shape(), old_allreduce->operands(),
-        MakeBinaryAdd(add_ins->shape().element_type(), entry->parent()),
-        old_allreduce->replica_groups(), old_allreduce->constrain_layout(),
-        old_allreduce->channel_id(), old_allreduce->use_global_device_ids()));
+      const Shape& new_shape = add_ins->shape();
+      auto new_allreduce =
+          entry->AddInstruction(HloInstruction::CreateAllReduce(
+              new_shape,
+              MaybeReplaceTuple(old_allreduce->operands(), new_shape),
+              MakeBinaryAdd(new_shape.element_type(), entry->parent()),
+              old_allreduce->replica_groups(),
+              old_allreduce->constrain_layout(), old_allreduce->channel_id(),
+              old_allreduce->use_global_device_ids()));
       new_allreduce->set_metadata(old_allreduce->metadata());
       old_allreduce->ReplaceAllUsesWith(
           MaybeReshape(new_allreduce, old_allreduce->shape()));

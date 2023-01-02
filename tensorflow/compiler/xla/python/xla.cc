@@ -82,7 +82,6 @@ limitations under the License.
 #ifdef XLA_PYTHON_ENABLE_GPU
 #include "tensorflow/compiler/xla/service/gpu/alpa_events.h"
 #include "tensorflow/compiler/xla/service/gpu/alpa_nccl_wrapper.h"
-#include "tensorflow/compiler/xla/service/gpu/nccl_all_reduce_thunk.h"
 
 PYBIND11_MAKE_OPAQUE(std::vector<ncclComm_t>);
 #endif // XLA_PYTHON_ENABLE_GPU
@@ -765,8 +764,9 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("set_num_device_on_host", &gpu::SetNumDeviceOnHost);
   m.def("set_idx_to_uuid", &gpu::XlaSetIdxToUuid);
   m.def("computation_wait_events", &gpu::alpa::ComputationWaitEvents);
-  m.def("create_cross_mesh_communicator", &gpu::CreateCrossMeshCommunicator,
-        "create nccl communicators for cross mesh collective communication");
+  m.def("set_comm_group_info", &gpu::alpa::SetCommGroup,
+        "set the mapping from meshes to the corresponding communication group "
+        "and nccl uuid");
   m.def("reset_event_context", &gpu::alpa::ResetEventContext);
   m.def("get_buffer_device_id", &gpu::alpa::GetBufferDeviceId,
         "get the local device id for one pybuffer");

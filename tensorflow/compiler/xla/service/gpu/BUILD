@@ -468,6 +468,8 @@ tf_cuda_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@llvm-project//mlir:IR",
+        # Added by Alpa
+        ":alpa_nccl_wrapper",
     ],
 )
 

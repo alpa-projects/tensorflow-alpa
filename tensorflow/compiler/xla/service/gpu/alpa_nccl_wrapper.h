@@ -78,6 +78,8 @@ class CommGroup {
 
   void ComputeWaitComm(bool is_send, bool is_compute, int device_id);
 
+  NcclComm::Lock AcquireComm(const AlpaNcclUid &uuids, int device_id);
+
  private:
   std::vector<std::unique_ptr<se::Stream>> send_streams, recv_streams;
   ThreadSafeMap<std::pair<AlpaNcclUid, int>, NcclComm> comm_map;
@@ -92,6 +94,11 @@ class CommGroup {
 // ComputationWaitEvents
 Status ComputationWaitEvents(const AlpaUuids &uuids,
                              std::shared_ptr<PyClient> client);
+
+// Cross-mesh allreduce thunk related
+void SetCommGroup(std::string key, CommGroup *g, const AlpaNcclUid uid);
+
+NcclComm::Lock GetCommunicator(std::string key, size_t device_id);
 
 // Event context management
 void ResetEventContext(std::shared_ptr<PyClient> client);

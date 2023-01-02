@@ -65,6 +65,10 @@ StatusOr<ncclDataType_t> ToNcclDataType(PrimitiveType element_type) {
     case F64:
     case C128:
       return ncclFloat64;
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+    case BF16:
+      return ncclBfloat16;
+#endif
     default:
       return Unimplemented("Nccl does not support the type.");
   }
@@ -104,9 +108,9 @@ se::Stream *GetXlaStream(PjRtStreamExecutorClient *client, bool is_compute,
   return is_compute ? client->device_state(device_id).compute_stream()
                     : client->device_state(0).GetLastDeviceToDeviceStream();
 }
-// key: (GroupId, global_rank)
-ThreadSafeMap<std::pair<AlpaNcclUid, int>, NcclComm> comm_map;
-// key: local_id
+
+using CrossMeshCommInfo = std::pair<CommGroup *, AlpaNcclUid>;
+absl::flat_hash_map<std::string, CrossMeshCommInfo> cross_mesh_comms;
 CUstream default_stream = NULL;
 };  // namespace
 
@@ -347,6 +351,10 @@ void CommGroup::ComputeWaitComm(bool is_send, bool is_compute, int device_id) {
   waiting->ThenWaitFor(waited);
 }
 
+// Other function
+NcclComm::Lock CommGroup::AcquireComm(const AlpaNcclUid &key, int device_id) {
+  return comm_map[std::make_pair(key, device_id)].Acquire();
+}
 // Sync function
 Status ComputationWaitEvents(const AlpaUuids &uuids,
                              std::shared_ptr<PyClient> client) {
@@ -364,6 +372,17 @@ Status ComputationWaitEvents(const AlpaUuids &uuids,
   return OkStatus();
 }
 
+// Cross-mesh allreduce thunk related
+// TODO(yonghao): complete this
+void SetCommGroup(std::string key, CommGroup *g, const AlpaNcclUid uid) {
+  cross_mesh_comms.emplace(key, std::make_pair(g, uid));
+}
+
+NcclComm::Lock GetCommunicator(std::string key, size_t device_id) {
+  CrossMeshCommInfo& info = cross_mesh_comms.at(key);
+  return info.first->AcquireComm(info.second, device_id);
+}
+
 // Event context management
 void ResetEventContext(std::shared_ptr<PyClient> client) { ResetAlpaEvents(); }
 // Other functions
@@ -373,7 +392,7 @@ AlpaNcclUid NcclUidSerialize(ncclUniqueId nccl_uid) {
   return nccl_uid_vec;
 }
 
-ncclUniqueId NcclUidDeserialize(const AlpaNcclUid& nccl_uid_vec) {
+ncclUniqueId NcclUidDeserialize(const AlpaNcclUid &nccl_uid_vec) {
   ncclUniqueId nccl_uid;
   CHECK_EQ(sizeof(nccl_uid.internal), nccl_uid_vec.size());
   memcpy(&nccl_uid.internal, nccl_uid_vec.data(), sizeof(nccl_uid.internal));

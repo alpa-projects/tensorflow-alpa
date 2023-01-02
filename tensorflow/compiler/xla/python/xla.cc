@@ -739,28 +739,28 @@ PYBIND11_MODULE(xla_extension, m) {
       py::arg("compile_options") = CompileOptions());
 
 #ifdef XLA_PYTHON_ENABLE_GPU
-  py::class_<gpu::alpa::CommGroup, std::shared_ptr<gpu::alpa::CommGroup>>
+  py::class_<gpu::alpa::PyCommGroup, std::shared_ptr<gpu::alpa::PyCommGroup>>
       alpa_comm_group(m, "CommGroup");
   alpa_comm_group
       .def(py::init([](std::shared_ptr<PyClient> backend) {
-        return std::make_shared<gpu::alpa::CommGroup>(backend);
+        return std::make_shared<gpu::alpa::PyCommGroup>(backend);
       }))
-      .def("record_events", &gpu::alpa::CommGroup::CommunicatorRecordEvents)
-      .def("wait_events", &gpu::alpa::CommGroup::CommunicatorWaitEvents)
-      .def("comm_wait_compute", &gpu::alpa::CommGroup::CommWaitCompute)
-      .def("compute_wait_comm", &gpu::alpa::CommGroup::ComputeWaitComm)
+      .def("record_events", &gpu::alpa::PyCommGroup::CommunicatorRecordEvents)
+      .def("wait_events", &gpu::alpa::PyCommGroup::CommunicatorWaitEvents)
+      .def("comm_wait_compute", &gpu::alpa::PyCommGroup::CommWaitCompute)
+      .def("compute_wait_comm", &gpu::alpa::PyCommGroup::ComputeWaitComm)
       .def("nccl_create_communicators",
-           &gpu::alpa::CommGroup::NcclCreateCommunicators,
+           &gpu::alpa::PyCommGroup::NcclCreateCommunicators,
            "create nccl communicators for cross-mesh communication")
-      .def("nccl_destroy_comms", &gpu::alpa::CommGroup::NcclDestroyComms,
+      .def("nccl_destroy_comms", &gpu::alpa::PyCommGroup::NcclDestroyComms,
            "destroy comms")
-      .def("nccl_local_all_gather", &gpu::alpa::CommGroup::NcclLocalAllGather,
+      .def("nccl_local_all_gather", &gpu::alpa::PyCommGroup::NcclLocalAllGather,
            "nccl local allgather")
       .def("nccl_broadcast_partial_gpus",
-           &gpu::alpa::CommGroup::NcclBroadcastPartialGPUs,
+           &gpu::alpa::PyCommGroup::NcclBroadcastPartialGPUs,
            "nccl broadcast with only a subset of gpus in the host are involved")
-      .def("nccl_recv", &gpu::alpa::CommGroup::NcclRecv, "nccl recv data")
-      .def("nccl_send", &gpu::alpa::CommGroup::NcclSend, "nccl send data");
+      .def("nccl_recv", &gpu::alpa::PyCommGroup::NcclRecv, "nccl recv data")
+      .def("nccl_send", &gpu::alpa::PyCommGroup::NcclSend, "nccl send data");
   m.def("set_num_device_on_host", &gpu::SetNumDeviceOnHost);
   m.def("set_idx_to_uuid", &gpu::XlaSetIdxToUuid);
   m.def("computation_wait_events", &gpu::alpa::ComputationWaitEvents);

@@ -37,6 +37,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/gpu/gpu_activation.h"
 #endif
 
+// Added by Alpa
+#include "tensorflow/compiler/xla/service/gpu/alpa_nccl_group_base.h"
+
 namespace xla {
 namespace gpu {
 

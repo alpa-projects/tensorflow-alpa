@@ -469,7 +469,7 @@ tf_cuda_library(
         "@com_google_absl//absl/synchronization",
         "@llvm-project//mlir:IR",
         # Added by Alpa
-        ":alpa_nccl_wrapper",
+        ":alpa_nccl_group_base",
     ],
 )
 
@@ -2979,14 +2979,14 @@ tf_cc_test(
 
 # Added by Alpa
 alias(
-    name = "alpa_nccl_wrapper",
-    actual = if_nccl(":_alpa_nccl_wrapper", ":empty"),
+    name = "alpa_nccl_group_base",
+    actual = if_nccl(":_alpa_nccl_group_base", ":empty"),
 )
 
 tf_cuda_library(
-    name = "_alpa_nccl_wrapper",
-    srcs = if_gpu_is_configured(["alpa_nccl_wrapper.cc"]),
-    hdrs = if_gpu_is_configured(["alpa_nccl_wrapper.h"]),
+    name = "_alpa_nccl_group_base",
+    srcs = if_gpu_is_configured(["alpa_nccl_group_base.cc"]),
+    hdrs = if_gpu_is_configured(["alpa_nccl_group_base.h"]),
     # Override tf_cuda_library()'s internal default value of ["//buildenv/target:gce"].
     copts = [
         "-fexceptions",
@@ -2996,7 +2996,7 @@ tf_cuda_library(
     defines = if_gpu_is_configured(["XLA_ENABLE_XCCL"]),
     deps = [
         ":alpa_event_manager",
-        "//tensorflow/compiler/xla/python:py_client",
+        "//tensorflow/compiler/xla/pjrt:pjrt_stream_executor_client",
     ] + if_gpu_is_configured([
         ":gpu_executable_run_options",
         ":nccl_utils",
@@ -3020,6 +3020,21 @@ cc_library(
         "//tensorflow/compiler/xla:status_macros",
         "//tensorflow/stream_executor:event",
         "@com_google_absl//absl/container:flat_hash_map",
+    ],
+)
+
+cc_library(
+    name = "alpa_nccl_wrapper",
+    srcs = [
+        "alpa_nccl_wrapper.cc",
+    ],
+    hdrs = [
+        "alpa_nccl_wrapper.h",
+    ],
+    defines = if_gpu_is_configured(["XLA_ENABLE_XCCL"]),
+    deps = [
+        "alpa_nccl_group_base",
+        "//tensorflow/compiler/xla/python:py_client",
     ],
 )
 

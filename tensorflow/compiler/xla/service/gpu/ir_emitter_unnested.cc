@@ -5589,8 +5589,13 @@ Status IrEmitterUnnested::EmitCrossMeshAllReduceTarget(mlir::Operation* op) {
         ShapeUtil::ElementsIn(GetShape(src_value)), *src, *dst});
   }
   ReductionKind reduction_kind;
-  // TODO(yonghao): the opaque should also add participant mesh group info.
-  const std::string op_str = custom_call.getBackendConfig().str();
+
+  const std::string opaque = custom_call.getBackendConfig().str();
+  std::vector<std::string> metadatas = absl::StrSplit(opaque, ";");
+  CHECK_EQ(metadatas.size(), 2);
+  const std::string op_str = metadatas[0];
+  const std::string key = metadatas[1];
+
   if (op_str == "SUM") {
     reduction_kind = ReductionKind::SUM;
   } else if (op_str == "AND" || op_str == "MIN") {
@@ -5603,7 +5608,7 @@ Status IrEmitterUnnested::EmitCrossMeshAllReduceTarget(mlir::Operation* op) {
   }
   auto op_type = GetShape(custom_call.getArgs()[0]).element_type();
   AddThunkToThunkSequence(std::make_unique<CrossMeshNcclAllReduceThunk>(
-      GetThunkInfo(op), buffers, reduction_kind, op_type));
+      GetThunkInfo(op), buffers, reduction_kind, op_type, key));
   return OkStatus();
 }
 

@@ -486,10 +486,12 @@ NcclAllReduceConfig GetCrossMeshNcclAllReduceConfig(
 
 CrossMeshNcclAllReduceThunk::CrossMeshNcclAllReduceThunk(
     ThunkInfo thunk_info, std::vector<Buffer> buffers,
-    ReductionKind reduction_kind, xla::PrimitiveType op_type)
+    ReductionKind reduction_kind, xla::PrimitiveType op_type,
+    const std::string key)
     : Thunk(Thunk::kNcclAllReduce, thunk_info),
       buffers_(buffers),
-      config_(GetCrossMeshNcclAllReduceConfig(reduction_kind, op_type)) {}
+      config_(GetCrossMeshNcclAllReduceConfig(reduction_kind, op_type)),
+      key_(key) {}
 
 Status CrossMeshNcclAllReduceThunk::ExecuteOnStream(
     const ExecuteParams& params) {
@@ -506,7 +508,7 @@ Status CrossMeshNcclAllReduceThunk::ExecuteOnStream(
   // TODO(yonghao): support CrossMeshNcclAllReduce for different mesh groups as
   // above using participants info created at compile time
   int device_ordinal = params.stream->parent()->device_ordinal();
-  NcclComm::Lock comm = alpa::GetCommunicator(/*key=*/"", device_ordinal);
+  NcclComm::Lock comm = alpa::GetCommunicator(key_, device_ordinal);
 
   se::Stream& stream = *params.stream;
   TF_ASSIGN_OR_RETURN(

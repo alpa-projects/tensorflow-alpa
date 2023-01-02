@@ -147,7 +147,8 @@ class CrossMeshNcclAllReduceThunk : public Thunk {
   explicit CrossMeshNcclAllReduceThunk(ThunkInfo thunk_info,
                                        std::vector<Buffer> buffers,
                                        ReductionKind reduction_kind,
-                                       xla::PrimitiveType op_type);
+                                       xla::PrimitiveType op_type,
+                                       std::string key);
 
   Status ExecuteOnStream(const ExecuteParams& params) override;
 
@@ -155,6 +156,7 @@ class CrossMeshNcclAllReduceThunk : public Thunk {
   const NcclAllReduceConfig config_;
   const std::vector<Buffer> buffers_;
   bool first_call_to_execute_ = true;
+  std::string key_;
 };
 
 }  // namespace gpu

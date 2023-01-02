@@ -764,7 +764,7 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("set_num_device_on_host", &gpu::SetNumDeviceOnHost);
   m.def("set_idx_to_uuid", &gpu::XlaSetIdxToUuid);
   m.def("computation_wait_events", &gpu::alpa::ComputationWaitEvents);
-  m.def("set_comm_group_info", &gpu::alpa::SetCommGroup,
+  m.def("set_comm_group_info", &gpu::alpa::SetPyCommGroup,
         "set the mapping from meshes to the corresponding communication group "
         "and nccl uuid");
   m.def("reset_event_context", &gpu::alpa::ResetEventContext);

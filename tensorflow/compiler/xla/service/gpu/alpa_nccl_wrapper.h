@@ -70,6 +70,10 @@ class PyCommGroup : public CommGroup {
   void ComputeWaitComm(bool is_send, bool is_compute, int device_id);
 };
 
+// Cross Mesh Communication related
+void SetPyCommGroup(std::string key, std::shared_ptr<PyCommGroup> g,
+                    const AlpaNcclUid &uid);
+
 // We add them here rather than alpa_events to avoid circular deps in Bazel:
 // alpa_events > done_event_thunk > executable > client >
 // ComputationWaitEvents

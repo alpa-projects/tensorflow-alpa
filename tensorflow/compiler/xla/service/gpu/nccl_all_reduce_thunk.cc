@@ -471,39 +471,6 @@ Status RunReduceScatter(ReductionKind reduction_kind,
 }
 
 // Added by Alpa
-std::vector<std::unique_ptr<NcclComm>> nccl_comms;
-
-// FIXME(yonghao): support multiple groups of cross mesh nccl comms with keys
-// by recording the uuid vec into the thunk and directly refer to the CommGroup
-// from the thunk
-Status CreateCrossMeshCommunicator(int world_size,
-                                   const std::vector<int>& device_global_ranks,
-                                   int num_device,
-                                   const std::vector<int8_t>& nccl_uid_vec) {
-#if XLA_ENABLE_XCCL
-  CHECK_EQ(num_device, device_global_ranks.size());
-  ncclUniqueId nccl_uid;
-  CHECK_EQ(sizeof(nccl_uid.internal), nccl_uid_vec.size());
-  memcpy(&nccl_uid.internal, nccl_uid_vec.data(), sizeof(nccl_uid.internal));
-  nccl_comms.clear();
-
-  // Create Communicators
-  XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
-  for (int device_id = 0; device_id < num_device; ++device_id) {
-    cudaSetDevice(device_id);
-    int rank = device_global_ranks[device_id];
-    nccl_comms.emplace_back(std::make_unique<NcclComm>());
-    NcclComm::Lock comm = nccl_comms[device_id]->Acquire();
-    XLA_CUDA_RETURN_IF_ERROR(
-        ncclCommInitRank(comm.get(), world_size, nccl_uid, rank));
-  }
-  XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
-  return OkStatus();
-#else   // XLA_ENABLE_XCCL
-  return Unimplemented("NCCL support is not available.");
-#endif  // XLA_ENABLE_XCCL
-}
-
 NcclAllReduceConfig GetCrossMeshNcclAllReduceConfig(
     ReductionKind reduction_kind, xla::PrimitiveType op_type) {
   NcclAllReduceConfig config;
@@ -536,18 +503,17 @@ Status CrossMeshNcclAllReduceThunk::ExecuteOnStream(
   //     NcclComm::Lock comm,
   //     AcquireNcclComm(params.run_id, op_id, std::move(participants),
   //                     num_local_participants, *unique_id_callback, rank));
-  // TODO(yonghao): support CrossMeshNcclAllReduce for different mesh groups as above
-  // using participants info created at compile time
+  // TODO(yonghao): support CrossMeshNcclAllReduce for different mesh groups as
+  // above using participants info created at compile time
   int device_ordinal = params.stream->parent()->device_ordinal();
-  NcclComm::Lock comm = nccl_comms[device_ordinal]->Acquire();
+  NcclComm::Lock comm = alpa::GetCommunicator(/*key=*/"", device_ordinal);
 
   se::Stream& stream = *params.stream;
   TF_ASSIGN_OR_RETURN(
       std::vector<DeviceBufferPair> device_buffers,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
-  TF_RETURN_IF_ERROR(
-      RunAllReduce(config_, device_buffers, stream, *comm, ""));
+  TF_RETURN_IF_ERROR(RunAllReduce(config_, device_buffers, stream, *comm, ""));
 
   // Block host on the first call to ensure that all devices have allocated the
   // required buffers for their communicators before allowing any device to

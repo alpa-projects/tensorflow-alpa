@@ -179,6 +179,12 @@ void PyCommGroup::ComputeWaitComm(bool is_send, bool is_compute,
   waiting->ThenWaitFor(waited);
 }
 
+// Cross Mesh Communication
+void SetPyCommGroup(std::string key, std::shared_ptr<PyCommGroup> g,
+                    const AlpaNcclUid &uid) {
+  SetCommGroup(key, g, uid);
+}
+
 // Sync function
 Status ComputationWaitEvents(const AlpaUuids &uuids,
                              std::shared_ptr<PyClient> client) {

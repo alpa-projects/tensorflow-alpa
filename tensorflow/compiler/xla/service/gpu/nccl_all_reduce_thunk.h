@@ -157,11 +157,6 @@ class CrossMeshNcclAllReduceThunk : public Thunk {
   bool first_call_to_execute_ = true;
 };
 
-Status CreateCrossMeshCommunicator(int world_size,
-                                   const std::vector<int>& device_global_ranks,
-                                   int num_device,
-                                   const std::vector<int8_t>& nccl_uid_vec);
-
 }  // namespace gpu
 }  // namespace xla
 

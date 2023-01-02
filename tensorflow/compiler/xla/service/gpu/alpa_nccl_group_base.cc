@@ -27,7 +27,6 @@ namespace se = ::stream_executor;
 
 namespace xla {
 namespace gpu {
-
 namespace alpa {
 namespace {
 StatusOr<std::uintptr_t> ToUnsafePointer(PjRtBuffer *buf) {
@@ -96,7 +95,7 @@ CUstream GetCudaStream(se::Stream *stream) {
   return reinterpret_cast<CUstream>(se::gpu::AsGpuStreamValue(stream));
 }
 
-using CrossMeshCommInfo = std::pair<CommGroup *, AlpaNcclUid>;
+using CrossMeshCommInfo = std::pair<std::shared_ptr<CommGroup>, AlpaNcclUid>;
 absl::flat_hash_map<std::string, CrossMeshCommInfo> cross_mesh_comms;
 CUstream default_stream = NULL;
 };  // namespace
@@ -283,7 +282,8 @@ NcclComm::Lock CommGroup::AcquireComm(const AlpaNcclUid &key, int device_id) {
 }
 
 // Cross-mesh allreduce thunk related
-void SetCommGroup(std::string key, CommGroup *g, const AlpaNcclUid uid) {
+void SetCommGroup(std::string key, std::shared_ptr<CommGroup> g,
+                  const AlpaNcclUid &uid) {
   cross_mesh_comms.emplace(key, std::make_pair(g, uid));
 }
 

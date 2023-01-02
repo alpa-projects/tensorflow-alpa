@@ -75,12 +75,14 @@ class CommGroup {
   absl::flat_hash_map<AlpaNcclUid, std::vector<int>> local_ids;
   std::vector<se::StreamExecutor *> executors;
   PjRtStreamExecutorClient *client_;
+
  private:
   ThreadSafeMap<std::pair<AlpaNcclUid, int>, NcclComm> comm_map;
 };
 
 // Cross-mesh allreduce thunk related
-void SetCommGroup(std::string key, CommGroup *g, const AlpaNcclUid uid);
+void SetCommGroup(std::string key, std::shared_ptr<CommGroup> g,
+                  const AlpaNcclUid &uid);
 
 NcclComm::Lock GetCommunicator(std::string key, size_t device_id);
 

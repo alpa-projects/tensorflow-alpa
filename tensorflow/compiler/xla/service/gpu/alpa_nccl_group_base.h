@@ -74,7 +74,7 @@ class CommGroup {
   std::vector<std::unique_ptr<se::Stream>> send_streams, recv_streams;
   absl::flat_hash_map<AlpaNcclUid, std::vector<int>> local_ids;
   std::vector<se::StreamExecutor *> executors;
-  PjRtStreamExecutorClient *client;
+  PjRtStreamExecutorClient *client_;
  private:
   ThreadSafeMap<std::pair<AlpaNcclUid, int>, NcclComm> comm_map;
 };

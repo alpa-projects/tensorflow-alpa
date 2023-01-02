@@ -101,7 +101,7 @@ absl::flat_hash_map<std::string, CrossMeshCommInfo> cross_mesh_comms;
 CUstream default_stream = NULL;
 };  // namespace
 
-CommGroup::CommGroup(PjRtStreamExecutorClient *client) {
+CommGroup::CommGroup(PjRtStreamExecutorClient *client) : client_(client) {
   if (client != nullptr) {
     for (int device_id = 0; device_id < client->device_count(); ++device_id) {
       auto executor = client->device_state(device_id).executor();

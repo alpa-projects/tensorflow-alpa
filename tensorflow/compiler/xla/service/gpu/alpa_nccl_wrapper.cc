@@ -57,30 +57,37 @@ PyCommGroup::PyCommGroup(std::shared_ptr<PyClient> backend)
 // Communication operation related functions:
 // FIXME: local allgather is deprecated
 Status PyCommGroup::NcclLocalAllGather(const AlpaNcclUid &key,
-                                     std::vector<PyBuffer::object> buffers,
-                                     std::vector<uint> local_start_positions,
-                                     uint global_start, uint n_elements,
-                                     bool use_default_stream) {
+                                       std::vector<PyBuffer::object> buffers,
+                                       std::vector<uint> local_start_positions,
+                                       uint global_start, uint n_elements,
+                                       bool use_default_stream) {
+#if XLA_ENABLE_XCCL
   std::vector<PjRtBuffer *> pjrt_buffers;
-  for (auto& buf : buffers) {
+  for (PyBuffer::object &buf : buffers) {
     pjrt_buffers.push_back(buf.buf()->buffer());
   }
-  return NcclLocalAllGatherImpl(key, pjrt_buffers, local_start_positions,
-                                global_start, n_elements, use_default_stream);
+  TF_RETURN_IF_ERROR(NcclLocalAllGatherImpl(key, pjrt_buffers,
+                                            local_start_positions, global_start,
+                                            n_elements, use_default_stream));
+  return OkStatus();
+#else   // XLA_ENABLE_XCCL
+  return Unimplemented("NCCL support is not available.");
+#endif  // XLA_ENABLE_XCCL
 }
 
 Status PyCommGroup::NcclBroadcastPartialGPUs(
     const AlpaNcclUid &key, std::vector<PyBuffer::object> buffers,
     std::vector<uint> local_start_positions, uint n_elements, int root_rank,
     bool use_recv_stream, bool use_default_stream) {
+#if XLA_ENABLE_XCCL
   std::vector<PjRtBuffer *> pjrt_buffers;
-  for (auto& buf : buffers) {
+  for (PyBuffer::object &buf : buffers) {
     pjrt_buffers.push_back(buf.buf()->buffer());
   }
   TF_RETURN_IF_ERROR(NcclBroadcastPartialGPUsImpl(
       key, pjrt_buffers, local_start_positions, n_elements, root_rank,
       use_recv_stream, use_default_stream));
-#if XLA_ENABLE_XCCL
+
   const auto &device_ids = local_ids[key];
   int n_devices = device_ids.size();
   for (int i = 0; i < n_devices; ++i) {
@@ -100,8 +107,8 @@ Status PyCommGroup::NcclBroadcastPartialGPUs(
 }
 
 Status PyCommGroup::NcclSend(const AlpaNcclUid &key, PyBuffer::object buffer,
-                           uint start, uint n_elements, int peer_p2p_rank,
-                           bool use_default_stream) {
+                             uint start, uint n_elements, int peer_p2p_rank,
+                             bool use_default_stream) {
 #if XLA_ENABLE_XCCL
   const int device_id = local_ids[key][0];
   TF_RETURN_IF_ERROR(NcclSendImpl(key, buffer.buf()->buffer(), start,
@@ -117,11 +124,10 @@ Status PyCommGroup::NcclSend(const AlpaNcclUid &key, PyBuffer::object buffer,
 }
 
 Status PyCommGroup::NcclRecv(const AlpaNcclUid &key, PyBuffer::object buffer,
-                           uint start, uint n_elements, int peer_p2p_rank,
-                           bool use_default_stream) {
+                             uint start, uint n_elements, int peer_p2p_rank,
+                             bool use_default_stream) {
 #if XLA_ENABLE_XCCL
-  const int device_id = local_ids[key][0];
-  TF_RETURN_IF_ERROR(NcclSendImpl(key, buffer.buf()->buffer(), start,
+  TF_RETURN_IF_ERROR(NcclRecvImpl(key, buffer.buf()->buffer(), start,
                                   n_elements, peer_p2p_rank,
                                   use_default_stream));
   return OkStatus();
@@ -132,7 +138,7 @@ Status PyCommGroup::NcclRecv(const AlpaNcclUid &key, PyBuffer::object buffer,
 
 // Sync functions:
 Status PyCommGroup::CommunicatorRecordEvents(const AlpaUuids &uuids,
-                                           int num_devices, bool is_send) {
+                                             int num_devices, bool is_send) {
   for (int uuid : uuids) {
     TF_RETURN_IF_ERROR(ResetEvents(uuid));
   }
@@ -149,7 +155,7 @@ Status PyCommGroup::CommunicatorRecordEvents(const AlpaUuids &uuids,
 }
 
 Status PyCommGroup::CommunicatorWaitEvents(const AlpaUuids &uuids,
-                                         int num_devices, bool is_send) {
+                                           int num_devices, bool is_send) {
   auto &streams = is_send ? send_streams : recv_streams;
   for (int uuid : uuids) {
     TF_RETURN_IF_ERROR(WaitEventOnStreams(uuid, streams));
@@ -157,15 +163,17 @@ Status PyCommGroup::CommunicatorWaitEvents(const AlpaUuids &uuids,
   return OkStatus();
 }
 
-void PyCommGroup::CommWaitCompute(bool is_send, bool is_compute, int device_id) {
-  se::Stream *waited = GetXlaStream(client, is_compute, device_id);
+void PyCommGroup::CommWaitCompute(bool is_send, bool is_compute,
+                                  int device_id) {
+  se::Stream *waited = GetXlaStream(client_, is_compute, device_id);
   se::Stream *waiting =
       is_send ? send_streams[device_id].get() : recv_streams[device_id].get();
   waiting->ThenWaitFor(waited);
 }
 
-void PyCommGroup::ComputeWaitComm(bool is_send, bool is_compute, int device_id) {
-  se::Stream *waiting = GetXlaStream(client, is_compute, device_id);
+void PyCommGroup::ComputeWaitComm(bool is_send, bool is_compute,
+                                  int device_id) {
+  se::Stream *waiting = GetXlaStream(client_, is_compute, device_id);
   se::Stream *waited =
       is_send ? send_streams[device_id].get() : recv_streams[device_id].get();
   waiting->ThenWaitFor(waited);
@@ -190,7 +198,6 @@ Status ComputationWaitEvents(const AlpaUuids &uuids,
 
 // Event context management
 void ResetEventContext(std::shared_ptr<PyClient> client) { ResetAlpaEvents(); }
-
 // Other functions
 StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer) {
   return buffer.buf()->device()->local_hardware_id();

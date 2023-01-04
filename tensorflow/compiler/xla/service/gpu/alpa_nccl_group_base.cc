@@ -86,6 +86,10 @@ int SizeOfType(ncclDataType_t element_type) {
       return 4;
     case ncclFloat64:
       return 8;
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+    case ncclBfloat16:
+      return 2;
+#endif
     default:
       return 4;
   }

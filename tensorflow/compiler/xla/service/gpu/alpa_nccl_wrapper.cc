@@ -41,265 +41,95 @@ void AddCallBackReleasingBuffer(se::Stream *stream, PyBuffer::object &buf_obj) {
   stream->ThenDoHostCallback([pjrt_ref]() {});
 }
 
-StatusOr<ncclDataType_t> ToNcclDataType(PrimitiveType element_type) {
-  // FIXME(yonghao): throw an error for other cases
-  switch (element_type) {
-    case S8:
-      return ncclInt8;
-    case PRED:
-    case U8:
-      return ncclUint8;
-    case S32:
-      return ncclInt32;
-    case U32:
-      return ncclUint32;
-    case S64:
-      return ncclInt64;
-    case U64:
-      return ncclUint64;
-    case F16:
-      return ncclFloat16;
-    case F32:
-    case C64:
-      return ncclFloat32;
-    case F64:
-    case C128:
-      return ncclFloat64;
-    default:
-      return Unimplemented("Nccl does not support the type.");
-  }
-}
-
-int SizeOfType(ncclDataType_t element_type) {
-  switch (element_type) {
-    case ncclInt8:
-      return 1;
-    case ncclUint8:
-      return 1;
-    case ncclInt32:
-      return 4;
-    case ncclUint32:
-      return 4;
-    case ncclInt64:
-      return 8;
-    case ncclUint64:
-      return 8;
-    case ncclFloat16:
-      return 2;
-    case ncclFloat32:
-      return 4;
-    case ncclFloat64:
-      return 8;
-    default:
-      return 4;
-  }
-}
-
-CUstream GetCudaStream(se::Stream *stream) {
-  return reinterpret_cast<CUstream>(se::gpu::AsGpuStreamValue(stream));
-}
-
 se::Stream *GetXlaStream(PjRtStreamExecutorClient *client, bool is_compute,
                          int device_id) {
   return is_compute ? client->device_state(device_id).compute_stream()
                     : client->device_state(0).GetLastDeviceToDeviceStream();
 }
-// key: (GroupId, global_rank)
-ThreadSafeMap<std::pair<AlpaNcclUid, int>, NcclComm> comm_map;
-// key: local_id
-CUstream default_stream = NULL;
 };  // namespace
 
-CommGroup::CommGroup(std::shared_ptr<PyClient> backend) {
-  if (backend != nullptr) {
-    client = tensorflow::down_cast<PjRtStreamExecutorClient *>(
-        backend->pjrt_client());
-    for (int device_id = 0; device_id < client->device_count(); ++device_id) {
-      auto executor = client->device_state(device_id).executor();
-      auto i_stream = std::make_unique<se::Stream>(executor);
-      auto o_stream = std::make_unique<se::Stream>(executor);
-      i_stream->Init();
-      o_stream->Init();
-      recv_streams.emplace_back(std::move(i_stream));
-      send_streams.emplace_back(std::move(o_stream));
-      executors.push_back(executor);
-    }
-  }
-}
-
-// Communicator related functions:
-Status CommGroup::NcclCreateCommunicators(
-    int world_size, const std::vector<int> &device_global_ranks,
-    const std::vector<int> &device_ids, const AlpaNcclUid &nccl_uid_vec) {
-#if XLA_ENABLE_XCCL
-  int n_devices = device_global_ranks.size();
-  CHECK_EQ(n_devices, device_ids.size());
-  ncclUniqueId nccl_uid = NcclUidDeserialize(nccl_uid_vec);
-  // Create Communicators
-  XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
-  for (int i = 0; i < n_devices; i++) {
-    cudaSetDevice(device_ids[i]);
-    int rank = device_global_ranks[i];
-    auto comm_key = std::make_pair(nccl_uid_vec, device_ids[i]);
-    NcclComm::Lock comm = comm_map[comm_key].Acquire();
-    XLA_CUDA_RETURN_IF_ERROR(
-        ncclCommInitRank(comm.get(), world_size, nccl_uid, rank));
-  }
-  local_ids[nccl_uid_vec] = device_ids;
-  XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
-  return OkStatus();
-#else   // XLA_ENABLE_XCCL
-  return Unimplemented("NCCL support is not available.");
-#endif  // XLA_ENABLE_XCCL
-}
-
-Status CommGroup::NcclDestroyComms(const AlpaNcclUid &nccl_uid_vec) {
-#if XLA_ENABLE_XCCL
-  for (int device_id : local_ids[nccl_uid_vec]) {
-    auto key = std::make_pair(nccl_uid_vec, device_id);
-    XLA_CUDA_RETURN_IF_ERROR(ncclCommDestroy(*comm_map[key].Acquire()));
-  }
-  return OkStatus();
-#else   // XLA_ENABLE_XCCL
-  return Unimplemented("NCCL support is not available.");
-#endif  // XLA_ENABLE_XCCL
-}
+PyCommGroup::PyCommGroup(std::shared_ptr<PyClient> backend)
+    : CommGroup(backend == nullptr
+                    ? nullptr
+                    : tensorflow::down_cast<PjRtStreamExecutorClient *>(
+                          backend->pjrt_client())) {}
 
 // Communication operation related functions:
 // FIXME: local allgather is deprecated
-Status CommGroup::NcclLocalAllGather(const AlpaNcclUid &key,
-                                     std::vector<PyBuffer::object> buffers,
-                                     std::vector<uint> local_start_positions,
-                                     uint global_start, uint n_elements,
-                                     bool use_default_stream) {
+Status PyCommGroup::NcclLocalAllGather(const AlpaNcclUid &key,
+                                       std::vector<PyBuffer::object> buffers,
+                                       std::vector<uint> local_start_positions,
+                                       uint global_start, uint n_elements,
+                                       bool use_default_stream) {
 #if XLA_ENABLE_XCCL
-  const auto &device_ids = local_ids[key];
-  int n_devices = device_ids.size();
-  CHECK_EQ(n_devices, buffers.size());
-  CHECK_EQ(n_devices, local_start_positions.size());
-
-  TF_ASSIGN_OR_RETURN(
-      ncclDataType_t dtype,
-      ToNcclDataType(
-          buffers[0].buf()->buffer()->on_device_shape().element_type()));
-  int dtype_size = SizeOfType(dtype);
-  XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
-  for (int i = 0; i < n_devices; ++i) {
-    // FIXME(yonghao): use assign or return
-    TF_ASSIGN_OR_RETURN(std::uintptr_t sendbuff,
-                        buffers[i].buf()->UnsafeBufferPointer());
-    sendbuff = sendbuff + local_start_positions[i] * dtype_size;
-    TF_ASSIGN_OR_RETURN(std::uintptr_t recvbuff,
-                        buffers[i].buf()->UnsafeBufferPointer());
-    recvbuff = recvbuff + global_start * dtype_size;
-    auto comm = *comm_map[std::make_pair(key, device_ids[i])].Acquire();
-    auto stream = (use_default_stream ? default_stream
-                                      : GetCudaStream(recv_streams[i].get()));
-    XLA_CUDA_RETURN_IF_ERROR(ncclAllGather((void *)sendbuff, (void *)recvbuff,
-                                           n_elements, dtype, comm, stream));
+  std::vector<PjRtBuffer *> pjrt_buffers;
+  for (PyBuffer::object &buf : buffers) {
+    pjrt_buffers.push_back(buf.buf()->buffer());
   }
-  XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
+  TF_RETURN_IF_ERROR(NcclLocalAllGatherImpl(key, pjrt_buffers,
+                                            local_start_positions, global_start,
+                                            n_elements, use_default_stream));
   return OkStatus();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
 #endif  // XLA_ENABLE_XCCL
 }
 
-Status CommGroup::NcclBroadcastPartialGPUs(
+Status PyCommGroup::NcclBroadcastPartialGPUs(
     const AlpaNcclUid &key, std::vector<PyBuffer::object> buffers,
     std::vector<uint> local_start_positions, uint n_elements, int root_rank,
     bool use_recv_stream, bool use_default_stream) {
 #if XLA_ENABLE_XCCL
+  std::vector<PjRtBuffer *> pjrt_buffers;
+  for (PyBuffer::object &buf : buffers) {
+    pjrt_buffers.push_back(buf.buf()->buffer());
+  }
+  TF_RETURN_IF_ERROR(NcclBroadcastPartialGPUsImpl(
+      key, pjrt_buffers, local_start_positions, n_elements, root_rank,
+      use_recv_stream, use_default_stream));
+
   const auto &device_ids = local_ids[key];
   int n_devices = device_ids.size();
-  CHECK_EQ(n_devices, buffers.size());
-  CHECK_EQ(n_devices, local_start_positions.size());
-
-  TF_ASSIGN_OR_RETURN(
-      ncclDataType_t dtype,
-      ToNcclDataType(
-          buffers[0].buf()->buffer()->on_device_shape().element_type()));
-  int dtype_size = SizeOfType(dtype);
-
-  XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
   for (int i = 0; i < n_devices; ++i) {
     int device_id = device_ids[i];
-    TF_ASSIGN_OR_RETURN(std::uintptr_t sendbuff,
-                        buffers[i].buf()->UnsafeBufferPointer());
-    sendbuff = sendbuff + local_start_positions[i] * dtype_size;
-    TF_ASSIGN_OR_RETURN(std::uintptr_t recvbuff,
-                        buffers[i].buf()->UnsafeBufferPointer());
-    recvbuff = recvbuff + local_start_positions[i] * dtype_size;
-
-    auto comm = *comm_map[std::make_pair(key, device_id)].Acquire();
     auto se_stream = use_default_stream
                          ? nullptr
                          : use_recv_stream ? recv_streams[device_id].get()
                                            : send_streams[device_id].get();
-    auto stream =
-        use_default_stream ? default_stream : GetCudaStream(se_stream);
-    XLA_CUDA_RETURN_IF_ERROR(ncclBroadcast((void *)sendbuff, (void *)recvbuff,
-                                           n_elements, dtype, root_rank, comm,
-                                           stream));
     if (!use_recv_stream && !use_default_stream) {
       AddCallBackReleasingBuffer(se_stream, buffers[i]);
     }
   }
-  XLA_CUDA_RETURN_IF_ERROR(ncclGroupEnd());
   return OkStatus();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
 #endif  // XLA_ENABLE_XCCL
 }
 
-Status CommGroup::NcclSend(const AlpaNcclUid &key, PyBuffer::object buffer,
-                           uint start, uint n_elements, int peer_p2p_rank,
-                           bool use_default_stream) {
+Status PyCommGroup::NcclSend(const AlpaNcclUid &key, PyBuffer::object buffer,
+                             uint start, uint n_elements, int peer_p2p_rank,
+                             bool use_default_stream) {
 #if XLA_ENABLE_XCCL
   const int device_id = local_ids[key][0];
-  TF_ASSIGN_OR_RETURN(
-      ncclDataType_t dtype,
-      ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type()));
-  int dtype_size = SizeOfType(dtype);
-  TF_ASSIGN_OR_RETURN(std::uintptr_t sendbuff,
-                      buffer.buf()->UnsafeBufferPointer());
-  sendbuff = sendbuff + start * dtype_size;
-  auto comm = *comm_map[std::make_pair(key, device_id)].Acquire();
-  auto stream = use_default_stream
-                    ? default_stream
-                    : GetCudaStream(send_streams[device_id].get());
-  XLA_CUDA_RETURN_IF_ERROR(ncclSend((void *)sendbuff, n_elements, dtype,
-                                    peer_p2p_rank, comm, stream));
+  TF_RETURN_IF_ERROR(NcclSendImpl(key, buffer.buf()->buffer(), start,
+                                  n_elements, peer_p2p_rank,
+                                  use_default_stream));
   if (!use_default_stream) {
     AddCallBackReleasingBuffer(send_streams[device_id].get(), buffer);
   }
-  // cudaDeviceSynchronize();
   return OkStatus();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
 #endif  // XLA_ENABLE_XCCL
 }
 
-Status CommGroup::NcclRecv(const AlpaNcclUid &key, PyBuffer::object buffer,
-                           uint start, uint n_elements, int peer_p2p_rank,
-                           bool use_default_stream) {
+Status PyCommGroup::NcclRecv(const AlpaNcclUid &key, PyBuffer::object buffer,
+                             uint start, uint n_elements, int peer_p2p_rank,
+                             bool use_default_stream) {
 #if XLA_ENABLE_XCCL
-  const int device_id = local_ids[key][0];
-  TF_ASSIGN_OR_RETURN(
-      ncclDataType_t dtype,
-      ToNcclDataType(buffer.buf()->buffer()->on_device_shape().element_type()));
-  int dtype_size = SizeOfType(dtype);
-  TF_ASSIGN_OR_RETURN(std::uintptr_t recvbuff,
-                      buffer.buf()->UnsafeBufferPointer());
-  recvbuff = recvbuff + start * dtype_size;
-  auto comm = *comm_map[std::make_pair(key, device_id)].Acquire();
-  auto stream = use_default_stream
-                    ? default_stream
-                    : GetCudaStream(recv_streams[device_id].get());
-  XLA_CUDA_RETURN_IF_ERROR(ncclRecv((void *)recvbuff, n_elements, dtype,
-                                    peer_p2p_rank, comm, stream));
-  // TF_RETURN_IF_ERROR(AddCallBackReleasingBuffer(stream, buffer));
-  // cudaDeviceSynchronize();
+  TF_RETURN_IF_ERROR(NcclRecvImpl(key, buffer.buf()->buffer(), start,
+                                  n_elements, peer_p2p_rank,
+                                  use_default_stream));
   return OkStatus();
 #else   // XLA_ENABLE_XCCL
   return Unimplemented("NCCL support is not available.");
@@ -307,8 +137,8 @@ Status CommGroup::NcclRecv(const AlpaNcclUid &key, PyBuffer::object buffer,
 }
 
 // Sync functions:
-Status CommGroup::CommunicatorRecordEvents(const AlpaUuids &uuids,
-                                           int num_devices, bool is_send) {
+Status PyCommGroup::CommunicatorRecordEvents(const AlpaUuids &uuids,
+                                             int num_devices, bool is_send) {
   for (int uuid : uuids) {
     TF_RETURN_IF_ERROR(ResetEvents(uuid));
   }
@@ -324,8 +154,8 @@ Status CommGroup::CommunicatorRecordEvents(const AlpaUuids &uuids,
   return OkStatus();
 }
 
-Status CommGroup::CommunicatorWaitEvents(const AlpaUuids &uuids,
-                                         int num_devices, bool is_send) {
+Status PyCommGroup::CommunicatorWaitEvents(const AlpaUuids &uuids,
+                                           int num_devices, bool is_send) {
   auto &streams = is_send ? send_streams : recv_streams;
   for (int uuid : uuids) {
     TF_RETURN_IF_ERROR(WaitEventOnStreams(uuid, streams));
@@ -333,18 +163,26 @@ Status CommGroup::CommunicatorWaitEvents(const AlpaUuids &uuids,
   return OkStatus();
 }
 
-void CommGroup::CommWaitCompute(bool is_send, bool is_compute, int device_id) {
-  se::Stream *waited = GetXlaStream(client, is_compute, device_id);
+void PyCommGroup::CommWaitCompute(bool is_send, bool is_compute,
+                                  int device_id) {
+  se::Stream *waited = GetXlaStream(client_, is_compute, device_id);
   se::Stream *waiting =
       is_send ? send_streams[device_id].get() : recv_streams[device_id].get();
   waiting->ThenWaitFor(waited);
 }
 
-void CommGroup::ComputeWaitComm(bool is_send, bool is_compute, int device_id) {
-  se::Stream *waiting = GetXlaStream(client, is_compute, device_id);
+void PyCommGroup::ComputeWaitComm(bool is_send, bool is_compute,
+                                  int device_id) {
+  se::Stream *waiting = GetXlaStream(client_, is_compute, device_id);
   se::Stream *waited =
       is_send ? send_streams[device_id].get() : recv_streams[device_id].get();
   waiting->ThenWaitFor(waited);
+}
+
+// Cross Mesh Communication
+void SetPyCommGroup(std::string key, std::shared_ptr<PyCommGroup> g,
+                    const AlpaNcclUid &uid) {
+  SetCommGroup(key, g, uid);
 }
 
 // Sync function
@@ -367,40 +205,6 @@ Status ComputationWaitEvents(const AlpaUuids &uuids,
 // Event context management
 void ResetEventContext(std::shared_ptr<PyClient> client) { ResetAlpaEvents(); }
 // Other functions
-AlpaNcclUid NcclUidSerialize(ncclUniqueId nccl_uid) {
-  AlpaNcclUid nccl_uid_vec(sizeof(nccl_uid.internal), 0);
-  memcpy(nccl_uid_vec.data(), &nccl_uid.internal, sizeof(nccl_uid.internal));
-  return nccl_uid_vec;
-}
-
-ncclUniqueId NcclUidDeserialize(const AlpaNcclUid& nccl_uid_vec) {
-  ncclUniqueId nccl_uid;
-  CHECK_EQ(sizeof(nccl_uid.internal), nccl_uid_vec.size());
-  memcpy(&nccl_uid.internal, nccl_uid_vec.data(), sizeof(nccl_uid.internal));
-  return nccl_uid;
-}
-
-StatusOr<AlpaNcclUid> NcclGetUniqueId() {
-#if XLA_ENABLE_XCCL
-  ncclUniqueId id;
-  XLA_CUDA_RETURN_IF_ERROR(ncclGetUniqueId(&id));
-  AlpaNcclUid nccl_uid_vec = NcclUidSerialize(id);
-  return nccl_uid_vec;
-#else   // XLA_ENABLE_XCCL
-  return Unimplemented("NCCL support is not available.");
-#endif  // XLA_ENABLE_XCCL
-}
-
-StatusOr<int> NcclGetVersion() {
-#if XLA_ENABLE_XCCL
-  int version;
-  XLA_CUDA_RETURN_IF_ERROR(ncclGetVersion(&version));
-  return version;
-#else   // XLA_ENABLE_XCCL
-  return Unimplemented("NCCL support is not available.");
-#endif  // XLA_ENABLE_XCCL
-}
-
 StatusOr<int> GetBufferDeviceId(PyBuffer::object buffer) {
   return buffer.buf()->device()->local_hardware_id();
 }

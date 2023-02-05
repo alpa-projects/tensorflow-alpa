@@ -43,8 +43,11 @@ void AddCallBackReleasingBuffer(se::Stream *stream, PyBuffer::object &buf_obj) {
 
 se::Stream *GetXlaStream(PjRtStreamExecutorClient *client, bool is_compute,
                          int device_id) {
-  return is_compute ? client->device_state(device_id).compute_stream()
-                    : client->device_state(0).GetLastDeviceToDeviceStream();
+  return is_compute
+             ? client->device_state(device_id).compute_stream()
+             : client->device_state(
+                client->EnqueueD2DTransfersOnSrcStream() ? 0 : device_id)
+                .GetLastDeviceToDeviceStream();
 }
 };  // namespace
 
@@ -191,10 +194,10 @@ Status ComputationWaitEvents(const AlpaUuids &uuids,
   std::vector<se::Stream *> streams;
   PjRtStreamExecutorClient *pjrt_client =
       tensorflow::down_cast<PjRtStreamExecutorClient *>(client->pjrt_client());
-  int num_devices = pjrt_client->device_count();
-  for (int device_ordinal = 0; device_ordinal < num_devices; ++device_ordinal) {
+  int num_local_devices = pjrt_client->addressable_device_count();
+  for (int device_id = 0; device_id < num_local_devices; ++device_id) {
     streams.push_back(
-        pjrt_client->device_state(device_ordinal).compute_stream());
+        pjrt_client->device_state(device_id).compute_stream());
   }
   for (int uuid : uuids) {
     TF_RETURN_IF_ERROR(WaitEventOnStreams(uuid, streams));

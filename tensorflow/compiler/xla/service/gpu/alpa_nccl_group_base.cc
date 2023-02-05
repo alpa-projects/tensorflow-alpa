@@ -106,7 +106,8 @@ CUstream default_stream = NULL;
 
 CommGroup::CommGroup(PjRtStreamExecutorClient *client) : client_(client) {
   if (client != nullptr) {
-    for (int device_id = 0; device_id < client->device_count(); ++device_id) {
+    for (int device_id = 0; device_id < client->addressable_device_count();
+         ++device_id) {
       auto executor = client->device_state(device_id).executor();
       auto i_stream = std::make_unique<se::Stream>(executor);
       auto o_stream = std::make_unique<se::Stream>(executor);

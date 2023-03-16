@@ -456,6 +456,9 @@ std::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
         create_sharded_dot = std::nullopt,
     SpmdBuilder* b = nullptr, HloModule* module = nullptr,
     SpmdPartitioningVisitor* visitor = nullptr) {
+  // Temporarily disable windowed dot.
+  return std::nullopt;
+
   if (num_partitions > max_iterations) {
     return std::nullopt;
   }

@@ -150,6 +150,9 @@ def _get_ld_config_paths():
   return sorted(list(result))
 
 
+from pathlib import Path
+
+
 def _get_default_cuda_paths(cuda_version):
   if not cuda_version:
     cuda_version = "*"
@@ -177,6 +180,7 @@ def _header_paths():
       "extras/CUPTI/include",
       "include/cuda/CUPTI",
       "local/cuda/extras/CUPTI/include",
+       str(Path.home()) + "/.cupy/cuda_lib/*/nccl/*/include/",
   ]
 
 
@@ -191,6 +195,7 @@ def _library_paths():
       "extras/CUPTI/*",
       "local/cuda/lib64",
       "local/cuda/extras/CUPTI/lib64",
+      str(Path.home()) + "/.cupy/cuda_lib/*/nccl/*/lib/",
   ]
 
 

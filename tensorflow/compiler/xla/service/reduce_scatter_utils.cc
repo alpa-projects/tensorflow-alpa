@@ -158,6 +158,13 @@ bool IsPerIdOffset(const HloInstruction* offset, int64_t shard_size,
     return IsPerIdOffset(offset->operand(1 - const_operand),
                          shard_size / *multiplier, map_id, group_size, ar);
   }
+
+  // Added by Alpa
+  if (offset->opcode() == HloOpcode::kSubtract) {
+    // TODO(lmzheng): make the condition stronger.
+    return IsTableLookup(offset->operand(0)) && IsTableLookup(offset->operand(1));
+  }
+
   if (shard_size == 1 && iota_group) {
     bool id_mapping_is_identity = true;
     for (int64_t id = 0; id < group_size; ++id) {
@@ -270,9 +277,7 @@ std::optional<ReduceScatterSpec> MatchReduceScatter(
     int64_t num_replicas, bool allow_multiple_split_dims,
     bool allow_intervening_reshape, int64_t min_rank,
     HloPredicate match_partition_id, HloPredicate match_replica_id) {
-  if (!ar->shape().IsArray() || ar->constrain_layout() ||
-      (ar->IsCrossModuleAllReduce() &&
-       !ar->GetModule()->config().use_spmd_partitioning())) {
+  if (!ar->shape().IsArray() || ar->constrain_layout()) {
     VLOG(2) << "Unsupported all-reduce: " << ar->ToString();
     return std::nullopt;
   }
@@ -407,6 +412,9 @@ std::optional<ReduceScatterSpec> MatchReduceScatter(
   std::vector<int64_t> split_dims;
   // First find a single dimension where the input and output of dynamic slice
   // differ.
+  if (ar->shape().rank() != user->shape().rank()) {
+    return std::nullopt;
+  }
   int num_dims = 0;
   for (int64_t dim = 0; dim < ar->shape().rank(); ++dim) {
     if (ar->shape().dimensions(dim) == user->shape().dimensions(dim)) {

@@ -117,6 +117,42 @@ class MultiDeviceAdapter : public DeviceMemoryAllocator {
     return per_device_allocators_[device_ordinal]->GetStream(device_ordinal);
   }
 
+  // Added by Alpa
+  int64_t bytes_available(int64_t device_ordinal) const override {
+    auto& allocator = tf_allocators_[device_ordinal];
+    absl::optional<tsl::AllocatorStats> stat = allocator->GetStats();
+    if (!stat.has_value()) {
+      return -1;
+    }
+    if (!stat->bytes_limit.has_value()) {
+      return -1;
+    }
+    return stat->bytes_limit.value() - stat->bytes_in_use;
+  }
+
+  int64_t bytes_used(int64_t device_ordinal) const override {
+    auto& allocator = tf_allocators_[device_ordinal];
+    absl::optional<tsl::AllocatorStats> stat = allocator->GetStats();
+    if (!stat.has_value()) {
+      return -1;
+    }
+    return stat->bytes_in_use;
+  }
+
+  int64_t bytes_peak_in_use(int64_t device_ordinal) const override {
+    auto& allocator = tf_allocators_[device_ordinal];
+    absl::optional<tsl::AllocatorStats> stat = allocator->GetStats();
+    if (!stat.has_value()) {
+      return -1;
+    }
+    return stat->peak_bytes_in_use;
+  }
+
+  bool ClearStats(int64_t device_ordinal) const override {
+    auto& allocator = tf_allocators_[device_ordinal];
+    return allocator->ClearStats();
+  }
+
  private:
   std::vector<std::unique_ptr<TfAllocatorAdapter>> per_device_allocators_;
   // The wrapped TF allocators backing per_device_allocators_

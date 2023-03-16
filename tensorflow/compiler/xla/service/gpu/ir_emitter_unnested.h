@@ -808,6 +808,15 @@ class IrEmitterUnnested : public IrEmitter {
   // HLO computation fingerprint.
   absl::flat_hash_map<std::string, std::pair<llvm::Function*, LaunchDimensions>>
       triton_cache_;
+
+  // Added by Alpa
+  Status EmitMemZeroThunk(mlir::Operation* op);
+  Status EmitDoneEventThunk(mlir::Operation* op);
+  Status EmitCrossMeshAllReduceTarget(mlir::Operation* op);
+  Status EmitRngGetAndUpdateStateThunk(mlir::Operation* op);
+  using Slices = std::vector<CustomCallThunk::OptionalSlice>;
+  StatusOr<std::pair<Slices, Slices>> CustomCallParseBuffers(
+      mlir::Operation* op);
 };
 
 }  // namespace gpu

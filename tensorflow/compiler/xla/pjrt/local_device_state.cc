@@ -172,6 +172,11 @@ void LocalDeviceState::ReturnStreamToPool(std::unique_ptr<se::Stream> stream) {
   usage_stream_pool_.push(std::move(stream));
 }
 
+void LocalDeviceState::SetPrngSeed(int seed) {
+  absl::MutexLock lock(&mu_);
+  prng_seed_generator_.seed(seed);
+}
+
 int LocalDeviceState::GetNewPrngSeed() {
   absl::MutexLock lock(&mu_);
   int x = 0;
@@ -179,6 +184,14 @@ int LocalDeviceState::GetNewPrngSeed() {
     x = prng_seed_distribution_(prng_seed_generator_);
   } while (x == 0);
   return x;
+}
+
+// Added by Alpa
+se::Stream* LocalDeviceState::GetLastDeviceToDeviceStream() {
+  absl::MutexLock lock(&mu_);
+  int i = next_device_to_device_stream_;
+  i = (i - 1) % device_to_device_streams_.size();
+  return device_to_device_streams_.at(i).get();
 }
 
 }  // namespace xla

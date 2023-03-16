@@ -127,6 +127,9 @@ limitations under the License.
 #include "tensorflow/tsl/profiler/lib/connected_traceme.h"
 #include "tensorflow/tsl/profiler/lib/traceme.h"
 
+// Added by Alpa
+#include "tensorflow/compiler/xla/service/pass_context.h"
+
 namespace xla {
 
 PjRtPlatformId PjRtStreamExecutorDevice::platform_id() const {
@@ -2667,6 +2670,12 @@ PjRtStreamExecutorExecutable::GetHloModules() const {
 StatusOr<PjRtStreamExecutorClient::ExecutableExtras>
 PjRtStreamExecutorClient::GetExecutableExtras(CompileOptions* options) {
   ExecutableExtras extras;
+
+  // Added by Alpa
+  if (pass_context::GetBool("build_option::bypass_device_assignment_check", false)) {
+    return extras;
+  }
+
   std::shared_ptr<DeviceAssignment>& device_assignment =
       extras.device_assignment;
   std::vector<PjRtStreamExecutorExecutable::LogicalDeviceIds>&

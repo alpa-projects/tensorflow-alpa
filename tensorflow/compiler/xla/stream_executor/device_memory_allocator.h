@@ -225,6 +225,22 @@ class DeviceMemoryAllocator {
   // a different stream.
   virtual tsl::StatusOr<Stream *> GetStream(int device_ordinal) = 0;
 
+  virtual int64_t bytes_available(int64_t device_ordinal) const {
+    return -1;
+  }
+
+  virtual int64_t bytes_used(int64_t device_ordinal) const {
+    return -1;
+  }
+
+  virtual int64_t bytes_peak_in_use(int64_t device_ordinal) const {
+    return -1;
+  }
+
+  virtual bool ClearStats(int64_t device_ordinal) const {
+    return false;
+  }
+
  protected:
   const Platform *platform_;
 };

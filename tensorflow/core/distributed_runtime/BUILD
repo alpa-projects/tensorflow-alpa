@@ -9,7 +9,7 @@ load(
     "if_google",
     "tf_cc_test",
     "tf_copts",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 load(
     "//tensorflow:tensorflow.default.bzl",
@@ -241,7 +241,7 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "worker",
     srcs = ["worker.cc"],
     hdrs = [

@@ -4,7 +4,7 @@
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_binary",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_cloud")
 
@@ -14,7 +14,7 @@ package(
     licenses = ["notice"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "optimization_pass_runner_lib",
     srcs = ["optimization_pass_runner.cc"],
     hdrs = ["optimization_pass_runner.h"],

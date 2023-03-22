@@ -8,7 +8,7 @@ load(
     "tf_cc_test_mkl",
     "tf_cc_tests",
     "tf_copts",
-    "tf_cuda_library",
+    "tsl_gpu_library",
     "tf_openmp_copts",
     "tf_openmp_lopts",
 )
@@ -59,7 +59,7 @@ package(
     licenses = ["notice"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "core_cpu",
     hdrs = [
         "composite_device.h",
@@ -214,7 +214,7 @@ filegroup(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "core_cpu_base_no_ops",
     srcs = [
         "//tensorflow/core/public:session_options.h",
@@ -1879,7 +1879,7 @@ cc_library(
     alwayslink = 1,
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "core_cpu_impl",
     hdrs = [":core_cpu_lib_headers"],
     copts = tf_copts(),
@@ -1947,7 +1947,7 @@ tf_cuda_library(
     ] + if_zendnn([":zen_layout_pass"]),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "core_cpu_lib",
     hdrs = [":core_cpu_lib_headers"],
     deps = [
@@ -1956,7 +1956,7 @@ tf_cuda_library(
     ] + if_static([":core_cpu_impl"]) + tf_protos_all() + tf_protos_grappler(),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "core_cpu_lib_no_ops",
     hdrs = [":core_cpu_lib_headers"],
     deps = [
@@ -1965,7 +1965,7 @@ tf_cuda_library(
     ] + tf_protos_all() + tf_protos_grappler(),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "core_cpu_internal",
     srcs = [
         "graph_execution_state.cc",
@@ -2035,7 +2035,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "direct_session_internal",
     srcs = ["direct_session.cc"],
     hdrs = [

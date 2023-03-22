@@ -2,7 +2,7 @@ load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_copts",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 
 package(
@@ -16,7 +16,7 @@ package_group(
     packages = ["//tensorflow/..."],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "mlir_c_api",
     srcs = [
         "c_api_unified_experimental_mlir.cc",

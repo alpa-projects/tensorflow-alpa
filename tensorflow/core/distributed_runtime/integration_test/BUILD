@@ -2,7 +2,7 @@ load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_test",
     "tf_cuda_cc_test",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 
 package(
@@ -13,7 +13,7 @@ package(
     licenses = ["notice"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "coordination_test_opkernel_registration",
     testonly = 1,
     srcs = ["coordination_test_opkernel_registration.cc"],

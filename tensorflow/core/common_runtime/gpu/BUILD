@@ -3,7 +3,7 @@ load(
     "if_google",
     "tf_cc_test",
     "tf_copts",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 load(
     "//tensorflow:tensorflow.default.bzl",
@@ -138,7 +138,7 @@ filegroup(
     visibility = ["//visibility:private"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "gpu_runtime_impl",
     srcs = [
         "gpu_cudamalloc_allocator.cc",
@@ -189,7 +189,7 @@ tf_cuda_library(
     alwayslink = 1,
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "gpu_runtime",
     hdrs = [":gpu_runtime_headers"],
     linkstatic = 1,
@@ -210,7 +210,7 @@ tf_cuda_library(
 
 # This is redundant with the "gpu_runtime_*" targets above. It's useful for
 # applications that want to depend on a minimal subset of TensorFlow (e.g. XLA).
-tf_cuda_library(
+tsl_gpu_library(
     name = "gpu_bfc_allocator",
     srcs = [
         "gpu_bfc_allocator.cc",
@@ -228,7 +228,7 @@ tf_cuda_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "gpu_virtual_mem_allocator",
     srcs = [
         "gpu_virtual_mem_allocator.cc",

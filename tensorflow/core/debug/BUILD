@@ -21,7 +21,7 @@ load(
     "tf_cc_binary",
     "tf_cc_test",
     "tf_copts",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 
 # For platform specific build config
@@ -82,7 +82,7 @@ cc_library(
     alwayslink = 1,
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "debugger_state_impl",
     srcs = ["debugger_state_impl.cc"],
     hdrs = ["debugger_state_impl.h"],
@@ -96,7 +96,7 @@ tf_cuda_library(
     alwayslink = 1,
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "debug_graph_utils",
     srcs = ["debug_graph_utils.cc"],
     hdrs = ["debug_graph_utils.h"],
@@ -113,7 +113,7 @@ tf_cuda_library(
     alwayslink = 1,
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "debug_io_utils",
     srcs = ["debug_io_utils.cc"],
     hdrs = ["debug_io_utils.h"],
@@ -136,7 +136,7 @@ tf_cuda_library(
     alwayslink = 1,
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "debug_grpc_testlib",
     srcs = ["debug_grpc_testlib.cc"],
     hdrs = ["debug_grpc_testlib.h"],
@@ -155,7 +155,7 @@ tf_cuda_library(
     alwayslink = 1,
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "debug_node_key",
     srcs = ["debug_node_key.cc"],
     hdrs = ["debug_node_key.h"],

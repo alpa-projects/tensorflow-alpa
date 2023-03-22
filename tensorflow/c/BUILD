@@ -10,7 +10,7 @@ load(
     "if_not_mobile",
     "tf_cc_test",
     "tf_copts",
-    "tf_cuda_library",
+    "tsl_gpu_library",
     "tf_custom_op_library",
     "tf_kernel_library",
 )
@@ -106,7 +106,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "c_api_internal",
     hdrs = [
         "c_api.h",
@@ -180,7 +180,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "c_api",
     hdrs = [
         "c_api.h",
@@ -223,7 +223,7 @@ check_deps(
     deps = [":c_api_no_xla"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "c_api_no_xla",
     srcs = [
         "c_api.cc",
@@ -289,7 +289,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "tf_status_internal",
     hdrs = [
         "tf_status.h",
@@ -469,7 +469,7 @@ cc_library(
     }),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "tf_tensor_internal",
     hdrs = [
         "tf_tensor.h",
@@ -514,7 +514,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "tf_buffer_internal",
     hdrs = [
         "tf_buffer.h",
@@ -532,7 +532,7 @@ tf_cuda_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "c_api_experimental",
     srcs = [
         "c_api_experimental.cc",
@@ -589,7 +589,7 @@ filegroup(
     visibility = ["//tensorflow:__subpackages__"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "tf_status_helper",
     srcs = ["tf_status_helper.cc"],
     hdrs = ["tf_status_helper.h"],
@@ -603,7 +603,7 @@ tf_cuda_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "checkpoint_reader",
     srcs = ["checkpoint_reader.cc"],
     hdrs = ["checkpoint_reader.h"],
@@ -616,7 +616,7 @@ tf_cuda_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "env",
     srcs = [
         "env.cc",
@@ -660,7 +660,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "kernels",
     srcs = [
         "kernels.cc",
@@ -702,7 +702,7 @@ cc_library(
     deps = [":kernels_hdrs"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "kernels_experimental",
     srcs = ["kernels_experimental.cc"],
     hdrs = ["kernels_experimental.h"],
@@ -728,7 +728,7 @@ tf_cuda_library(
     ]),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "ops",
     srcs = [
         "ops.cc",
@@ -766,7 +766,7 @@ cc_library(
 # -----------------------------------------------------------------------------
 # Tests
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "c_test_util",
     testonly = 1,
     srcs = ["c_test_util.cc"],
@@ -1000,7 +1000,7 @@ tf_cc_test(
 # -----------------------------------------------------------------------------
 # Python API target
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "python_api",
     srcs = ["python_api.cc"],
     hdrs = ["python_api.h"],

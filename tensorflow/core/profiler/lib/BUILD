@@ -1,6 +1,6 @@
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load("//tensorflow/core/platform:build_config_root.bzl", "if_static")
-load("//tensorflow:tensorflow.bzl", "if_not_android", "tf_cc_test", "tf_cuda_library")
+load("//tensorflow:tensorflow.bzl", "if_not_android", "tf_cc_test", "tsl_gpu_library")
 load("//tensorflow:tensorflow.default.bzl", "filegroup")
 load(
     "//tensorflow/core/profiler/builds:build_config.bzl",
@@ -118,7 +118,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "profiler_backends",
     visibility = ["//tensorflow:internal"],
     deps = [

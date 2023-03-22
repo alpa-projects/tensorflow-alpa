@@ -3,7 +3,7 @@ load("@local_config_rocm//rocm:build_defs.bzl", "if_rocm")
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_copts",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 load("//tensorflow:tensorflow.default.bzl", "tf_cuda_cc_test")
 load(
@@ -67,7 +67,7 @@ tf_cuda_cc_test(
     ]),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "cupti_interface",
     hdrs = if_cuda(["cupti_interface.h"]),
     copts = tf_profiler_copts() + tf_copts(),
@@ -79,7 +79,7 @@ tf_cuda_library(
     ] + tf_additional_cupti_deps(),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "mock_cupti",
     testonly = 1,
     hdrs = if_cuda(["mock_cupti.h"]),
@@ -93,7 +93,7 @@ tf_cuda_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "cupti_error_manager",
     hdrs = if_cuda(["cupti_error_manager.h"]),
     copts = tf_profiler_copts() + tf_copts(),
@@ -136,7 +136,7 @@ cuda_library(
 # the wrapper statically works around the issue. An alternative would be
 # to patch libcupti_static, but it's not worth the trouble considering
 # that the wrapper is about the only direct user.
-tf_cuda_library(
+tsl_gpu_library(
     name = "cupti_wrapper",
     hdrs = if_cuda(["cupti_wrapper.h"]),
     copts = tf_profiler_copts() + tf_copts(),
@@ -148,7 +148,7 @@ tf_cuda_library(
     ] + tf_additional_cupti_deps(),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "cupti_tracer",
     hdrs = if_cuda(["cupti_tracer.h"]),
     copts = tf_profiler_copts() + tf_copts(),
@@ -170,7 +170,7 @@ tf_cuda_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "rocm_tracer",
     hdrs = if_rocm(["rocm_tracer.h"]),
     copts = tf_profiler_copts() + tf_copts(),
@@ -189,7 +189,7 @@ tf_cuda_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "nvtx_utils",
     hdrs = if_cuda(["nvtx_utils.h"]),
     copts = tf_profiler_copts() + tf_copts(),
@@ -199,7 +199,7 @@ tf_cuda_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "cupti_collector",
     hdrs = if_cuda(["cupti_collector.h"]),
     copts = tf_profiler_copts() + tf_copts(),
@@ -241,7 +241,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "cupti_utils",
     copts = tf_profiler_copts() + tf_copts(),
     cuda_deps = [

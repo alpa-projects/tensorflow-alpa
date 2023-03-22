@@ -8,7 +8,7 @@ load(
     "if_windows",
     "tf_cc_binary",
     "tf_cc_test",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 load("//tensorflow:tensorflow.default.bzl", "filegroup", "tf_cuda_cc_test", "tf_cuda_cc_tests", "tf_grpc_cc_dependencies", "tf_grpc_dependencies")
 
@@ -183,7 +183,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "grpc_worker_service",
     srcs = ["grpc_worker_service.cc"],
     hdrs = ["grpc_worker_service.h"],
@@ -402,7 +402,7 @@ tf_cc_binary(
     deps = [":grpc_testlib_server_main"],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "grpc_testlib",
     testonly = 1,
     srcs = ["grpc_testlib.cc"],

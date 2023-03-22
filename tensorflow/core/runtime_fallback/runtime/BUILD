@@ -1,6 +1,6 @@
 load(
     "//tensorflow:tensorflow.bzl",
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
@@ -36,7 +36,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "runtime_fallback_alwayslink",
     srcs = [
         "conversion_function.cc",
@@ -124,7 +124,7 @@ tf_cuda_library(
     alwayslink = 1,
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "runtime_fallback_tensor",
     srcs = ["runtime_fallback_tensor.cc"],
     hdrs = ["runtime_fallback_tensor.h"],
@@ -198,7 +198,7 @@ cc_library(
     }),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "runtime_fallback_gpu_alwayslink",
     srcs = [
         "gpu/conversion_function.cc",

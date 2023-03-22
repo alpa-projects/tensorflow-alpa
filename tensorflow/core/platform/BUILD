@@ -35,7 +35,7 @@ load(
     "tf_cc_test",
     "tf_cc_tests",
     "tf_copts",  # @unused
-    "tf_cuda_library",
+    "tsl_gpu_library",
 )
 load(
     "//tensorflow/tsl/platform/default:cuda_build_defs.bzl",
@@ -1053,7 +1053,7 @@ cc_library(
     ),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "stream_executor",
     srcs = ["stream_executor.h"],
     hdrs = [

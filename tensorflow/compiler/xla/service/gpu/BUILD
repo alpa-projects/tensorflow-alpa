@@ -3268,11 +3268,11 @@ alias(
     actual = if_nccl(":_alpa_nccl_group_base", ":empty"),
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "_alpa_nccl_group_base",
     srcs = if_gpu_is_configured(["alpa_nccl_group_base.cc"]),
     hdrs = if_gpu_is_configured(["alpa_nccl_group_base.h"]),
-    # Override tf_cuda_library()'s internal default value of ["//buildenv/target:gce"].
+    # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:gce"].
     copts = [
         "-fexceptions",
         # "-fno-strict-aliasing",
@@ -3348,7 +3348,7 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":ir_emission_utils",
-        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/service:pass_context",
         "//tensorflow/compiler/xla/service/spmd:auto_sharding",
     ],

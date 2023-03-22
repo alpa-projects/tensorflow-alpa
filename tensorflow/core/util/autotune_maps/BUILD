@@ -14,7 +14,7 @@ load(
 )
 load(
     "//tensorflow:tensorflow.bzl",
-    "tf_cuda_library",
+    "tsl_gpu_library",
     "tf_cuda_only_cc_test",
 )
 
@@ -77,7 +77,7 @@ cc_library(
     ],
 )
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "conv_parameters",
     srcs = ["conv_parameters.cc"],
     hdrs = [
@@ -116,7 +116,7 @@ tf_proto_library(
 # )
 # copybara:uncomment_end
 
-tf_cuda_library(
+tsl_gpu_library(
     name = "autotune_serialize",
     srcs = [
         "autotune_serialize.cc",

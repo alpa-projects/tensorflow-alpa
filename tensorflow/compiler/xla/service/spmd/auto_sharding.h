@@ -1,7 +1,7 @@
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_AUTO_SHARDING_H_
 
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
 
 namespace xla {

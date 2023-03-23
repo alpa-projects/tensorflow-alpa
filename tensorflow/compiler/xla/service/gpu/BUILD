@@ -3303,7 +3303,7 @@ cc_library(
     ],
     deps = [
         "//tensorflow/compiler/xla:status_macros",
-        "//tensorflow/stream_executor:event",
+        "//tensorflow/compiler/xla/stream_executor:event",
         "@com_google_absl//absl/container:flat_hash_map",
     ],
 )
@@ -3332,7 +3332,7 @@ cc_library(
         "common_computation_elimination.h",
     ],
     deps = [
-        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
     ],
 )
@@ -3360,7 +3360,7 @@ cc_library(
     hdrs = ["done_event_insertion.h"], 
     deps = [
         "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
     ]
 )

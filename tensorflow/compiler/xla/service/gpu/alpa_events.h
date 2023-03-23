@@ -3,7 +3,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "tensorflow/compiler/xla/status_macros.h"
-#include "tensorflow/stream_executor/stream.h"
+#include "tensorflow/compiler/xla/stream_executor/stream.h"
 // This file provides APIs to sync Alpa's multi-stream behavior with
 // XLA's own streams
 namespace xla {

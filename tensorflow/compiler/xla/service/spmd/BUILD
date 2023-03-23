@@ -253,10 +253,10 @@ cc_library(
     hdrs = ["auto_sharding.h", "auto_sharding_strategy.h", "auto_sharding_util.h"],
     deps = [
         "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
+        "//tensorflow/compiler/xla/hlo/utils:hlo_live_range",
         "//tensorflow/compiler/xla/service:dump",
-        "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_creation_utils",
-        "//tensorflow/compiler/xla/service:hlo_live_range",
         "//tensorflow/compiler/xla/service:hlo_memory_scheduler",
         "//tensorflow/compiler/xla/service:hlo_pass",
         "//tensorflow/compiler/xla/service:hlo_sharding_util",
@@ -271,7 +271,7 @@ cc_library(
     hdrs = ["redundant_slice_eliminator.h"],
     deps = [
         "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/service:hlo_dce",
         "//tensorflow/compiler/xla/service:hlo_pass",
     ],
@@ -283,7 +283,7 @@ cc_library(
     hdrs = ["grad_acc_rewrite.h"],
     deps = [
         "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
         "//tensorflow/compiler/xla/service:pass_context",
         "//tensorflow/compiler/xla/service/spmd:spmd_partitioner",
@@ -297,7 +297,7 @@ cc_library(
     deps = [
         ":auto_sharding",
         "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
         "@pybind11",
     ],
@@ -314,6 +314,7 @@ cc_library(
         ":slice_auto_sharded_stages",
         ":stateful_rng_spmd_partitioner",
         # Copied from gpu_compiler
+        "//tensorflow/compiler/xla/hlo/transforms:hlo_constant_splitter",
         "//tensorflow/compiler/xla/pjrt:pjrt_client",
         "//tensorflow/compiler/xla/service:algebraic_simplifier",
         "//tensorflow/compiler/xla/service:all_reduce_reassociate",
@@ -326,7 +327,6 @@ cc_library(
         "//tensorflow/compiler/xla/service:gather_expander",
         "//tensorflow/compiler/xla/service:gather_simplifier",
         "//tensorflow/compiler/xla/service:hlo_constant_folding",
-        "//tensorflow/compiler/xla/service:hlo_constant_splitter",
         "//tensorflow/compiler/xla/service:hlo_cse",
         "//tensorflow/compiler/xla/service:hlo_dce",
         "//tensorflow/compiler/xla/service:hlo_pass",

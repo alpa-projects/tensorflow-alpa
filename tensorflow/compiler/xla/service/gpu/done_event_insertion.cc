@@ -34,7 +34,7 @@ Status AddDoneEvent(HloInstruction* inst, size_t index, HloInstruction* root) {
       TF_RETURN_IF_ERROR(done_event->AddControlDependencyTo(root));
     }
   }
-  return Status::OK();
+  return OkStatus();
 }
 };  // namespace
 

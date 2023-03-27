@@ -322,7 +322,7 @@ double EstimateHloModuleCost(const HloModule* hlo_module) {
       const HloInstruction* lhs = ins->operand(0);
       const HloInstruction* rhs = ins->operand(1);
       std::vector<int64_t> lhs_space_dims, rhs_space_dims;
-      auto config = ins->backend_config<GemmBackendConfig>().ValueOrDie();
+      auto config = ins->backend_config<GemmBackendConfig>().value();
       auto dnum = config.dot_dimension_numbers();
       std::tie(lhs_space_dims, rhs_space_dims) =
           spmd::GetSpaceDims(lhs->shape(), rhs->shape(), dnum);

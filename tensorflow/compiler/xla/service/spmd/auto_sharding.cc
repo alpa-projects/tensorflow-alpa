@@ -2199,7 +2199,7 @@ StatusOr<bool> AutoSharding::Run(
                                          DFSMemoryScheduler)));
   const HloComputation* entry_computation = module->entry_computation();
   std::unique_ptr<HloAliasAnalysis> alias_analysis =
-      HloAliasAnalysis::Run(module).ValueOrDie();
+      HloAliasAnalysis::Run(module).value();
   AliasMap alias_map =
       BuildAliasMap(module, alias_analysis->dataflow_analysis());
 

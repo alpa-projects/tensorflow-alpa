@@ -47,7 +47,7 @@ StatusOr<bool> ZeroSizedHloElimination::Run(
         std::vector<std::pair<ShapeIndex, std::pair<int64_t, ShapeIndex>>>
             aliasing;
 
-        ShapeUtil::VisitorFunction visitor = [&](const Shape& shape,
+        auto visitor = [&](const Shape& shape,
                                                  const ShapeIndex& idx) {
           aliasing.push_back(std::make_pair(idx, std::make_pair(0, idx)));
         };

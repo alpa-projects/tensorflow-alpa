@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "pybind11/pybind11.h"
-#include "tensorflow/compiler/xla/service/hlo_live_range.h"
+#include "tensorflow/compiler/xla/hlo/utils/hlo_live_range.h"
 #include "tensorflow/compiler/xla/service/pass_context.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 

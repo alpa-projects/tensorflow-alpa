@@ -11,7 +11,7 @@ Status RngGetAndUpdateStateThunk::Initialize(
   int device_ordinal = executor->device_ordinal();
   rng_states[device_ordinal] = 0;
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status RngGetAndUpdateStateThunk::ExecuteOnStream(const ExecuteParams& params) {
@@ -31,7 +31,7 @@ Status RngGetAndUpdateStateThunk::ExecuteOnStream(const ExecuteParams& params) {
   params.stream->ThenMemset32(&dest_addr,
                               static_cast<int32_t>(seed),
                               dest_addr.size());
-  return Status::OK();
+  return OkStatus();
 }
 
 }  // namespace gpu

@@ -5814,7 +5814,11 @@ Status IrEmitterUnnested::EmitCrossMeshAllReduceTarget(mlir::Operation* op) {
   }
   ReductionKind reduction_kind;
 
-  const std::string opaque = custom_call.getBackendConfig().str();
+  //const std::string opaque = custom_call.getBackendConfig().str();
+  const std::string opaque = custom_call.getBackendConfig()
+    .value_or(mlir::Attribute())
+    .dyn_cast_or_null<mlir::StringAttr>().str();
+
   std::vector<std::string> metadatas = absl::StrSplit(opaque, ";");
   CHECK_EQ(metadatas.size(), 2);
   const std::string op_str = metadatas[0];
@@ -5838,10 +5842,15 @@ Status IrEmitterUnnested::EmitCrossMeshAllReduceTarget(mlir::Operation* op) {
 
 Status IrEmitterUnnested::EmitDoneEventThunk(mlir::Operation* op) {
   auto custom_call = mlir::cast<mlir::lmhlo::CustomCallOp>(op);
-  int64_t output_index = std::stoll(custom_call.getBackendConfig().str());
+  int64_t output_index = std::stoll(
+    //custom_call.getBackendConfig().str()
+    custom_call.getBackendConfig()
+               .value_or(mlir::Attribute())
+               .dyn_cast_or_null<mlir::StringAttr>().str()
+  );
   AddThunkToThunkSequence(
       absl::make_unique<DoneEventThunk>(GetThunkInfo(op), output_index));
-  return OkStatus()
+  return OkStatus();
 }
 
 Status IrEmitterUnnested::EmitRngGetAndUpdateStateThunk(mlir::Operation* op) {

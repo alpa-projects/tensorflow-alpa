@@ -285,7 +285,7 @@ Status NcclAllReduceThunkBase::RunAllReduce(const ExecuteParams& params,
       std::vector<DeviceBufferPair> device_buffers,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
-  return ::xla::gpu::RunAllReduce(config_.reduction_kind, device_buffers,
+  return ::xla::gpu::RunAllReduce(config_, device_buffers,
                                   stream, comm);
 }
 

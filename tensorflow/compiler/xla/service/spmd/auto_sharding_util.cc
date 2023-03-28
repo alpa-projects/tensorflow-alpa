@@ -1,11 +1,11 @@
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_util.h"
 
 #include "tensorflow/compiler/xla/primitive_util.h"
-#include "tensorflow/compiler/xla/runtime/errors.h"
 #include "tensorflow/compiler/xla/service/hlo_creation_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding_util.h"
 #include "tensorflow/compiler/xla/service/spmd/auto_sharding_strategy.h"
 #include "tensorflow/compiler/xla/shape_util.h"
+#include "tensorflow/tsl/platform/errors.h"
 
 namespace xla {
 namespace spmd {
@@ -940,7 +940,7 @@ Status FilterStrategy(const HloInstruction* ins,
   const Array<int64_t>& device_mesh = cluster_env.device_mesh;
 
   if (ins->shape().dimensions(batch_dim) % device_mesh.dim(mesh_dim) != 0) {
-    return runtime::InvalidArgument(
+    return tsl::errors::InvalidArgument(
         "The length of batch dimension is "
         "not divisible by the number of devices. " +
         ins->ToString());

@@ -175,7 +175,7 @@ Status RunAutoShardingPass(HloModule* hlo_module,
       spmd_pipeline.AddPass<AutoSharding>();
       spmd_pipeline.AddPass<ShardingPropagation>(
           /*is_spmd=*/true, /*propagate_metadata=*/false,
-          /*allow_spmd_sharding_propagation_to_output=*/{true});
+          /*allow_spmd_sharding_propagation_to_output=*/absl::Span<const bool>{true});
       spmd_pipeline.AddPass<SliceAutoShardedStages>();
     } else {
       spmd_pipeline.AddPass<CallInliner>();
@@ -204,7 +204,7 @@ Status RunSpmdPartitionerPass(HloModule* hlo_module,
     if (num_partitions > 1) {
       spmd_pipeline.AddPass<ShardingPropagation>(
           /*is_spmd=*/true, /*propagate_metadata=*/false,
-          /*allow_spmd_sharding_propagation_to_output=*/true);
+          /*allow_spmd_sharding_propagation_to_output=*/absl::Span<const bool>{true});
       spmd_pipeline.AddPass<StatefulRngSpmdPartitioner>(
           num_partitions, hlo_module->config().replica_count());
       spmd_pipeline.AddPass<RedundantSliceEliminator>();

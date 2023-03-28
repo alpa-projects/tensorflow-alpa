@@ -72,20 +72,6 @@ class NcclAllReduceThunkBase : public NcclAllReduceReduceScatterThunkBase {
                       ncclComm_t comm);
 };
 
-// -----------------------------------------------------------------------------
-// AllReduce thunks
-// -----------------------------------------------------------------------------
-
-class NcclAllReduceThunkBase : public NcclAllReduceReduceScatterThunkBase {
- public:
-  using NcclAllReduceReduceScatterThunkBase::
-      NcclAllReduceReduceScatterThunkBase;
-
- protected:
-  Status RunAllReduce(const ExecuteParams& params, se::Stream& stream,
-                      ncclComm_t comm);
-};
-
 class NcclAllReduceThunk : public NcclAllReduceThunkBase {
  public:
   NcclAllReduceThunk(ThunkInfo thunk_info, mlir::lmhlo::AllReduceOp op,

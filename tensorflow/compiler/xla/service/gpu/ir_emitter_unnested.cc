@@ -5841,7 +5841,7 @@ Status IrEmitterUnnested::EmitDoneEventThunk(mlir::Operation* op) {
   int64_t output_index = std::stoll(custom_call.getBackendConfig().str());
   AddThunkToThunkSequence(
       absl::make_unique<DoneEventThunk>(GetThunkInfo(op), output_index));
-  return Status::OK();
+  return OkStatus()
 }
 
 Status IrEmitterUnnested::EmitRngGetAndUpdateStateThunk(mlir::Operation* op) {

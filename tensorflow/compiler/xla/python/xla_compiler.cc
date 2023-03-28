@@ -952,7 +952,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       [](HloModule* hlo_module, const CompileOptions& options) {
         py::gil_scoped_release gil_release;
         TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module, options));
-        return Status::OK();
+        return OkStatus();
       },
       py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 
@@ -961,7 +961,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       [](HloModule* hlo_module, const CompileOptions& options) {
         py::gil_scoped_release gil_release;
         TF_RETURN_IF_ERROR(spmd::RunSpmdPartitionerPass(hlo_module, options));
-        return Status::OK();
+        return OkStatus();
       },
       py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
 

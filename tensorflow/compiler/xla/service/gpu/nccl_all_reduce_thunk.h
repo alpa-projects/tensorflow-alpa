@@ -45,17 +45,11 @@ class NcclAllReduceReduceScatterThunkBase : public NcclCollectiveThunk {
                                       NcclAllReduceConfig config,
                                       std::vector<Buffer> buffers);
 
-  // Added by Alpa
-  void set_module_name(const std::string& module_name) {
-    skip_env_name_ = module_name + "XLA_SKIP_NCCL_COLLECTIVE_IDS";
-  }
-
  protected:
   const NcclCollectiveConfig& config() const override { return config_.config; }
 
   const NcclAllReduceConfig config_;
   const std::vector<Buffer> buffers_;
-  std::string skip_env_name_ = "";  // Added by Alpa
 };
 
 // -----------------------------------------------------------------------------
@@ -192,9 +186,9 @@ class NcclReduceScatterDoneThunk : public NcclCollectiveDoneThunk {
 
 // -----------------------------------------------------------------------------
 
-Status RunAllReduce(const NcclAllReduceConfig& config,
+Status RunAllReduce(ReductionKind reduction_kind,
                     std::vector<DeviceBufferPair>& buffers, se::Stream& stream,
-                    ncclComm_t comm, const std::string& env_name);
+                    ncclComm_t comm);
 
 Status RunReduceScatter(ReductionKind reduction_kind,
                         std::vector<DeviceBufferPair>& buffers,

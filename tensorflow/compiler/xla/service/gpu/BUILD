@@ -610,7 +610,7 @@ tsl_gpu_library(
         "//tensorflow/compiler/xla/service:buffer_assignment",
         "//tensorflow/compiler/xla/service:collective_ops_utils",
         "//tensorflow/compiler/xla/service:global_device_id",
-        "//tensorflow/compiler/xla/stream_executor/gpu:gpu_activation_header",
+        "//tensorflow/compiler/xla/stream_executor/cuda:cuda_activation_header",
         "//tensorflow/compiler/xla/stream_executor/gpu:gpu_stream",
         "//tensorflow/compiler/xla/translate/hlo_to_mhlo:hlo_utils",
         "//tensorflow/compiler/xla/translate/mhlo_to_hlo:attribute_exporter",

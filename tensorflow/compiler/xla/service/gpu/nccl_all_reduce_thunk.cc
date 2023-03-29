@@ -30,10 +30,10 @@ limitations under the License.
 #include "tensorflow/compiler/xla/translate/hlo_to_mhlo/hlo_utils.h"
 #include "tensorflow/compiler/xla/translate/mhlo_to_hlo/type_to_shape.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
+#include "tensorflow/compiler/xla/stream_executor/cuda/cuda_activation.h"
 
 #if XLA_ENABLE_XCCL
 #include "tensorflow/compiler/xla/stream_executor/gpu/gpu_stream.h"
-#include "tensorflow/compiler/xla/stream_executor/gpu/gpu_activation.h"
 #endif
 
 // Added by Alpa
@@ -42,62 +42,16 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
-// Added by Alpa
-bool IsSkipped(const int64_t op_id, const std::string& env_name) {
-  // Return whether this op should be skipped.
-  if (getenv("XLA_GPU_SKIP_ALLREDUCE") != nullptr) {  // skip all all-reduce
-    return true;
-  }
-
-  const char* env = getenv(env_name.c_str());
-  if (env == nullptr) {  // skip specific all-reduce
-    return false;
-  }
-  std::string key = absl::StrFormat(".%d.", op_id);
-  return strstr(env, key.c_str()) != nullptr;
-}
-
-Status RunAllReduce(const NcclAllReduceConfig& config,
+Status RunAllReduce(ReductionKind reduction_kind,
                     std::vector<DeviceBufferPair>& buffers, se::Stream& stream,
-                    ncclComm_t comm,
-                    const std::string& env_name) {
+                    ncclComm_t comm) {
 #if XLA_ENABLE_XCCL
   int device_ordinal = stream.parent()->device_ordinal();
   VLOG(3) << "Performing all-reduce from device ordinal: " << device_ordinal;
 
-  ncclRedOp_t reduce_op = ToNcclReduction(config.reduction_kind);
+  ncclRedOp_t reduce_op = ToNcclReduction(reduction_kind);
 
   se::gpu::GpuStreamHandle gpu_stream = se::gpu::AsGpuStreamValue(&stream);
-
-  bool skip = IsSkipped(config.config.op_id, env_name);
-
-  if (skip) {
-    for (size_t i = 0; i < buffers.size(); ++i) {
-      DeviceBufferPair& buffer = buffers[i];
-      const void* send_buffer = buffer.source_buffer.opaque();
-      void* recv_buffer = buffer.destination_buffer.opaque();
-
-      if (send_buffer == recv_buffer) {
-        // if (device_ordinal == 0) {
-        //  std::cerr << "skip all-reduce " << config.config.op_id << std::endl;
-        //}
-      } else {
-        PrimitiveType element_type = config.config.operand_element_type[i];
-        int64_t size = buffer.element_count *
-                   ShapeUtil::ByteSizeOfPrimitiveType(element_type);
-
-        // if (device_ordinal == 0) {
-        //  std::cerr << "skip-copy all-reduce " << config.config.op_id << ",
-        //  size: " << size <<  std::endl;
-        //}
-        auto ret = cudaMemcpyAsync(recv_buffer, send_buffer, size,
-                                   cudaMemcpyDeviceToDevice,
-                                   gpu_stream);
-        CHECK_EQ(ret, 0);
-      }
-    }
-    return OkStatus();
-  }
 
   XLA_CUDA_RETURN_IF_ERROR(ncclGroupStart());
   for (size_t i = 0; i < buffers.size(); ++i) {
@@ -285,8 +239,8 @@ Status NcclAllReduceThunkBase::RunAllReduce(const ExecuteParams& params,
       std::vector<DeviceBufferPair> device_buffers,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
-  return ::xla::gpu::RunAllReduce(config_, device_buffers,
-                                  stream, comm, skip_env_name_);
+  return ::xla::gpu::RunAllReduce(config_.reduction_kind, device_buffers,
+                                  stream, comm);
 }
 
 NcclAllReduceThunk::NcclAllReduceThunk(ThunkInfo thunk_info,
@@ -503,7 +457,7 @@ Status CrossMeshNcclAllReduceThunk::ExecuteOnStream(
   VLOG(1) << absl::StreamFormat("Starting %s.", Thunk::KindToString(kind()));
 
   se::StreamExecutor* executor = params.stream->parent();
-  se::gpu::ScopedActivateExecutorContext scoped_context(executor);
+  se::cuda::ScopedActivateExecutorContext scoped_context(executor);
 
   // TF_ASSIGN_OR_RETURN(
   //     NcclComm::Lock comm,
@@ -519,7 +473,7 @@ Status CrossMeshNcclAllReduceThunk::ExecuteOnStream(
       std::vector<DeviceBufferPair> device_buffers,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
-  TF_RETURN_IF_ERROR(RunAllReduce(config_, device_buffers, stream, *comm, ""));
+  TF_RETURN_IF_ERROR(RunAllReduce(config_.reduction_kind, device_buffers, stream, *comm));
 
   // Block host on the first call to ensure that all devices have allocated the
   // required buffers for their communicators before allowing any device to

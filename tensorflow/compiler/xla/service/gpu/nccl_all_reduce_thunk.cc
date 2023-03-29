@@ -286,7 +286,7 @@ Status NcclAllReduceThunkBase::RunAllReduce(const ExecuteParams& params,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
   return ::xla::gpu::RunAllReduce(config_, device_buffers,
-                                  stream, comm);
+                                  stream, comm, skip_env_name_);
 }
 
 NcclAllReduceThunk::NcclAllReduceThunk(ThunkInfo thunk_info,
@@ -313,7 +313,7 @@ CollectiveOpGroupMode NcclAllReduceThunk::GetGroupMode(
 
 Status NcclAllReduceThunk::RunNcclCollective(const ExecuteParams& params,
                                              ncclComm_t comm) {
-  return RunAllReduce(params, *params.stream, comm, skip_env_name_);
+  return RunAllReduce(params, *params.stream, comm);
 }
 
 NcclAllReduceStartThunk::NcclAllReduceStartThunk(
@@ -356,8 +356,7 @@ Status NcclReduceScatterThunkBase::RunReduceScatter(const ExecuteParams& params,
       ConvertToDeviceBuffers(params, buffers_,
                              config_.config.operand_element_type));
   return ::xla::gpu::RunReduceScatter(config_.reduction_kind, device_buffers,
-                                      stream, comm,
-                                      skip_env_name_);
+                                      stream, comm);
 }
 
 NcclReduceScatterThunk::NcclReduceScatterThunk(

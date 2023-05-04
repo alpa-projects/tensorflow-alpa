@@ -392,11 +392,14 @@ Status GpuCompiler::OptimizeHloModule(
 
   const int64_t num_partitions = hlo_module->config().num_partitions();
   if (num_partitions > 1) {
+    #if 0
+    // FIXME: TMP HACK
     if (!hlo_module->config().use_spmd_partitioning()) {
       return InvalidArgument(
           "num_partitions=%d but SPMD partitioning not enabled.",
           num_partitions);
     }
+    #endif
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     // Run some IR cleanup passes before running the SPMD partitioning
     // passes.

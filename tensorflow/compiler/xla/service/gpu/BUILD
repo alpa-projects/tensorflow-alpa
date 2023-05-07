@@ -2026,6 +2026,8 @@ cc_library(
         "//tensorflow/tsl/platform:status",
         "//tensorflow/tsl/platform:statusor",
         "//tensorflow/tsl/profiler/lib:traceme",
+        # Added by Alpa
+        "//tensorflow/compiler/xla/service/spmd:redundant_slice_eliminator",
     ] + if_cuda_is_configured([
         ":gemm_algorithm_picker",
         ":triton_autotuner",

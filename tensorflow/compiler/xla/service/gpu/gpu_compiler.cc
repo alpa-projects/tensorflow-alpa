@@ -204,6 +204,8 @@ limitations under the License.
 // Added by Alpa
 #include "tensorflow/compiler/xla/service/gpu/done_event_insertion.h"
 #include "tensorflow/compiler/xla/service/pass_context.h"
+#include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
+#include "tensorflow/compiler/xla/service/spmd/redundant_slice_eliminator.h"
 
 namespace xla {
 namespace gpu {
@@ -392,14 +394,11 @@ Status GpuCompiler::OptimizeHloModule(
 
   const int64_t num_partitions = hlo_module->config().num_partitions();
   if (num_partitions > 1) {
-    #if 0
-    // FIXME: TMP HACK
     if (!hlo_module->config().use_spmd_partitioning()) {
       return InvalidArgument(
           "num_partitions=%d but SPMD partitioning not enabled.",
           num_partitions);
     }
-    #endif
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     // Run some IR cleanup passes before running the SPMD partitioning
     // passes.
@@ -439,6 +438,10 @@ Status GpuCompiler::OptimizeHloModule(
     spmd_pipeline.AddPass<spmd::StatefulRngSpmdPartitioner>(
         num_partitions, hlo_module->config().replica_count());
     spmd_pipeline.AddPass<CollectivePermuteMotion>();
+    // Added by Alpa
+    spmd_pipeline.AddPass<spmd::RedundantSliceEliminator>();
+    spmd_pipeline.AddPass<AllReduceReassociate>();
+    spmd_pipeline.AddPass<spmd::GradAccRewrite>();
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
   } else {
     HloPassPipeline sharding_removal_pipeline("sharding-removal");

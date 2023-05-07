@@ -73,6 +73,8 @@ Thunk::ExecuteParams::ExecuteParams(
     CASE(kSequential);
     CASE(kTriangularSolve);
     CASE(kWhile);
+    // Added by Alpa
+    CASE(kDoneEvent);
     CASE(kRngGetAndUpdateState);
   }
 }

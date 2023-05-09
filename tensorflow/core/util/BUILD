@@ -12,7 +12,7 @@ load(
     "tf_cc_test",
     "tf_cc_tests",
     "tf_copts",
-    "tsl_gpu_library",
+    "tf_cuda_library",
     "tf_cuda_only_cc_test",
     "tf_kernel_library",
     "tf_mkl_kernel_library",
@@ -555,12 +555,12 @@ cc_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "gpu_cuda_alias",
     hdrs = ["gpu_cuda_alias.h"],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "gpu_device_functions",
     hdrs = ["gpu_device_functions.h"],
     deps = [

@@ -3,7 +3,7 @@ load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_test",
-    "tsl_gpu_library",
+    "tf_cuda_library",
 )
 load(
     "//tensorflow/core/platform:build_config.bzl",
@@ -166,7 +166,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "utils",
     srcs = ["utils.cc"],
     hdrs = ["utils.h"],

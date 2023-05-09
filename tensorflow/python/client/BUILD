@@ -1,6 +1,6 @@
 # Contains targets that expose client session APIs
 
-load("//tensorflow:tensorflow.bzl", "tsl_gpu_library")
+load("//tensorflow:tensorflow.bzl", "tf_cuda_library")
 load("//tensorflow:tensorflow.default.bzl", "cuda_py_test", "tf_py_test", "tf_python_pybind_extension")
 load("//tensorflow/core/platform:build_config_root.bzl", "if_static")
 
@@ -208,7 +208,7 @@ cc_library(
     ),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "tf_session_helper",
     srcs = ["tf_session_helper.cc"],
     hdrs = ["tf_session_helper.h"],
@@ -273,7 +273,7 @@ py_library(
 )
 
 # Just used by tests.
-tsl_gpu_library(
+tf_cuda_library(
     name = "construction_fails_op",
     srcs = ["test_construction_fails_op.cc"],
     deps = [

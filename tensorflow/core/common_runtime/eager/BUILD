@@ -6,7 +6,7 @@ load(
     "tf_cc_test",
     "tf_cc_test_mkl",
     "tf_copts",
-    "tsl_gpu_library",
+    "tf_cuda_library",
     "tf_mkl_kernel_library",
 )
 load(
@@ -24,7 +24,7 @@ package(
 )
 
 # TODO(b/152902651): Remove this file once all circular dependencies are resolved.
-tsl_gpu_library(
+tf_cuda_library(
     name = "core",
     visibility = ["//tensorflow:internal"],
     deps = [
@@ -34,7 +34,7 @@ tsl_gpu_library(
     alwayslink = 1,
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "core_no_xla",
     srcs = [
         "core.cc",
@@ -54,7 +54,7 @@ tsl_gpu_library(
     alwayslink = 1,
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "eager_executor",
     srcs = [
         "eager_executor.cc",
@@ -93,7 +93,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "context",
     srcs = [
         "context.cc",
@@ -141,7 +141,7 @@ tsl_gpu_library(
     }),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "custom_device",
     srcs = [
         "custom_device.cc",
@@ -188,7 +188,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "context_distributed_manager",
     srcs = [
         "context_distributed_manager.cc",
@@ -271,7 +271,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "eager_operation",
     srcs = [
         "eager_operation.cc",
@@ -323,7 +323,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "tensor_handle_data",
     srcs = [
         "tensor_handle_data.cc",
@@ -360,7 +360,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "tensor_handle",
     srcs = [
         "tensor_handle.cc",
@@ -410,7 +410,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "copy_to_device_node",
     hdrs = [
         "copy_to_device_node.h",
@@ -462,7 +462,7 @@ KERNEL_AND_DEVICE_DEPS = [
     "//tensorflow/core/grappler/optimizers:meta_optimizer",
 ]
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "kernel_and_device",
     srcs = [
         "kernel_and_device.cc",
@@ -732,7 +732,7 @@ cc_library(
     }),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "placement_utils",
     srcs = [
         "placement_utils.cc",
@@ -784,7 +784,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "attr_builder",
     srcs = ["attr_builder.cc"],
     hdrs = ["attr_builder.h"],

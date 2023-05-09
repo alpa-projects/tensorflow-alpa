@@ -2,7 +2,7 @@
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_test",
-    "tsl_gpu_library",
+    "tf_cuda_library",
 )
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
@@ -244,7 +244,7 @@ cc_library(
     alwayslink = 1,
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "kernel_fallback_gpu_alwayslink",
     srcs = [
         "gpu/conversion_function.cc",

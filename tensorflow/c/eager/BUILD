@@ -6,7 +6,7 @@ load(
     "tf_cc_test",
     "tf_copts",
     "tf_cuda_cc_test",
-    "tsl_gpu_library",
+    "tf_cuda_library",
 )
 load("//tensorflow:tensorflow.default.bzl", "cc_header_only_library", "filegroup", "internal_tfrt_deps")
 load(
@@ -19,7 +19,7 @@ package(
     licenses = ["notice"],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "c_api",
     srcs = [
         "c_api.cc",
@@ -609,7 +609,7 @@ cc_header_only_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "c_api_test_util",
     testonly = 1,
     srcs = ["c_api_test_util.cc"],
@@ -667,7 +667,7 @@ tf_cuda_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "c_api_remote_test_util",
     testonly = 1,
     srcs = ["c_api_remote_test_util.cc"],
@@ -816,7 +816,7 @@ cc_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "c_api_experimental",
     srcs = [
         "c_api_experimental.cc",

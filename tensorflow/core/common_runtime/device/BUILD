@@ -1,7 +1,7 @@
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_copts",
-    "tsl_gpu_library",
+    "tf_cuda_library",
 )
 load(
     "//tensorflow:tensorflow.default.bzl",
@@ -58,7 +58,7 @@ cc_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "device_mem_allocator",
     srcs = [
         "device_id.h",

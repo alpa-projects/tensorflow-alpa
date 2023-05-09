@@ -74,7 +74,7 @@ load(
     "tf_cc_test_mkl",
     "tf_cc_tests",
     "tf_copts",
-    "tsl_gpu_library",
+    "tf_cuda_library",
     "tf_defines_nortti_if_lite_protos",
     "tf_features_nomodules_if_mobile",
     "tf_opts_nortti_if_lite_protos",
@@ -344,7 +344,7 @@ cc_library(
 # purposefully omits the definitions of many declared symbols, which are
 # included in //tensorflow:libtensorflow_framework.so. Using tf_cc_test and tf_cc_binary
 # will include the necessary symbols.
-tsl_gpu_library(
+tf_cuda_library(
     name = "framework",
     hdrs = [
         "//tensorflow/core/example:feature_util.h",
@@ -688,7 +688,7 @@ cc_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "tensorflow_opensource",
     copts = tf_copts(),
     visibility = ["//visibility:public"],
@@ -738,7 +738,7 @@ cc_library(
 )
 
 # Test support library needed for higher-level (TensorFlow-specific) tests
-tsl_gpu_library(
+tf_cuda_library(
     name = "testlib",
     testonly = 1,
     srcs = [
@@ -786,7 +786,7 @@ tsl_gpu_library(
 
 # This is a link-only library to provide a DirectSession
 # implementation of the Session interface.
-tsl_gpu_library(
+tf_cuda_library(
     name = "direct_session",
     copts = tf_copts(),
     linkstatic = 1,
@@ -1582,7 +1582,7 @@ filegroup(
     visibility = ["//visibility:private"],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "framework_internal",
     srcs = [":framework_internal_private_headers"],
     hdrs = [":framework_internal_public_headers"],
@@ -1619,7 +1619,7 @@ cc_header_only_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "framework_internal_impl",
     srcs = [
         ":framework_internal_private_headers",
@@ -1746,7 +1746,7 @@ alias(
 
 # Library containing all of the graph construction code that is
 # independent of the runtime.
-tsl_gpu_library(
+tf_cuda_library(
     name = "graph",
     srcs = ["//tensorflow/core/graph:graph_srcs"],
     hdrs = ["//tensorflow/core/graph:graph_headers"],
@@ -1770,7 +1770,7 @@ filegroup(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "core_cpu_base",
     hdrs = [
         ":core_cpu_base_headers",

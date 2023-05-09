@@ -8,7 +8,7 @@ load(
     "tf_cc_test",
     "tf_cc_tests",
     "tf_copts",
-    "tsl_gpu_library",
+    "tf_cuda_library",
 )
 load("//tensorflow:tensorflow.default.bzl", "filegroup", "tf_cuda_cc_test", "tf_generate_proto_text_sources")
 load(
@@ -766,7 +766,7 @@ cc_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "tensor",
     srcs = [
         "log_memory.cc",

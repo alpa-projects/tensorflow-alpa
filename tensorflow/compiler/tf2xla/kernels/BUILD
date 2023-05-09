@@ -9,7 +9,7 @@ load(
     "//tensorflow:tensorflow.bzl",
     "if_cuda_or_rocm",
     "tf_cc_test",
-    "tsl_gpu_library",
+    "tf_cuda_library",
 )
 
 package(
@@ -253,7 +253,7 @@ tf_kernel_library(
     ),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "light_outside_compilation",
     srcs = ["light_outside_compilation.cc"],
     hdrs = ["light_outside_compilation.h"],

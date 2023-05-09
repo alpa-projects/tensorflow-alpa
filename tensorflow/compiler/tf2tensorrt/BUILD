@@ -9,7 +9,7 @@ load(
     "VERSION",
     "if_google",
     "tf_copts",
-    "tsl_gpu_library",
+    "tf_cuda_library",
     "tf_custom_op_library_additional_deps",
     "tf_gen_op_wrapper_py",
 )
@@ -388,7 +388,7 @@ cc_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "trt_engine_utils",
     srcs = [
         "utils/trt_engine_utils.cc",
@@ -415,7 +415,7 @@ tsl_gpu_library(
     ] + if_tensorrt([":tensorrt_lib"]),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "trt_logging",
     srcs = ["utils/trt_logger.cc"],
     hdrs = ["utils/trt_logger.h"],
@@ -450,7 +450,7 @@ tf_custom_op_py_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "trt_parameters",
     srcs = ["convert/trt_parameters.cc"],
     hdrs = [
@@ -465,7 +465,7 @@ tsl_gpu_library(
     ] + if_tensorrt([":tensorrt_lib"]),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "trt_resources",
     srcs = [
         "utils/trt_int8_calibrator.cc",
@@ -492,7 +492,7 @@ tsl_gpu_library(
     ] + if_tensorrt([":tensorrt_lib"]),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "trt_allocator",
     srcs = ["utils/trt_allocator.cc"],
     hdrs = ["utils/trt_allocator.h"],
@@ -549,7 +549,7 @@ tf_cuda_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "logger_registry",
     srcs = ["convert/logger_registry.cc"],
     hdrs = [
@@ -562,7 +562,7 @@ tsl_gpu_library(
     ] + if_tensorrt([":tensorrt_lib"]),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "trt_weights",
     srcs = ["convert/weights.cc"],
     hdrs = [
@@ -576,7 +576,7 @@ tsl_gpu_library(
     ] + if_tensorrt([":tensorrt_lib"]),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "op_converter",
     srcs = [],
     hdrs = [
@@ -594,7 +594,7 @@ tsl_gpu_library(
 # libtensorflow_framework.so depends on this target so that users can
 # register custom op converters without the need to incorporate Tensorflow into
 # their build system.
-tsl_gpu_library(
+tf_cuda_library(
     name = "op_converter_registry_impl",
     srcs = ["convert/op_converter_registry.cc"],
     hdrs = [
@@ -609,7 +609,7 @@ tsl_gpu_library(
     ] + if_tensorrt([":tensorrt_lib"]),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "op_converter_registry",
     hdrs = [
         "convert/op_converter_registry.h",
@@ -642,7 +642,7 @@ tf_cuda_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "algorithm_selector",
     srcs = [
         "convert/algorithm_selector.cc",
@@ -666,7 +666,7 @@ tf_cuda_cc_test(
 )
 
 # Library for the node-level conversion portion of TensorRT operation creation
-tsl_gpu_library(
+tf_cuda_library(
     name = "trt_conversion",
     srcs = [
         "convert/convert_graph.cc",
@@ -939,7 +939,7 @@ tf_cuda_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "trt_plugins",
     srcs = ["plugin/trt_plugin.cc"],
     hdrs = ["plugin/trt_plugin.h"],
@@ -979,7 +979,7 @@ tf_proto_library(
     protodeps = tf_additional_all_protos(),
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "py_utils",
     srcs = ["utils/py_utils.cc"],
     hdrs = ["utils/py_utils.h"],

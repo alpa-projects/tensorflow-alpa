@@ -1,6 +1,6 @@
 load(
     "//tensorflow:tensorflow.bzl",
-    "tsl_gpu_library",
+    "tf_cuda_library",
 )
 
 package(
@@ -17,7 +17,7 @@ package_group(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "gpu_registration_alwayslink",
     srcs = [
         "gpu_registration.cc",

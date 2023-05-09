@@ -13,7 +13,7 @@ load(
     "tf_cc_test",
     "tf_cc_tests",
     "tf_copts",
-    "tsl_gpu_library",
+    "tf_cuda_library",
     "tf_cuda_only_cc_test",
     "tf_opts_nortti_if_lite_protos",
 )
@@ -414,7 +414,7 @@ tf_cc_test(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "ops_testutil",
     testonly = 1,
     srcs = ["ops_testutil.cc"],
@@ -518,7 +518,7 @@ cc_library(
     ],
 )
 
-tsl_gpu_library(
+tf_cuda_library(
     name = "gpu_utils",
     srcs = if_cuda_or_rocm(["gpu_utils.cc"]),
     hdrs = ["gpu_utils.h"],

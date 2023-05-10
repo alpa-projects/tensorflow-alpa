@@ -222,6 +222,9 @@ ExecutionOptions CreateExecutionOptions(
     *execution_options.mutable_shape_with_output_layout() =
         result_shape.ToProto();
   }
+  // Added by Alpa
+  execution_options.set_seed(build_options.seed());
+  // End of Alpa's addition
   execution_options.set_num_replicas(build_options.num_replicas());
   execution_options.set_num_partitions(build_options.num_partitions());
   execution_options.set_use_spmd_partitioning(

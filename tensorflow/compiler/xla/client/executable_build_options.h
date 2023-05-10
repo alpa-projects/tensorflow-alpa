@@ -91,6 +91,11 @@ class ExecutableBuildOptions {
   // debugging.
   std::string ToString() const;
 
+  // Added by Alpa: The random seed for compilation.
+  int seed() const { return seed_; };
+  void set_seed(int seed) { seed_ = seed; }
+  // End of Alpa's addition.
+
   // The number of replicas of this computation that are to be executed.
   // Defaults to 1.
   int num_replicas() const { return num_replicas_; }
@@ -224,6 +229,9 @@ class ExecutableBuildOptions {
       false};
   tsl::thread::ThreadPool* compile_thread_pool_ = nullptr;
   LayoutCanonicalizationCallback layout_canonicalization_callback_;
+
+  // Added by Alpa
+  int seed_ = 42;
 };
 
 StatusOr<ExecutableBuildOptions> ExecutableBuildOptionsFromProto(

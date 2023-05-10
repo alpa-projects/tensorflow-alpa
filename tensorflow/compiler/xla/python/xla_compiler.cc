@@ -63,6 +63,12 @@ limitations under the License.
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/tsl/lib/strings/proto_serialization.h"
 
+// Added by Alpa
+#include "tensorflow/compiler/xla/service/pass_context.h"
+#include "tensorflow/compiler/xla/service/gpu/gpu_cost_model.h"
+#include "tensorflow/compiler/xla/service/spmd/alpa_compiler.h"
+#include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
+
 namespace xla {
 namespace {
 
@@ -413,7 +419,23 @@ void BuildXlaCompilerSubmodule(py::module& m) {
            py::arg("print_large_constants") = false)
       .def("as_hlo_dot_graph", &GetComputationHloDotGraph)
       .def("hash", &HashComputation)
-      .def("as_hlo_module", &GetHloModule);
+      .def("as_hlo_module", &GetHloModule)
+      // Added by Alpa
+      .def("setup_alias",
+           [](XlaComputation& computation, const std::vector<int64_t>& output_index,
+              int64_t param_number, const std::vector<int64_t>& param_index) {
+             HloInputOutputAliasProto::AliasEntryProto entry;
+             for (auto i : output_index) {
+                 entry.add_output_shape_index(i);
+             }
+             entry.set_parameter_number(param_number);
+             for (auto i : param_index) {
+                 entry.add_parameter_shape_index(i);
+             }
+             entry.set_kind(Kind::MAY_ALIAS);
+             computation.mutable_proto()->mutable_input_output_alias()
+                                        ->add_entries()->Swap(&entry);
+           });
 
   py::class_<HloPrintOptions> hlo_print_options_class(m, "HloPrintOptions");
   hlo_print_options_class.def(py::init<>())
@@ -493,7 +515,36 @@ void BuildXlaCompilerSubmodule(py::module& m) {
               param_shardings.push_back(parameter_sharding.ToProto());
             }
             return param_shardings;
-          });
+          })
+      // Added by Alpa
+      .def("has_schedule", &HloModule::has_schedule)
+      .def("set_spmd_output_sharding", &HloModule::set_spmd_output_sharding)
+      .def("set_spmd_parameters_shardings",
+           &HloModule::set_spmd_parameters_shardings)
+      .def("infer_spmd_shardings", &HloModule::infer_spmd_shardings)
+      .def("setup_alias",
+           [](std::shared_ptr<HloModule> hlo_module,
+              const std::vector<int64_t>& output_index, int64_t param_number,
+              const std::vector<int64_t>& param_index) {
+             hlo_module->input_output_alias_config().SetUpAlias(
+                 ShapeIndex(output_index.begin(), output_index.end()),
+                 param_number,
+                 ShapeIndex(param_index.begin(), param_index.end()));
+           })
+      .def("program_shape",
+           [](const HloModule& hlo_module) {
+             return hlo_module.entry_computation_layout().ComputeProgramShape();
+           })
+      .def("parameter_shapes",
+           [](const HloModule& hlo_module) -> std::vector<Shape> {
+             const auto params =
+                 hlo_module.entry_computation()->parameter_instructions();
+             std::vector<Shape> ret(params.size());
+             for (size_t i = 0; i < params.size(); ++i) {
+               ret[i] = params[i]->shape();
+             }
+             return ret;
+           });
 
   py::class_<HloModuleGroup, std::shared_ptr<HloModuleGroup>>
       hlo_module_group_class(m, "HloModuleGroup");
@@ -752,7 +803,11 @@ void BuildXlaCompilerSubmodule(py::module& m) {
                     &DebugOptions::set_xla_llvm_disable_expensive_passes)
       .def_property("xla_test_all_input_layouts",
                     &DebugOptions::xla_test_all_input_layouts,
-                    &DebugOptions::set_xla_test_all_input_layouts);
+                    &DebugOptions::set_xla_test_all_input_layouts)
+      // Added by Alpa: remove when the Alpa on JitRt approach is ready.
+      .def_property("xla_gpu_enable_xla_runtime_executable",
+                    &DebugOptions::xla_gpu_enable_xla_runtime_executable,
+                    &DebugOptions::set_xla_gpu_enable_xla_runtime_executable);
 
   py::class_<ExecutableBuildOptions>(m, "ExecutableBuildOptions")
       .def(py::init<>())
@@ -806,7 +861,10 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           [](ExecutableBuildOptions& options, std::vector<bool> values) {
             absl::InlinedVector<bool, 1> v(values.begin(), values.end());
             options.set_allow_spmd_sharding_propagation_to_output(v);
-          });
+          })
+      // Added by Alpa
+      .def_property("seed", &ExecutableBuildOptions::seed,
+                    &ExecutableBuildOptions::set_seed);
 
   py::enum_<OpSharding::Type> op_sharding_type(m, "OpSharding_Type");
   op_sharding_type.value("REPLICATED", OpSharding::REPLICATED)
@@ -856,6 +914,14 @@ void BuildXlaCompilerSubmodule(py::module& m) {
 
   py::class_<HloSharding> hlo_sharding(m, "HloSharding");
   hlo_sharding.def_static("from_proto", &xla::HloSharding::FromProto)
+      // Added by Alpa. TODO: directly use proto in stage_profiling.py rather
+      // than the serialized proto, then remove this.
+      .def(py::init([](const py::bytes& serialized_hlo_sharding_proto) {
+        OpSharding proto;
+        proto.ParseFromString(std::string(serialized_hlo_sharding_proto));
+        return ValueOrThrow(HloSharding::FromProto(proto));
+      }))
+      // End of Alpa's addition
       .def("__eq__", [](const xla::HloSharding& a,
                         const xla::HloSharding& b) { return a == b; })
       .def("__hash__",
@@ -900,6 +966,45 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .value("IFFT", FftType::IFFT)
       .value("RFFT", FftType::RFFT)
       .value("IRFFT", FftType::IRFFT);
+
+  /***** Alpa Functions Begin *****/
+  m.def("set_pass_context", &pass_context::SetPassContext);
+  m.def("clear_pass_context", &pass_context::ClearPassContext);
+  m.def("estimate_hlo_module_cost", &gpu::EstimateHloModuleCost);
+  m.def("set_hlo_module_output_shardings", &spmd::SetHloModuleOutputShardings);
+  m.def("set_hlo_module_input_shardings", &spmd::SetHloModuleInputShardings);
+  m.def("get_grad_sync_channel_ids", &spmd::GetGradSyncChannelIds);
+  m.def("get_alpa_jaxlib_version", [] { return "0.3.0"; });
+
+  m.def(
+      "run_auto_sharding",
+      [](HloModule* hlo_module, const CompileOptions& options) {
+        py::gil_scoped_release gil_release;
+        TF_RETURN_IF_ERROR(spmd::RunAutoShardingPass(hlo_module, options));
+        return OkStatus();
+      },
+      py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
+
+  m.def(
+      "run_spmd_partitioner",
+      [](HloModule* hlo_module, const CompileOptions& options) {
+        py::gil_scoped_release gil_release;
+        TF_RETURN_IF_ERROR(spmd::RunSpmdPartitionerPass(hlo_module, options));
+        return OkStatus();
+      },
+      py::arg("hlo_module"), py::arg("compile_options") = CompileOptions());
+
+  m.def(
+      "hlo_module_count_flop_dot_conv_only",
+      [](const HloModule& module) -> double {
+        double ret = 0.0;
+        for (HloComputation* computation : module.computations()) {
+          ret += CountFlopDotConvOnly(*computation);
+        }
+        return ret;
+      });
+  /***** Alpa Functions End *****/
+
 
   // Hlo Module Passes
   py::class_<HloPassInterface> hlo_pass_interface(m, "HloPassInterface");

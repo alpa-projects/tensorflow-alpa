@@ -787,6 +787,11 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@pybind11",
+        # Added by Alpa
+        "//tensorflow/compiler/xla/service:pass_context",
+        "//tensorflow/compiler/xla/service/gpu:gpu_cost_model",
+        "//tensorflow/compiler/xla/service/spmd:alpa_compiler",
+        "//tensorflow/compiler/xla/service/spmd:grad_acc_rewrite",
     ],
 )
 
@@ -936,6 +941,9 @@ tsl_pybind_extension(
         "//tensorflow/tsl/distributed_runtime/preemption:preemption_sync_manager",
         "//tensorflow/tsl/python/lib/core:bfloat16_lib",
         "//tensorflow/tsl/python/lib/core:float8_lib",
+
+	    # Added by Alpa
+	    "//tensorflow/compiler/xla/service/gpu:alpa_nccl_wrapper",
     ] + select({
         ":gpu_enabled": [
             "//tensorflow/compiler/xla/pjrt/gpu:se_gpu_pjrt_client",

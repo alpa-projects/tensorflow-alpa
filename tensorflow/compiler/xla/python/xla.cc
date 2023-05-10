@@ -86,6 +86,14 @@ limitations under the License.
 #include "tensorflow/tsl/python/lib/core/bfloat16.h"
 #include "tensorflow/tsl/python/lib/core/float8.h"
 
+// Added by Alpa
+#ifdef XLA_PYTHON_ENABLE_GPU
+#include "tensorflow/compiler/xla/service/gpu/alpa_events.h"
+#include "tensorflow/compiler/xla/service/gpu/alpa_nccl_wrapper.h"
+
+PYBIND11_MAKE_OPAQUE(std::vector<ncclComm_t>);
+#endif // XLA_PYTHON_ENABLE_GPU
+
 // TODO(phawkins): remove host_id properties after JAX is update to avoid them.
 
 namespace xla {
@@ -199,6 +207,72 @@ PYBIND11_MODULE(xla_extension, m) {
       .def_property_readonly(
           "client",
           [](const ClientAndPtr<PjRtDevice>& device) { return device.client; })
+      // Added by Alpa
+      .def("set_seed", [](const PjRtDevice& device, int seed) {
+            xla::PjRtClient* client = device.client();
+            xla::PjRtStreamExecutorClient* stream_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+			CHECK(stream_client != nullptr);
+            stream_client->device_state(device.local_hardware_id()).SetPrngSeed(seed);
+            return OkStatus();
+          })
+      .def("memory_allocated", [](const PjRtDevice& device) {
+            const int64_t invalid = -1;
+
+            xla::PjRtClient* client = device.client();
+            if (client->platform_name() != "gpu") {
+              return invalid;
+            }
+            xla::PjRtStreamExecutorClient* gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+			CHECK(gpu_client != nullptr);
+            return gpu_client->allocator()->bytes_used(device.local_hardware_id());
+          })
+      .def("max_memory_allocated", [](const PjRtDevice& device) {
+            const int64_t invalid = -1;
+
+            xla::PjRtClient* client = device.client();
+            if (client->platform_name() != "gpu") {
+              return invalid;
+            }
+            xla::PjRtStreamExecutorClient* gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+			CHECK(gpu_client != nullptr);
+            return gpu_client->allocator()->bytes_peak_in_use(device.local_hardware_id());
+          })
+      .def("available_memory", [](const PjRtDevice& device) {
+            const int64_t invalid = -1;
+
+            xla::PjRtClient* client = device.client();
+            if (client->platform_name() != "gpu") {
+              return invalid;
+            }
+            xla::PjRtStreamExecutorClient* gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+			CHECK(gpu_client != nullptr);
+            return gpu_client->allocator()->bytes_available(device.local_hardware_id());
+          })
+      .def("clear_memory_stats", [](const PjRtDevice& device) {
+            const bool invalid = false;
+
+            xla::PjRtClient* client = device.client();
+            if (client->platform_name() != "gpu") {
+              return invalid;
+            }
+            xla::PjRtStreamExecutorClient* gpu_client =
+                dynamic_cast<xla::PjRtStreamExecutorClient*>(client);
+			CHECK(gpu_client != nullptr);
+            return gpu_client->allocator()->ClearStats(device.local_hardware_id());
+          })
+      .def("synchronize_all_activity", [](PjRtDevice& device) {
+             PjRtStreamExecutorDevice* stream_device =
+               dynamic_cast<PjRtStreamExecutorDevice*>(&device);
+             CHECK_NE(stream_device, nullptr);
+             TF_ASSIGN_OR_RETURN(LocalDeviceState* local_device,
+                                 stream_device->GetLocalDeviceState());
+             local_device->SynchronizeAllActivity();
+             return OkStatus();
+           })
       .def("__str__", &PjRtDevice::DebugString)
       .def("__repr__", &PjRtDevice::ToString)
       .def("transfer_to_infeed",
@@ -513,6 +587,19 @@ PYBIND11_MODULE(xla_extension, m) {
            [](const PyLoadedExecutable& self) {
              return self.pjrt_executable()->GetCompileOptions();
            })
+      // Added by Alpa
+      .def("total_allocation_size",
+           [](PyLoadedExecutable* exec) {
+             const PjRtLoadedExecutable* pjrt_executable =
+                 exec->pjrt_executable();
+             const PjRtStreamExecutorExecutable* stream_executable =
+                 dynamic_cast<const PjRtStreamExecutorExecutable*>(
+                     pjrt_executable);
+             absl::Span<const std::shared_ptr<LocalExecutable>>
+                 local_executables = stream_executable->executables();
+             Executable* executable = local_executables[0]->executable();
+             return executable->TotalAllocationSize();
+           })
       .def_property_readonly("traceback", &PyLoadedExecutable::traceback)
       .def_property_readonly("fingerprint",
                              [](PyLoadedExecutable* exec) -> py::object {
@@ -801,6 +888,44 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("is_msan", IsMsan);
   m.def("is_tsan", IsTsan);
   m.def("is_sanitized", IsSanitized);
+
+// Added by Alpa
+#ifdef XLA_PYTHON_ENABLE_GPU
+  py::class_<gpu::alpa::PyCommGroup, std::shared_ptr<gpu::alpa::PyCommGroup>>
+      alpa_comm_group(m, "CommGroup");
+  alpa_comm_group
+      .def(py::init([](std::shared_ptr<PyClient> backend) {
+        return std::make_shared<gpu::alpa::PyCommGroup>(backend);
+      }))
+      .def("record_events", &gpu::alpa::PyCommGroup::CommunicatorRecordEvents)
+      .def("wait_events", &gpu::alpa::PyCommGroup::CommunicatorWaitEvents)
+      .def("comm_wait_compute", &gpu::alpa::PyCommGroup::CommWaitCompute)
+      .def("compute_wait_comm", &gpu::alpa::PyCommGroup::ComputeWaitComm)
+      .def("nccl_create_communicators",
+           &gpu::alpa::PyCommGroup::NcclCreateCommunicators,
+           "create nccl communicators for cross-mesh communication")
+      .def("nccl_destroy_comms", &gpu::alpa::PyCommGroup::NcclDestroyComms,
+           "destroy comms")
+      .def("nccl_local_all_gather", &gpu::alpa::PyCommGroup::NcclLocalAllGather,
+           "nccl local allgather")
+      .def("nccl_broadcast_partial_gpus",
+           &gpu::alpa::PyCommGroup::NcclBroadcastPartialGPUs,
+           "nccl broadcast with only a subset of gpus in the host are involved")
+      .def("nccl_recv", &gpu::alpa::PyCommGroup::NcclRecv, "nccl recv data")
+      .def("nccl_send", &gpu::alpa::PyCommGroup::NcclSend, "nccl send data");
+  m.def("set_num_device_on_host", &gpu::SetNumDeviceOnHost);
+  m.def("set_idx_to_uuid", &gpu::XlaSetIdxToUuid);
+  m.def("computation_wait_events", &gpu::alpa::ComputationWaitEvents);
+  m.def("set_comm_group_info", &gpu::alpa::SetPyCommGroup,
+        "set the mapping from meshes to the corresponding communication group "
+        "and nccl uuid");
+  m.def("reset_event_context", &gpu::alpa::ResetEventContext);
+  m.def("get_buffer_device_id", &gpu::alpa::GetBufferDeviceId,
+        "get the local device id for one pybuffer");
+  m.def("nccl_get_unique_id", &gpu::alpa::NcclGetUniqueId,
+        "get unique nccl id");
+  m.def("nccl_get_version", &gpu::alpa::NcclGetVersion, "get nccl version");
+#endif // XLA_PYTHON_ENABLE_GPU
 }  // NOLINT(readability/fn_size)
 
 }  // namespace xla

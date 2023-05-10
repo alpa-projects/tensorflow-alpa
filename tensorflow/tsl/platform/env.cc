@@ -48,6 +48,9 @@ limitations under the License.
 #include <unistd.h>
 #endif
 
+// Added by Alpa
+#include <cstdlib>
+
 namespace tsl {
 
 // 128KB copy buffer
@@ -438,8 +441,9 @@ bool Env::CreateUniqueFileName(string* prefix, const string& suffix) {
   int32_t pid = GetProcessId();
   long long now_microsec = NowMicros();  // NOLINT
 
-  *prefix += strings::Printf("%s-%x-%d-%llx", port::Hostname().c_str(), tid,
-                             pid, now_microsec);
+  // Modified by Alpa: add rand()
+  *prefix += strings::Printf("%s-%x-%d-%llx-%d", port::Hostname().c_str(), tid,
+                             pid, now_microsec, rand());
 
   if (!suffix.empty()) {
     *prefix += suffix;

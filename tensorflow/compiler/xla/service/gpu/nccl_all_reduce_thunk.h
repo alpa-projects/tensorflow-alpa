@@ -61,9 +61,15 @@ class NcclAllReduceThunkBase : public NcclAllReduceReduceScatterThunkBase {
   using NcclAllReduceReduceScatterThunkBase::
       NcclAllReduceReduceScatterThunkBase;
 
+  // Added by Alpa
+  void set_module_name(const std::string& module_name) {
+    skip_env_name_ = module_name + "XLA_SKIP_NCCL_COLLECTIVE_IDS";
+  }
+
  protected:
   Status RunAllReduce(const ExecuteParams& params, se::Stream& stream,
                       ncclComm_t comm);
+  std::string skip_env_name_ = "";  // Added by Alpa
 };
 
 class NcclAllReduceThunk : public NcclAllReduceThunkBase {
@@ -190,9 +196,33 @@ Status RunAllReduce(ReductionKind reduction_kind,
                     std::vector<DeviceBufferPair>& buffers, se::Stream& stream,
                     ncclComm_t comm);
 
+Status RunAllReduce(const NcclAllReduceConfig& config,
+                    std::vector<DeviceBufferPair>& buffers, se::Stream& stream,
+                    ncclComm_t comm, const std::string& env_name);
+
 Status RunReduceScatter(ReductionKind reduction_kind,
                         std::vector<DeviceBufferPair>& buffers,
                         se::Stream& stream, ncclComm_t comm);
+
+// Added by Alpa
+class CrossMeshNcclAllReduceThunk : public Thunk {
+ public:
+  using Buffer = NcclCollectiveThunk::Buffer;
+
+  explicit CrossMeshNcclAllReduceThunk(ThunkInfo thunk_info,
+                                       std::vector<Buffer> buffers,
+                                       ReductionKind reduction_kind,
+                                       xla::PrimitiveType op_type,
+                                       std::string key);
+
+  Status ExecuteOnStream(const ExecuteParams& params) override;
+
+ private:
+  const NcclAllReduceConfig config_;
+  const std::vector<Buffer> buffers_;
+  bool first_call_to_execute_ = true;
+  std::string key_;
+};
 
 }  // namespace gpu
 }  // namespace xla

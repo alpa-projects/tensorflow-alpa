@@ -991,5 +991,15 @@ StatusOr<std::string_view> GpuExecutable::GetMlirModule() const {
   return gpu_runtime_executable_->GetMlirModule();
 }
 
+// Added by Alpa
+int64_t GpuExecutable::TotalAllocationSize() const {
+  int64_t total_size = 0;
+  for (const BufferAllocation& allocation : allocations_) {
+    //std::cerr << allocation.ToString();
+    total_size += allocation.size();
+  }
+  return total_size;
+}
+
 }  // namespace gpu
 }  // namespace xla

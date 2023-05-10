@@ -30,7 +30,9 @@ Thunk::ExecuteParams::ExecuteParams(
     : buffer_allocations(&buffer_allocations),
       stream(stream),
       async_comms_stream(async_comms_stream),
-      nccl_params(run_options, stream->parent()) {}
+      nccl_params(run_options, stream->parent()),
+      // Added by Alpa
+      rng_seed(run_options.run_options().rng_seed()) {}
 
 /*static*/ absl::string_view Thunk::KindToString(Thunk::Kind kind) {
 #define CASE(x)  \
@@ -72,6 +74,9 @@ Thunk::ExecuteParams::ExecuteParams(
     CASE(kSequential);
     CASE(kTriangularSolve);
     CASE(kWhile);
+    // Added by Alpa
+    CASE(kDoneEvent);
+    CASE(kRngGetAndUpdateState);
   }
 }
 

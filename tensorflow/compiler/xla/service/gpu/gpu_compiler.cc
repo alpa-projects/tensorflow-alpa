@@ -201,6 +201,12 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/triton_autotuner.h"
 #endif  // GOOGLE_CUDA
 
+// Added by Alpa
+#include "tensorflow/compiler/xla/service/gpu/done_event_insertion.h"
+#include "tensorflow/compiler/xla/service/pass_context.h"
+#include "tensorflow/compiler/xla/service/spmd/grad_acc_rewrite.h"
+#include "tensorflow/compiler/xla/service/spmd/redundant_slice_eliminator.h"
+
 namespace xla {
 namespace gpu {
 namespace {
@@ -432,6 +438,10 @@ Status GpuCompiler::OptimizeHloModule(
     spmd_pipeline.AddPass<spmd::StatefulRngSpmdPartitioner>(
         num_partitions, hlo_module->config().replica_count());
     spmd_pipeline.AddPass<CollectivePermuteMotion>();
+    // Added by Alpa
+    spmd_pipeline.AddPass<spmd::RedundantSliceEliminator>();
+    spmd_pipeline.AddPass<AllReduceReassociate>();
+    spmd_pipeline.AddPass<spmd::GradAccRewrite>();
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(hlo_module).status());
   } else {
     HloPassPipeline sharding_removal_pipeline("sharding-removal");
@@ -564,7 +574,8 @@ Status GpuCompiler::OptimizeHloModule(
       pipeline.AddPass<DotDecomposer>();
       // Only merge "smallish" dots.  This threshold was not set carefully, but
       // so far we know that 1mb is too small.
-      pipeline.AddPass<DotMerger>(/*max_size_to_merge=*/int64_t{16} << 20);
+      // Commented out by Alpa for potential perf regression.
+      // pipeline.AddPass<DotMerger>(/*max_size_to_merge=*/int64_t{16} << 20);
       pipeline.AddPass<SortSimplifier>();
       pipeline.AddPass<TupleSimplifier>();
       pipeline.AddPass<WhileLoopConstantSinking>();
@@ -712,16 +723,20 @@ Status GpuCompiler::OptimizeHloModule(
   {
     HloPassPipeline pipeline("post-fusion optimization");
     pipeline.AddPass<AllGatherCombiner>(
-        /*combine_threshold_in_bytes=*/1024 * 1024 * 1024,
-        /*combine_threshold_count=*/256);
+        /*combine_threshold_in_bytes=*/
+        pass_context::GetInt("combiner::all_gather_threshold", 1024 * 1024 * 1024),
+        /*combine_threshold_count=*/512);
     pipeline.AddPass<AllReduceCombiner>(
-        debug_options.xla_gpu_all_reduce_combine_threshold_bytes(),
-        /*combine_threshold_count=*/256);
+        /*combine_threshold_in_bytes=*/
+        pass_context::GetInt("combiner::all_reduce_threshold",
+                             debug_options.xla_gpu_all_reduce_combine_threshold_bytes()),
+        /*combine_threshold_count=*/512);
     pipeline.AddPass<ReduceScatterCombiner>(
-        /*combine_threshold_in_bytes=*/30 * 1024 * 1024,
-        /*combine_threshold_count=*/256);
+        /*combine_threshold_in_bytes=*/
+        pass_context::GetInt("combiner::all_reduce_threshold", 30 * 1024 * 1024),
+        /*combine_threshold_count=*/512);
 
-    if (debug_options.xla_gpu_all_reduce_contiguous()) {
+    if (true || debug_options.xla_gpu_all_reduce_contiguous()) {
       pipeline.AddPass<AllReduceContiguous>();
     }
 
@@ -755,6 +770,12 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
 
+  // Added by Alpa
+  if (pass_context::GetBool("done-event::enable", false)) {
+    HloPassPipeline pipeline("done event insertion");
+    pipeline.AddPass<HloDoneInsertion>();
+    TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+  }
   return OkStatus();
 }
 
@@ -1225,8 +1246,9 @@ static Status CompileModuleToLlvmIrImpl(
       entry_function, &results->allocations, &results->output_info,
       &results->output_shape, &results->entry_func_attrs));
 
+  // Midified by Alpa to get module name.
   IrEmitterContext ir_emitter_context(
-      /*hlo_module=*/nullptr, /*buffer_assignment=*/nullptr, platform_name,
+      /*hlo_module=*/hlo_module, /*buffer_assignment=*/nullptr, platform_name,
       gpu_device_info, cuda_compute_capability, rocm_compute_capability,
       &mlir_context, results->llvm_module.get());
 

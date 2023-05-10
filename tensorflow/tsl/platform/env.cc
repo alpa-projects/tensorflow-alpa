@@ -18,7 +18,6 @@ limitations under the License.
 #include <sys/stat.h>
 
 #include <deque>
-#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -48,6 +47,9 @@ limitations under the License.
 #include <sys/types.h>
 #include <unistd.h>
 #endif
+
+// Added by Alpa
+#include <cstdlib>
 
 namespace tsl {
 
@@ -439,6 +441,7 @@ bool Env::CreateUniqueFileName(string* prefix, const string& suffix) {
   int32_t pid = GetProcessId();
   long long now_microsec = NowMicros();  // NOLINT
 
+  // Modified by Alpa: add rand()
   *prefix += strings::Printf("%s-%x-%d-%llx-%d", port::Hostname().c_str(), tid,
                              pid, now_microsec, rand());
 

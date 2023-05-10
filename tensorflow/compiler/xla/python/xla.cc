@@ -889,6 +889,7 @@ PYBIND11_MODULE(xla_extension, m) {
   m.def("is_tsan", IsTsan);
   m.def("is_sanitized", IsSanitized);
 
+// Added by Alpa
 #ifdef XLA_PYTHON_ENABLE_GPU
   py::class_<gpu::alpa::PyCommGroup, std::shared_ptr<gpu::alpa::PyCommGroup>>
       alpa_comm_group(m, "CommGroup");

@@ -225,6 +225,7 @@ class DeviceMemoryAllocator {
   // a different stream.
   virtual tsl::StatusOr<Stream *> GetStream(int device_ordinal) = 0;
 
+  // Added by Alpa to profile memory usage
   virtual int64_t bytes_available(int64_t device_ordinal) const {
     return -1;
   }

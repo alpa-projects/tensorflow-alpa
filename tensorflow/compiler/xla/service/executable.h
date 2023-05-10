@@ -366,7 +366,7 @@ class Executable {
   // Does not include the size of used libraries (e.g. cuDNN, Eigen, etc.).
   virtual int64_t SizeOfGeneratedCodeInBytes() const;
 
-  // Return the total size of allocated buffers in bytes. This is GPU only.
+  // Added by Alpa. Return the total allocated buffers' size in bytes. GPU only.
   virtual int64_t TotalAllocationSize() const { return -1; }
 
   // Dumping helpers.

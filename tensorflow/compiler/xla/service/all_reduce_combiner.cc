@@ -88,9 +88,11 @@ Status CombineAllReduces(absl::Span<HloInstruction* const> to_combine) {
       Cast<HloAllReduceInstruction>(to_combine.front())
           ->use_global_device_ids()));
 
+  // Added by Alpa
   if (to_combine.front()->metadata().op_name() == spmd::kSkippableAllReduce) {
     combined->set_metadata_op_name(spmd::kSkippableAllReduce);
   }
+  // End of Alpa's addition
 
   // We have to propagate the sharding manually because Domain instructions are
   // not guaranteed to preserve it for side effecting instructions.
@@ -115,7 +117,7 @@ AllReduceCombiner::AllReduceCombiner(int64_t combine_threshold_in_bytes,
     : combine_threshold_in_bytes_(combine_threshold_in_bytes),
       combine_threshold_count_(combine_threshold_count) {}
 
-// Add a new boolean field to the original AllReduceKey.
+// Added by Alpa. Add a new boolean field to the original AllReduceKey.
 // This field indicates whether the all-reduce is a skippable
 // all-reduce for gradient accumulation.
 using AllReduceKeyWithSkip = std::tuple<AllReduceKey, bool>;
@@ -149,6 +151,7 @@ StatusOr<bool> AllReduceCombiner::Run(
         return std::nullopt;
       }
       auto old_key = GetAllReduceKey(instruction, domain_map.get());
+      // Added by Alpa
       if (!old_key.has_value()) {
         return absl::nullopt;
       }

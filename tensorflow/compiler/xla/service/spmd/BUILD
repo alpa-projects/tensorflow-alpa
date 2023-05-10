@@ -163,11 +163,12 @@ cc_library(
     srcs = ["stateful_rng_spmd_partitioner.cc"],
     hdrs = ["stateful_rng_spmd_partitioner.h"],
     deps = [
-        ":auto_sharding",
         ":spmd_partitioner",
         "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/service:hlo_pass",
         "@com_google_absl//absl/memory",
+        # Added by Alpa
+        ":auto_sharding",
     ],
 )
 

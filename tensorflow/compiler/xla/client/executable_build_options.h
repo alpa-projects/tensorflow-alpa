@@ -91,9 +91,10 @@ class ExecutableBuildOptions {
   // debugging.
   std::string ToString() const;
 
-  // The random seed for compilation.
+  // Added by Alpa: The random seed for compilation.
   int seed() const { return seed_; };
   void set_seed(int seed) { seed_ = seed; }
+  // End of Alpa's addition.
 
   // The number of replicas of this computation that are to be executed.
   // Defaults to 1.

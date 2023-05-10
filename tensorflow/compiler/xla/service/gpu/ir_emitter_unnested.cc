@@ -2992,14 +2992,12 @@ Status IrEmitterUnnested::EmitNcclThunk(mlir::Operation* untyped_op) {
 
 
     // Added by Alpa
-    #if 0
     if (mlir::isa<mlir::lmhlo::AllReduceOp>(op) ||
         mlir::isa<mlir::lmhlo_gpu::AllReduceStartOp>(op)) {
       // add the name of a module to help with skip all-reduce
       std::string module_name = ir_emitter_context_->hlo_module().name();
       dynamic_cast<NcclAllReduceThunkBase*>(thunk.get())->set_module_name(module_name);
     }
-    #endif
 
     if constexpr (NcclThunkType::IsAsync()) {
       async_executors_.insert({untyped_op, &thunk->async_executor()});

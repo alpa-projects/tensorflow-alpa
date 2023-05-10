@@ -574,6 +574,7 @@ Status GpuCompiler::OptimizeHloModule(
       pipeline.AddPass<DotDecomposer>();
       // Only merge "smallish" dots.  This threshold was not set carefully, but
       // so far we know that 1mb is too small.
+      // Commented out by Alpa for potential perf regression.
       // pipeline.AddPass<DotMerger>(/*max_size_to_merge=*/int64_t{16} << 20);
       pipeline.AddPass<SortSimplifier>();
       pipeline.AddPass<TupleSimplifier>();
@@ -769,6 +770,7 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
 
+  // Added by Alpa
   if (pass_context::GetBool("done-event::enable", false)) {
     HloPassPipeline pipeline("done event insertion");
     pipeline.AddPass<HloDoneInsertion>();
@@ -1244,6 +1246,7 @@ static Status CompileModuleToLlvmIrImpl(
       entry_function, &results->allocations, &results->output_info,
       &results->output_shape, &results->entry_func_attrs));
 
+  // Midified by Alpa to get module name.
   IrEmitterContext ir_emitter_context(
       /*hlo_module=*/hlo_module, /*buffer_assignment=*/nullptr, platform_name,
       gpu_device_info, cuda_compute_capability, rocm_compute_capability,

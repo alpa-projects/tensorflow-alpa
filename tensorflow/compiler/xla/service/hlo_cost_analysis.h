@@ -632,7 +632,7 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
   HloCostAnalysis& operator=(const HloCostAnalysis&) = delete;
 };
 
-// Count the number of floating point operations for
+// Added by Alpa: Count the number of floating point operations for
 // dot and convolution in a HLO module.
 double CountFlopDotConvOnly(const HloComputation& computation);
 

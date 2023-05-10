@@ -21,12 +21,11 @@ StatusOr<bool> OptimizationBarrierExpander::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
   std::vector<HloInstruction*> barriers;
-
-  // Added by Alpa
   for (HloComputation* computation :
        module->MakeNonfusionComputations(execution_threads)) {
     bool modified = false;
     for (HloInstruction* inst : computation->instructions()) {
+      // Modified by Alpa: add pipeline marker option
       if (inst->IsCustomCall("pipeline_marker") || inst->opcode() == HloOpcode::kOptimizationBarrier) {
         barriers.push_back(inst);
         modified = true;
@@ -34,7 +33,10 @@ StatusOr<bool> OptimizationBarrierExpander::Run(
     }
   }
 
+  // Modified by Alpa: remove the module->has_schedule() branch;
+
   for (HloInstruction* inst : barriers) {
+    // Modified by Alpa: use another way to expand. TODO: maybe no need to change?
     HloInstruction* identity = inst->parent()->AddInstruction(
         HloInstruction::CreateUnary(inst->shape(), HloOpcode::kBitcast,
                                     inst->mutable_operand(0)));

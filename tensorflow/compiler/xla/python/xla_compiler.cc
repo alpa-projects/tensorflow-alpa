@@ -420,6 +420,7 @@ void BuildXlaCompilerSubmodule(py::module& m) {
       .def("as_hlo_dot_graph", &GetComputationHloDotGraph)
       .def("hash", &HashComputation)
       .def("as_hlo_module", &GetHloModule)
+      // Added by Alpa
       .def("setup_alias",
            [](XlaComputation& computation, const std::vector<int64_t>& output_index,
               int64_t param_number, const std::vector<int64_t>& param_index) {
@@ -497,33 +498,53 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           py::arg("options") = HloPrintOptions())
       .def("as_serialized_hlo_module_proto", &GetHloModuleSerializedProto)
       .def("from_serialized_hlo_module_proto", &HloModuleFromSerializedProto)
+      .def_property_readonly(
+          "spmd_output_sharding",
+          [](const HloModule& m) -> std::optional<xla::OpSharding> {
+            if (!m.has_spmd_output_sharding()) return std::nullopt;
+            return m.spmd_output_sharding().ToProto();
+          })
+      .def_property_readonly(
+          "spmd_parameters_shardings",
+          [](const HloModule& m)
+              -> std::optional<std::vector<xla::OpSharding>> {
+            if (!m.has_spmd_parameters_shardings()) return std::nullopt;
+            std::vector<xla::OpSharding> param_shardings;
+            for (const auto& parameter_sharding :
+                 m.spmd_parameters_shardings()) {
+              param_shardings.push_back(parameter_sharding.ToProto());
+            }
+            return param_shardings;
+          })
       // Added by Alpa
       .def("has_schedule", &HloModule::has_schedule)
-      .def("spmd_output_sharding", &HloModule::spmd_output_sharding)
-      .def("spmd_parameters_shardings", &HloModule::spmd_parameters_shardings)
       .def("set_spmd_output_sharding", &HloModule::set_spmd_output_sharding)
-      .def("set_spmd_parameters_shardings", &HloModule::set_spmd_parameters_shardings)
+      .def("set_spmd_parameters_shardings",
+           &HloModule::set_spmd_parameters_shardings)
       .def("infer_spmd_shardings", &HloModule::infer_spmd_shardings)
-      .def("setup_alias", [](std::shared_ptr<HloModule> hlo_module,
-                             const std::vector<int64_t>& output_index,
-                             int64_t param_number,
-                             const std::vector<int64_t>& param_index) {
-            hlo_module->input_output_alias_config().SetUpAlias(
-               ShapeIndex(output_index.begin(), output_index.end()),
-               param_number,
-               ShapeIndex(param_index.begin(), param_index.end()));
-          })
-      .def("program_shape", [](const HloModule& hlo_module) {
-            return hlo_module.entry_computation_layout().ComputeProgramShape();
-          })
-      .def("parameter_shapes", [](const HloModule& hlo_module) -> std::vector<Shape>{
-            const auto params = hlo_module.entry_computation()->parameter_instructions();
-            std::vector<Shape> ret(params.size());
-            for (size_t i = 0; i < params.size(); ++i) {
-              ret[i] = params[i]->shape();
-            }
-            return ret;
-          });
+      .def("setup_alias",
+           [](std::shared_ptr<HloModule> hlo_module,
+              const std::vector<int64_t>& output_index, int64_t param_number,
+              const std::vector<int64_t>& param_index) {
+             hlo_module->input_output_alias_config().SetUpAlias(
+                 ShapeIndex(output_index.begin(), output_index.end()),
+                 param_number,
+                 ShapeIndex(param_index.begin(), param_index.end()));
+           })
+      .def("program_shape",
+           [](const HloModule& hlo_module) {
+             return hlo_module.entry_computation_layout().ComputeProgramShape();
+           })
+      .def("parameter_shapes",
+           [](const HloModule& hlo_module) -> std::vector<Shape> {
+             const auto params =
+                 hlo_module.entry_computation()->parameter_instructions();
+             std::vector<Shape> ret(params.size());
+             for (size_t i = 0; i < params.size(); ++i) {
+               ret[i] = params[i]->shape();
+             }
+             return ret;
+           });
 
   py::class_<HloModuleGroup, std::shared_ptr<HloModuleGroup>>
       hlo_module_group_class(m, "HloModuleGroup");
@@ -795,8 +816,6 @@ void BuildXlaCompilerSubmodule(py::module& m) {
                        : std::nullopt;
           },
           &ExecutableBuildOptions::set_result_layout)
-      .def_property("seed", &ExecutableBuildOptions::seed,
-                    &ExecutableBuildOptions::set_seed)
       .def_property("num_replicas", &ExecutableBuildOptions::num_replicas,
                     &ExecutableBuildOptions::set_num_replicas)
       .def_property("num_partitions", &ExecutableBuildOptions::num_partitions,
@@ -838,7 +857,10 @@ void BuildXlaCompilerSubmodule(py::module& m) {
           [](ExecutableBuildOptions& options, std::vector<bool> values) {
             absl::InlinedVector<bool, 1> v(values.begin(), values.end());
             options.set_allow_spmd_sharding_propagation_to_output(v);
-          });
+          })
+      // Added by Alpa
+      .def_property("seed", &ExecutableBuildOptions::seed,
+                    &ExecutableBuildOptions::set_seed);
 
   py::enum_<OpSharding::Type> op_sharding_type(m, "OpSharding_Type");
   op_sharding_type.value("REPLICATED", OpSharding::REPLICATED)
@@ -888,11 +910,14 @@ void BuildXlaCompilerSubmodule(py::module& m) {
 
   py::class_<HloSharding> hlo_sharding(m, "HloSharding");
   hlo_sharding.def_static("from_proto", &xla::HloSharding::FromProto)
+      // Added by Alpa. TODO: directly use proto in stage_profiling.py rather
+      // than the serialized proto, then remove this.
       .def(py::init([](const py::bytes& serialized_hlo_sharding_proto) {
         OpSharding proto;
         proto.ParseFromString(std::string(serialized_hlo_sharding_proto));
         return ValueOrThrow(HloSharding::FromProto(proto));
       }))
+      // End of Alpa's addition
       .def("__eq__", [](const xla::HloSharding& a,
                         const xla::HloSharding& b) { return a == b; })
       .def("__hash__",

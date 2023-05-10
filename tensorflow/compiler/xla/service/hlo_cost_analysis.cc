@@ -1377,6 +1377,7 @@ bool HloCostAnalysis::KeyToCopyFromSubcomputation(absl::string_view key) const {
          !absl::StartsWith(key, kUtilizationKey);
 }
 
+// Added by Alpa
 double CountFlopDotConvOnly(const HloComputation& computation) {
   auto analysis = absl::make_unique<HloCostAnalysis>([](const Shape&) { return 0; });
   computation.Accept(analysis.get());

@@ -25,36 +25,23 @@ StatusOr<bool> OptimizationBarrierExpander::Run(
        module->MakeNonfusionComputations(execution_threads)) {
     bool modified = false;
     for (HloInstruction* inst : computation->instructions()) {
-      if (inst->opcode() == HloOpcode::kOptimizationBarrier) {
+      // Modified by Alpa: add pipeline marker option
+      if (inst->IsCustomCall("pipeline_marker") || inst->opcode() == HloOpcode::kOptimizationBarrier) {
         barriers.push_back(inst);
         modified = true;
       }
     }
-
-    if (modified && module->has_schedule()) {
-      const auto& sequences = module->schedule().sequences();
-      auto it = sequences.find(computation->unique_id());
-      if (it != sequences.end()) {
-        std::vector<HloInstruction*> sequence;
-        sequence.reserve(it->second.instructions().size());
-        absl::c_copy_if(it->second.instructions(), std::back_inserter(sequence),
-                        [](HloInstruction* inst) {
-                          return inst->opcode() !=
-                                 HloOpcode::kOptimizationBarrier;
-                        });
-        module->schedule().set_sequence(computation, sequence);
-      }
-    }
   }
 
+  // Modified by Alpa: remove the module->has_schedule() branch;
+
   for (HloInstruction* inst : barriers) {
-    HloInstruction* arg = inst->mutable_operand(0);
-    TF_RETURN_IF_ERROR(arg->CopyAllControlDepsFrom(inst));
-
-    TF_RETURN_IF_ERROR(inst->ReplaceAllUsesWith(arg));
-    TF_RETURN_IF_ERROR(inst->DropAllControlDeps());
-
-    TF_RETURN_IF_ERROR(inst->parent()->RemoveInstruction(inst));
+    // Modified by Alpa: use another way to expand. TODO: maybe no need to change?
+    HloInstruction* identity = inst->parent()->AddInstruction(
+        HloInstruction::CreateUnary(inst->shape(), HloOpcode::kBitcast,
+                                    inst->mutable_operand(0)));
+    inst->ReplaceAllUsesWith(identity);
+    inst->parent()->RemoveInstruction(inst);
   }
 
   return !barriers.empty();
